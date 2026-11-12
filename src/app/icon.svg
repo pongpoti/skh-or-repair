@@ -1,25 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- OR surgeon in scrub cap, surgical mask and scrubs (same drawing as src/components/brand-mark.tsx) -->
   <defs>
     <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#54402f"/>
       <stop offset="1" stop-color="#3f2f24"/>
     </linearGradient>
+    <clipPath id="clip"><rect width="48" height="48" rx="10.5"/></clipPath>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#tile)"/>
-  <!-- Surgical light: ceiling mount, jointed arm, lamp head with seven light cells (same drawing as src/components/brand-mark.tsx) -->
-  <g transform="scale(10.6667)">
-    <rect x="34" y="6" width="10" height="2.8" rx="1.4" fill="#ddbf94"/>
-    <path d="M39 8 V13 L30.5 19" fill="none" stroke="#ddbf94" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="39" cy="13" r="2" fill="#ddbf94"/>
-    <circle cx="21" cy="28" r="13" fill="#f1e7da" stroke="#ddbf94" stroke-width="1.8"/>
-    <g fill="#fff" stroke="#b8976b" stroke-width="0.9">
-      <circle cx="21" cy="28" r="3.4"/>
-      <circle cx="21" cy="20.6" r="2.8"/>
-      <circle cx="27.41" cy="24.3" r="2.8"/>
-      <circle cx="27.41" cy="31.7" r="2.8"/>
-      <circle cx="21" cy="35.4" r="2.8"/>
-      <circle cx="14.59" cy="31.7" r="2.8"/>
-      <circle cx="14.59" cy="24.3" r="2.8"/>
-    </g>
+  <g clip-path="url(#clip)">
+    <rect width="48" height="48" fill="url(#tile)"/>
+    <path d="M7 48 C7.5 40.5 14 37 24 37 C34 37 40.5 40.5 41 48 Z" fill="#7fbfb7"/>
+    <path d="M19.5 37.4 L24 43 L28.5 37.4 Z" fill="#3f2f24" opacity="0.55"/>
+    <circle cx="24" cy="24" r="10.6" fill="#f1e7da"/>
+    <path d="M12.9 22.6 C12.2 9.8 35.8 9.8 35.1 22.6 Q24 19.6 12.9 22.6 Z" fill="#7fbfb7"/>
+    <circle cx="20.2" cy="23.6" r="1.25" fill="#241c16"/>
+    <circle cx="27.8" cy="23.6" r="1.25" fill="#241c16"/>
+    <path d="M13.8 26 Q24 24.4 34.2 26 L33.2 30.6 Q24 37.2 14.8 30.6 Z" fill="#eaf4f5"/>
+    <path d="M17 28.3 Q24 27.4 31 28.3 M17.6 30.6 Q24 29.8 30.4 30.6" fill="none" stroke="#a7c9cf" stroke-width="0.8" stroke-linecap="round"/>
   </g>
 </svg>
