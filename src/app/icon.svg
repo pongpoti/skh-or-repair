@@ -1,8 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#3f2f24"/>
-  <path d="M-8 150H70L108 188V300L70 338H-8Z" fill="#54402f"/>
-  <path d="M520 174H442L404 212V324L442 362H520Z" fill="#54402f"/>
-  <path d="M176 84H336L400 148V364L336 428H176L112 364V148Z" fill="#f1e7da"/>
-  <path d="M184 101H328L386 159V353L328 411H184L126 353V159Z" fill="none" stroke="#ddbf94" stroke-width="12" stroke-linejoin="round"/>
-  <circle cx="256" cy="256" r="54" fill="#a68966" stroke="#fff" stroke-width="16"/>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#54402f"/>
+      <stop offset="1" stop-color="#3f2f24"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#tile)"/>
+  <!-- Surgical light: ceiling mount, jointed arm, lamp head with seven light cells (same drawing as src/components/brand-mark.tsx) -->
+  <g transform="scale(10.6667)">
+    <rect x="34" y="6" width="10" height="2.8" rx="1.4" fill="#ddbf94"/>
+    <path d="M39 8 V13 L30.5 19" fill="none" stroke="#ddbf94" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="39" cy="13" r="2" fill="#ddbf94"/>
+    <circle cx="21" cy="28" r="13" fill="#f1e7da" stroke="#ddbf94" stroke-width="1.8"/>
+    <g fill="#fff" stroke="#b8976b" stroke-width="0.9">
+      <circle cx="21" cy="28" r="3.4"/>
+      <circle cx="21" cy="20.6" r="2.8"/>
+      <circle cx="27.41" cy="24.3" r="2.8"/>
+      <circle cx="27.41" cy="31.7" r="2.8"/>
+      <circle cx="21" cy="35.4" r="2.8"/>
+      <circle cx="14.59" cy="31.7" r="2.8"/>
+      <circle cx="14.59" cy="24.3" r="2.8"/>
+    </g>
+  </g>
 </svg>

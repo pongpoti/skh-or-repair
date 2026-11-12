@@ -12,9 +12,9 @@ import { TELEGRAM_WEBHOOK_PATH } from "@/lib/telegram";
  * 1. canonical-host redirect (production only)
  * 2. CSRF origin check for non-GET requests
  * 3. per-request CSP nonce
- * 4. device gate (lib/gate.ts): outside the LINE app on a phone (or outside the LIFF app, once LIFF_ID is set) every page
- *    shows the "open in LINE" page and every API call answers 403, before the sign-in gate. The Telegram webhook and
- *    /preview* are exempt.
+ * 4. device gate (lib/gate.ts): on Vercel, outside the LIFF app in LINE on a phone every page shows the "open in LINE"
+ *    page and every API call answers 403, before the sign-in gate, so LINE Login never starts outside LIFF. The
+ *    Telegram webhook and /preview* are exempt.
  * 5. auth gate: everything except /login*, /api/auth/*, the Telegram webhook and /preview* needs a valid session
  *    (pages ALSO verify the session themselves; this is the first line, not the only one). The /preview pages answer
  *    404 unless NODE_ENV is development.
@@ -92,7 +92,7 @@ export async function proxy(req: NextRequest) {
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
 
-  // 4. Device gate: LINE app on a phone (LIFF app when required). Runs before the sign-in gate, so a desktop browser
+  // 4. Device gate: the LIFF app in LINE on a phone. Runs before the sign-in gate, so a desktop browser
   //    never reaches the LINE login. The answer depends on the User-Agent, so it must not be cached across browsers.
   const gateExempt =
     pathname === TELEGRAM_WEBHOOK_PATH || pathname === GATE_PATH || pathname === "/preview" || pathname.startsWith("/preview/");

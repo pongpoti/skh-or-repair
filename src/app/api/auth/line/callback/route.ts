@@ -4,6 +4,7 @@ import { clearCookie, cookieName, setCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { appUrl, ConfigError, lineConfig, sessionSecret } from "@/lib/env";
 import { redirectToError, type ErrorCode } from "@/lib/http";
+import { GATE_PATH, clientAllowed, gateMode } from "@/lib/gate";
 import { exchangeCode, LineAuthError, verifyIdToken } from "@/lib/line";
 import { findFreshBinding, logEvent, touchBinding } from "@/lib/otp";
 import { clientIp, safeEqual, safeNextPath, userAgent } from "@/lib/security";
@@ -19,8 +20,11 @@ function fail(req: NextRequest, code: ErrorCode): NextResponse {
   return res;
 }
 
-/** LINE redirects here with ?code&state (or ?error). */
+/** LINE redirects here with ?code&state (or ?error). Only inside the LIFF app (the proxy checks too). */
 export async function GET(req: NextRequest) {
+  if (!clientAllowed(req.headers.get("user-agent"), gateMode())) {
+    return NextResponse.redirect(new URL(GATE_PATH, req.nextUrl.origin), { status: 303, headers: { "Cache-Control": "no-store" } });
+  }
   const q = req.nextUrl.searchParams;
   try {
     const cfg = lineConfig();

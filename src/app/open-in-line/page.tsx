@@ -7,8 +7,8 @@ import { clientAllowed, gateMode, isPhone, liffUrl } from "@/lib/gate";
 export const metadata: Metadata = { title: "เปิดผ่าน LINE บนมือถือ" };
 
 /**
- * Shown (through the proxy's rewrite) to every browser the device gate turns away: a desktop, a phone browser outside
- * LINE, or LINE outside the LIFF app once LIFF_ID is set. It names the one way in, the LIFF link when there is one.
+ * Shown (through the proxy's rewrite) to every browser the device gate turns away: a desktop, a tablet, a phone browser
+ * outside LINE, or a LINE chat outside the LIFF app. It names the one way in, the LIFF link (once LIFF_ID is set).
  */
 export default async function OpenInLinePage() {
   const ua = (await headers()).get("user-agent") ?? "";

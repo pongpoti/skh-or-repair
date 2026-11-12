@@ -29,7 +29,7 @@ const UA = {
 
 const SAVED = { ...process.env };
 afterEach(() => {
-  for (const k of ["CLIENT_GATE", "LIFF_ID", "VERCEL_ENV"]) {
+  for (const k of ["CLIENT_GATE", "LIFF_ID", "VERCEL", "VERCEL_ENV"]) {
     if (SAVED[k] === undefined) delete process.env[k];
     else process.env[k] = SAVED[k];
   }
@@ -54,41 +54,51 @@ describe("clientAllowed", () => {
     assert.ok(clientAllowed(UA.desktopChrome, "off"));
     assert.ok(clientAllowed(null, "off"));
   });
-  test("line: LINE app on a phone", () => {
-    for (const ua of [UA.iosLine, UA.androidLine, UA.iosLiff, UA.androidLiff]) assert.ok(clientAllowed(ua, "line"), ua);
-    for (const ua of [UA.iosSafari, UA.androidChrome, UA.desktopChrome, UA.macLine, UA.ipadLine, UA.androidTabletLine, null])
-      assert.ok(!clientAllowed(ua, "line"), String(ua));
-  });
-  test("liff: LIFF app on a phone", () => {
+  test("liff: only the LIFF app on a phone", () => {
     for (const ua of [UA.iosLiff, UA.androidLiff]) assert.ok(clientAllowed(ua, "liff"), ua);
-    for (const ua of [UA.iosLine, UA.androidLine, UA.iosSafari, UA.desktopChrome, UA.ipadLine, UA.liffWord, undefined])
+    for (const ua of [
+      UA.iosLine,
+      UA.androidLine,
+      UA.iosSafari,
+      UA.androidChrome,
+      UA.desktopChrome,
+      UA.macLine,
+      UA.ipadLine,
+      UA.androidTabletLine,
+      UA.liffWord,
+      "",
+      null,
+      undefined,
+    ])
       assert.ok(!clientAllowed(ua, "liff"), String(ua));
   });
 });
 
 describe("gateMode and the LIFF link", () => {
-  test("off outside production, line or liff in production", () => {
+  test("liff on Vercel (production and preview, LIFF_ID or not), off elsewhere", () => {
     delete process.env.CLIENT_GATE;
     delete process.env.LIFF_ID;
+    delete process.env.VERCEL;
     delete process.env.VERCEL_ENV;
     assert.equal(gateMode(), "off");
+    process.env.VERCEL = "1";
     process.env.VERCEL_ENV = "preview";
-    assert.equal(gateMode(), "off");
+    assert.equal(gateMode(), "liff");
     process.env.VERCEL_ENV = "production";
-    assert.equal(gateMode(), "line");
+    assert.equal(gateMode(), "liff");
     process.env.LIFF_ID = "2001234567-AbCdEfGh";
     assert.equal(gateMode(), "liff");
   });
-  test("CLIENT_GATE overrides, and a typo fails closed", () => {
-    process.env.VERCEL_ENV = "production";
-    process.env.CLIENT_GATE = "off";
+  test("CLIENT_GATE: off is the break-glass, anything else fails closed", () => {
+    process.env.VERCEL = "1";
+    process.env.CLIENT_GATE = " OFF ";
     assert.equal(gateMode(), "off");
-    process.env.CLIENT_GATE = " LINE ";
-    assert.equal(gateMode(), "line");
-    delete process.env.VERCEL_ENV;
+    for (const v of ["line", "liff", "of", "0"]) {
+      process.env.CLIENT_GATE = v;
+      assert.equal(gateMode(), "liff", v);
+    }
+    delete process.env.VERCEL;
     process.env.CLIENT_GATE = "liff";
-    assert.equal(gateMode(), "liff");
-    process.env.CLIENT_GATE = "of";
     assert.equal(gateMode(), "liff");
   });
   test("liffUrl only for a well-formed LIFF ID", () => {
