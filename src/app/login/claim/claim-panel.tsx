@@ -325,7 +325,7 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
       </div>
 
       {/* The names flow in the page's one scroller; the search stays on top of them while they scroll by. */}
-      <div className="claim-search sticky top-0 z-10 -mx-6 mt-2 px-6 pt-2 pb-2 sm:-mx-7 sm:px-7" data-testid="claim-search-bar">
+      <div className="claim-search sticky z-10 -mx-6 mt-2 px-6 pt-2 pb-2 sm:-mx-7 sm:px-7" data-testid="claim-search-bar">
         <label className={LABEL} htmlFor="claim-search">
           ค้นหาชื่อหรือนามสกุล
         </label>

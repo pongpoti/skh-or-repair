@@ -316,7 +316,7 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
         เลือกชื่อของคุณ
       </h2>
       <p className={HELP}>เลือกชื่อของคุณ แล้วระบบจะส่งรหัสไปที่อีเมลของคุณ</p>
-      <div className="claim-search sticky top-0 z-10 -mx-6 mt-2 px-6 pt-2 pb-2 sm:-mx-7 sm:px-7">
+      <div className="claim-search sticky z-10 -mx-6 mt-2 px-6 pt-2 pb-2 sm:-mx-7 sm:px-7">
         <label className={LABEL} htmlFor="doctor-search">
           ค้นหาชื่อหรือนามสกุล
         </label>

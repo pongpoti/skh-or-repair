@@ -470,7 +470,12 @@ body {
     margin-inline: -0.25rem;
     padding: 0.25rem;
   }
+  /*
+   * The page scrolls in AuthShell's <main>, whose top padding is max(1.5rem, safe area). A sticky top of 0 would
+   * stop the bar below that padding and leave a strip where names show above it, so it sticks at the very top instead.
+   */
   .claim-search {
+    top: calc(-1 * max(1.5rem, env(safe-area-inset-top)));
     background: color-mix(in srgb, var(--surface) 94%, transparent);
     -webkit-backdrop-filter: blur(8px);
     backdrop-filter: blur(8px);
