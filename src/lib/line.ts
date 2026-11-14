@@ -103,16 +103,21 @@ export function cleanPictureUrl(v: unknown): string | null {
 /**
  * Verifies the ID token with LINE's verify endpoint (which checks the signature, audience,
  * expiry and nonce) and re-checks iss, aud, exp and nonce locally.
+ *
+ * `nonce` is null for an ID token from the LIFF SDK (liff.getIDToken()): LIFF signs the user in itself, so there is no
+ * nonce of ours in it. The token must still be LINE's, for this channel, and unexpired.
  */
-export async function verifyIdToken(cfg: LineConfig, idToken: string, nonce: string): Promise<LineProfile> {
-  const c = await postForm(cfg.verifyUrl, { id_token: idToken, client_id: cfg.channelId, nonce });
+export async function verifyIdToken(cfg: LineConfig, idToken: string, nonce: string | null): Promise<LineProfile> {
+  const form: Record<string, string> = { id_token: idToken, client_id: cfg.channelId };
+  if (nonce !== null) form.nonce = nonce;
+  const c = await postForm(cfg.verifyUrl, form);
   const now = Math.floor(Date.now() / 1000);
   const aud = c.aud;
   const audOk = Array.isArray(aud) ? aud.includes(cfg.channelId) : aud === cfg.channelId;
   if (c.iss !== LINE_ISSUER) throw new LineAuthError("unexpected iss");
   if (!audOk) throw new LineAuthError("unexpected aud");
   if (typeof c.exp !== "number" || c.exp <= now) throw new LineAuthError("id_token expired");
-  if (typeof c.nonce !== "string" || !safeEqual(c.nonce, nonce)) throw new LineAuthError("nonce mismatch");
+  if (nonce !== null && (typeof c.nonce !== "string" || !safeEqual(c.nonce, nonce))) throw new LineAuthError("nonce mismatch");
   if (typeof c.sub !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(c.sub)) throw new LineAuthError("invalid sub");
   return { sub: c.sub, name: cleanDisplayName(c.name), picture: cleanPictureUrl(c.picture) };
 }
