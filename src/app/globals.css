@@ -137,6 +137,13 @@ body {
     -webkit-backdrop-filter: blur(20px) saturate(160%);
   }
 
+  /* The sign-in card (components/auth-shell.tsx): solid and quiet, no glass. */
+  .auth-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 1rem;
+    box-shadow: 0 1px 2px rgb(41 29 20 / 0.04), 0 12px 32px -14px rgb(41 29 20 / 0.14);
+  }
   .card {
     background: var(--glass);
     border: 1px solid var(--glass-edge);
@@ -269,6 +276,17 @@ body {
   .btn-ghost:hover:not(:disabled) {
     background: var(--surface-2);
     color: var(--ink);
+  }
+
+  /* A full-width second choice beside a primary button (the sign-in pages' other way in). */
+  .btn-outline {
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    box-shadow: 0 1px 2px rgb(41 29 20 / 0.05);
+  }
+  .btn-outline:hover:not(:disabled) {
+    background: var(--surface-2);
   }
 
   /* Destructive: a deep red fill for the confirm button, and a red tint on the quiet delete icon. */

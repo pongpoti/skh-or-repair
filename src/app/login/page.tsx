@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { AuthShell } from "@/components/auth-shell";
-import { LineLoginButton } from "@/components/line-login-button";
 import { LiffSignIn } from "@/components/liff-sign-in";
 import { latestRequest, viewFor } from "@/lib/access";
 import { getAccessGrant, getUser } from "@/lib/auth/server";
@@ -12,8 +11,8 @@ import { claimsEnabled } from "@/lib/telegram";
 
 /**
  * Where a browser with a verified number continues: its access request, or picking its name (only while claims are
- * open). Nothing when the number holds a name by now (claimed on another device, or set by hand): signing in with LINE,
- * the primary button, is the way on, and the claim or request pages would only lead back here.
+ * open). Nothing when the number holds a name by now (claimed on another device, or set by hand): signing in with LINE
+ * is the way on, and the claim or request pages would only lead back here.
  */
 async function continueAt(phone: string, sub: string): Promise<"request" | "claim" | null> {
   if (await isListedUser(phone)) return null;
@@ -31,35 +30,37 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   // A verified number that is not authorized yet (a name to pick, or an access request in progress, on this browser).
   const grant = await getAccessGrant();
   const resume = grant ? await continueAt(grant.phone, grant.sub) : null;
-  // Inside the LIFF app (the only place the gate lets this page render on Vercel) LINE has already signed the user in,
-  // so sign in straight away instead of showing a button to tap, through the LIFF SDK so the app never leaves for
-  // LINE Login's web page (see LiffSignIn). Not after signing out (that would sign straight back in) and not while
-  // this browser has a name to pick or an access request to follow.
-  const liff = gateMode() === "liff" ? liffId() : null;
-  const auto = !resume && sp.signed_out === undefined;
-  if (gateMode() === "liff" && !liff && auto) {
-    redirect(next === "/" ? "/api/auth/line/start" : `/api/auth/line/start?next=${encodeURIComponent(next)}`);
+
+  if (resume) {
+    return (
+      <AuthShell title="เข้าสู่ระบบ" description="ยืนยันเบอร์มือถือแล้ว ทำต่อจากขั้นที่ค้างไว้">
+        {resume === "request" ? (
+          <a className="btn btn-primary min-h-12 w-full" href="/login/request" data-testid="request-status-link">
+            ดูสถานะคำขอเข้าใช้งาน
+          </a>
+        ) : (
+          <a className="btn btn-primary min-h-12 w-full" href="/login/claim" data-testid="claim-resume-link">
+            เลือกชื่อของคุณต่อ
+          </a>
+        )}
+      </AuthShell>
+    );
   }
 
+  // Signing out lands here; signing straight back in would undo it. The next visit from the LINE menu signs in again.
+  if (sp.signed_out !== undefined) {
+    return <AuthShell title="ออกจากระบบแล้ว" description="เปิดใหม่ได้จากเมนูใน LINE" />;
+  }
+
+  // There is no sign-in button: people open the board from the LINE menu, and LINE has already signed them in there.
+  // Inside the LIFF app (the only place the gate lets this page render on Vercel) the LIFF SDK signs in without leaving
+  // the app (see LiffSignIn). Anywhere else (no LIFF ID, local development, the CLIENT_GATE=off break-glass) LINE
+  // Login's web redirect does it.
+  const liff = gateMode() === "liff" ? liffId() : null;
+  if (!liff) redirect(next === "/" ? "/api/auth/line/start" : `/api/auth/line/start?next=${encodeURIComponent(next)}`);
   return (
-    <AuthShell title="ตารางห้องผ่าตัด" description="เข้าสู่ระบบเพื่อดูเคสผ่าตัดของวันนี้">
-      {liff ? <LiffSignIn liffId={liff} next={next} auto={auto} /> : <LineLoginButton next={next} />}
-      <p className="mt-4 text-center text-sm leading-6 text-muted">
-        สำหรับเจ้าหน้าที่ห้องผ่าตัดที่ได้รับอนุญาตเท่านั้น
-        <br />
-        ครั้งแรกต้องยืนยันเบอร์มือถือด้วยรหัสทาง SMS
-        <br />
-        แพทย์ยืนยันด้วยรหัสทางอีเมล
-      </p>
-      {resume === "request" ? (
-        <a className="btn btn-secondary mt-4 w-full" href="/login/request" data-testid="request-status-link">
-          ดูสถานะคำขอเข้าใช้งาน
-        </a>
-      ) : resume === "claim" ? (
-        <a className="btn btn-secondary mt-4 w-full" href="/login/claim" data-testid="claim-resume-link">
-          เลือกชื่อของคุณต่อ
-        </a>
-      ) : null}
+    <AuthShell title="เข้าสู่ระบบ">
+      <LiffSignIn liffId={liff} next={next} />
     </AuthShell>
   );
 }

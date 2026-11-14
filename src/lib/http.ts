@@ -7,7 +7,7 @@ import { isJsonRequest, isSameOrigin } from "./security";
 export const MSG = {
   notReady: "ระบบยังไม่พร้อม กรุณาติดต่อผู้ดูแล",
   badRequest: "คำขอไม่ถูกต้อง",
-  sessionExpired: "หมดเวลายืนยันตัวตน กรุณาเข้าสู่ระบบด้วย LINE อีกครั้ง",
+  sessionExpired: "หมดเวลายืนยันตัวตน กรุณาเริ่มใหม่",
   // U+00A0 keeps a number with its unit ("10 หลัก") on one line (Thai line breaking)
   invalidPhone: "เบอร์มือถือไม่ถูกต้อง กรุณากรอก 10\u00A0หลัก ขึ้นต้นด้วย 06, 08 หรือ 09",
   // deeSMSX refused the number (reference code 99)

@@ -68,16 +68,30 @@ export function cleanPhoneInput(v: string): string {
 /** Step counter and heading of a sign-in step. */
 export function StepHeading({ step, children }: { step?: string; children: React.ReactNode }) {
   return (
-    <div className="mb-2">
-      {step ? <p className="text-xs font-semibold text-muted">{step}</p> : null}
-      <h2 className="text-lg leading-snug font-bold text-ink">{children}</h2>
+    <div className="mb-1.5">
+      {step ? <p className="text-xs font-medium tracking-wide text-muted">{step}</p> : null}
+      <h2 className="text-base leading-snug font-semibold text-ink">{children}</h2>
     </div>
   );
 }
 
 const LABEL = "mb-1.5 block text-sm font-semibold text-ink-2";
 
-export function VerifyForm() {
+/** The step counter of the SMS sign-in, above the field it is about. */
+function StepCount({ n }: { n: 1 | 2 }) {
+  return (
+    <p className="mb-3 flex items-center gap-2 text-xs font-medium text-muted">
+      <span className="flex gap-1" aria-hidden="true">
+        <span className="h-1 w-5 rounded-full bg-brand" />
+        <span className={`h-1 w-5 rounded-full ${n === 2 ? "bg-brand" : "bg-line-strong"}`} />
+      </span>
+      ขั้นที่ {n} จาก 2
+    </p>
+  );
+}
+
+/** `other`: the other way in (the doctors' email sign-in), shown under the number step only. */
+export function VerifyForm({ other }: { other?: React.ReactNode }) {
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   // The number as the server read it (081-234-5678) and the reference printed in the SMS.
@@ -240,7 +254,7 @@ export function VerifyForm() {
       <div role="alert">
         <Notice tone="warning">{error}</Notice>
         <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
-          เข้าสู่ระบบด้วย LINE อีกครั้ง
+          เริ่มใหม่
         </a>
       </div>
     );
@@ -261,11 +275,8 @@ export function VerifyForm() {
         }}
         noValidate
       >
-        <StepHeading step="ขั้นที่ 1 จาก 2">กรอกเบอร์มือถือ</StepHeading>
-        <p className="text-sm leading-6 text-muted">
-          ใช้เบอร์มือถือของคุณเอง ระบบจะส่งรหัส 6&nbsp;หลักทาง SMS ครั้งต่อไปใช้เบอร์เดิม
-        </p>
-        <label className={`${LABEL} mt-4`} htmlFor="phone">
+        <StepCount n={1} />
+        <label className={LABEL} htmlFor="phone">
           เบอร์มือถือ
         </label>
         <input
@@ -285,9 +296,12 @@ export function VerifyForm() {
             setPhoneInvalid(false);
           }}
           placeholder="0xx-xxx-xxxx"
-          aria-describedby={error ? "phone-error" : undefined}
+          aria-describedby={error ? "phone-hint phone-error" : "phone-hint"}
           aria-invalid={phoneInvalid || undefined}
         />
+        <p id="phone-hint" className="mt-1.5 text-[0.8125rem] leading-5 text-muted">
+          รับรหัส 6&nbsp;หลักทาง SMS
+        </p>
         {error ? (
           <div id="phone-error" className="mt-3">
             <Notice tone="warning" role="alert">
@@ -298,9 +312,7 @@ export function VerifyForm() {
         <button className="btn btn-primary mt-4 min-h-12 w-full" type="submit" disabled={busy || digits < 9 || phoneWait > 0}>
           {busy ? "กำลังส่ง…" : phoneWait > 0 ? `ส่งรหัสได้ใน ${waitText(phoneWait)}` : "ส่งรหัสทาง SMS"}
         </button>
-        <p className="mt-4 text-[0.8125rem] leading-5 text-muted">
-          ครั้งแรก ยืนยันรหัสแล้วเลือกชื่อของคุณจากรายชื่อ หากไม่พบชื่อ ส่งคำขอเข้าใช้งานได้
-        </p>
+        {other}
       </form>
     );
   }
@@ -314,29 +326,23 @@ export function VerifyForm() {
       }}
       noValidate
     >
-      <StepHeading step="ขั้นที่ 2 จาก 2">กรอกรหัส 6&nbsp;หลัก</StepHeading>
+      <StepCount n={2} />
       {sentTo ? (
-        <div id="otp-info" className="mb-3" data-testid="otp-info">
-          <Notice tone="success" role="status">
-            ส่งรหัสทาง SMS ไปที่ <strong className="font-semibold whitespace-nowrap tabular-nums">{sentTo}</strong> แล้ว
-            {ref ? (
-              <>
-                {/* The reference gets a line of its own (the notice is too narrow for one line at any width); the
-                    separator stays in the text for copying, but is not shown. */}
-                <span className="hidden"> · </span>
-                <span className="block whitespace-nowrap">
-                  รหัสอ้างอิง <strong className="font-semibold tracking-wide" data-testid="otp-ref">{ref}</strong>
-                </span>
-              </>
-            ) : null}
-          </Notice>
-        </div>
+        <p id="otp-info" className="text-sm leading-6 text-ink-2" role="status" data-testid="otp-info">
+          ส่งรหัสทาง SMS ไปที่ <strong className="font-semibold whitespace-nowrap text-ink tabular-nums">{sentTo}</strong> แล้ว
+          {ref ? (
+            <>
+              {/* The reference gets a line of its own; the separator stays in the text for copying, but is not shown. */}
+              <span className="hidden"> · </span>
+              <span className="block whitespace-nowrap">
+                รหัสอ้างอิง <strong className="font-semibold tracking-wide text-ink" data-testid="otp-ref">{ref}</strong>
+              </span>
+            </>
+          ) : null}
+        </p>
       ) : null}
-      <p id="code-help" className="text-sm leading-6 text-muted">
-        รหัสใช้ได้ 5&nbsp;นาที{ref ? " ใช้รหัสจาก SMS ที่มีรหัสอ้างอิงตรงกัน" : null}
-      </p>
       <label className={`${LABEL} mt-4`} htmlFor="code">
-        รหัสยืนยัน
+        รหัส 6&nbsp;หลัก
       </label>
       <input
         ref={codeRef}
@@ -354,6 +360,15 @@ export function VerifyForm() {
         disabled={locked}
         placeholder="••••••"
       />
+      <p id="code-help" className="mt-1.5 text-[0.8125rem] leading-5 text-muted">
+        รหัสใช้ได้ 5&nbsp;นาที
+        {ref ? (
+          <>
+            {" "}
+            <span className="block">ใช้รหัสจาก SMS ที่มีรหัสอ้างอิงตรงกัน</span>
+          </>
+        ) : null}
+      </p>
       <div id="code-error" ref={codeErrorRef} tabIndex={-1} className="outline-none" aria-live="polite">
         {error ? (
           <div className="mt-3" data-testid="otp-error">
