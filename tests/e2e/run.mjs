@@ -830,7 +830,8 @@ async function main() {
         const bar = document.querySelector('[data-testid="claim-search-bar"]').getBoundingClientRect();
         return { scrolled: main.scrollTop > 0, top: Math.round(bar.top - main.getBoundingClientRect().top) };
       });
-      assert(stuck.scrolled && stuck.top >= 0 && stuck.top <= 40, `search bar stays at the top when the page scrolls: ${JSON.stringify(stuck)}`);
+      // flush with the top of the scroller: no strip above the bar where names show through (Pong, 14 Nov 2026)
+      assert(stuck.scrolled && Math.abs(stuck.top) <= 1, `search bar sticks at the very top when the page scrolls: ${JSON.stringify(stuck)}`);
       await page.evaluate(() => (document.querySelector("main").scrollTop = 0));
       await page.setViewportSize({ width: 390, height: 844 });
       const focusedStep = await page.evaluate(() => [document.activeElement?.tagName, document.activeElement?.textContent?.trim()].join(" "));

@@ -61,7 +61,10 @@ export function Notice({
   );
 }
 
-/** Shared frame for the sign-in, SMS-code, access-request and error pages. */
+/**
+ * Shared frame for the sign-in, SMS-code, access-request and error pages. <main> is the page's scroller; the sticky
+ * name search (.claim-search in globals.css) cancels its top padding, so keep the two in step.
+ */
 export function AuthShell({
   title,
   description,
