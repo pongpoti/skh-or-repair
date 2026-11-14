@@ -47,19 +47,19 @@
   --highlight: inset 0 1px 0 rgb(255 255 255 / 0.85);
 
   /* Floor plan */
-  --fp-floor: var(--surface);
-  --fp-outer: #f1e9df;
-  --fp-or: #e9ddcd;
+  --fp-floor: #fbf7f1;
+  --fp-outer: #e6dccf;
+  --fp-or: #f1e7da;
   --fp-recovery: var(--fp-support);
-  --fp-support: #f5efe7;
+  --fp-support: #efe7dc;
   --fp-core: #ffffff;
-  --fp-wall: #d9ccbc;
-  --fp-wall-outer: var(--line);
-  --fp-detail: #c9baa8;
-  --fp-grate-line: #e6dccf;
+  --fp-wall: var(--ink);
+  --fp-wall-outer: #b9a996;
+  --fp-detail: #8a7a6c;
+  --fp-grate-line: #cdbfae;
   --fp-shell: var(--fp-floor);
-  --fp-counter: #d9ccbc;
-  --fp-counter-edge: #c9baa8;
+  --fp-counter: #8f8072;
+  --fp-counter-edge: #6b5d52;
   --fp-ink: var(--ink);
   --fp-muted: var(--ink-3);
   --fp-active: #157f3d;
@@ -105,9 +105,15 @@ body {
   -webkit-text-size-adjust: 100%;
 }
 
-/* A plain warm canvas, as on the sign-in pages: solid cards on it, no glass. */
+/* Soft colour fields behind the glass, so the blur has something to pick up. */
 body {
-  background: var(--canvas);
+  background:
+    radial-gradient(40rem 28rem at 8% 0%, rgb(222 190 145 / 0.42), transparent 70%),
+    radial-gradient(36rem 26rem at 95% 8%, rgb(196 170 220 / 0.2), transparent 70%),
+    radial-gradient(40rem 30rem at 85% 95%, rgb(150 208 216 / 0.2), transparent 70%),
+    radial-gradient(34rem 26rem at 10% 95%, rgb(240 180 160 / 0.2), transparent 70%),
+    linear-gradient(160deg, #fbf6ef 0%, #f8f1e7 50%, #fbf7f1 100%);
+  background-attachment: fixed;
   color: var(--foreground);
   line-height: 1.6;
   font-feature-settings: "tnum" 0;
@@ -125,8 +131,10 @@ body {
 
 @layer components {
   .appbar {
-    background: var(--surface);
-    border-bottom: 1px solid var(--line);
+    background: rgb(255 255 255 / 0.6);
+    border-bottom: 1px solid rgb(63 47 36 / 0.08);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
   }
 
   /* The sign-in card (components/auth-shell.tsx): solid and quiet, no glass. */
@@ -362,9 +370,11 @@ body {
     min-height: 2.75rem;
     padding: 0 0.5rem 0 1rem;
     border-radius: 999px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    box-shadow: 0 1px 2px rgb(41 29 20 / 0.04);
+    background: rgb(255 255 255 / 0.72);
+    border: 1px solid var(--glass-edge);
+    box-shadow: var(--shadow-md), var(--highlight);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
     font-size: 0.875rem;
     font-weight: 600;
     color: var(--ink-2);
@@ -372,7 +382,7 @@ body {
     transition: background-color 0.15s ease, border-color 0.15s ease;
   }
   button.pill { cursor: pointer; }
-  button.pill:hover { background: var(--surface-2); }
+  button.pill:hover { background: rgb(255 255 255 / 0.9); }
   .pill[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
   .pill[aria-pressed="true"] .pill-count { background: #fff; color: var(--brand); }
   .pill-count {
@@ -405,7 +415,8 @@ body {
     height: 1.625rem;
     padding: 0 0.625rem;
     border-radius: 999px;
-    background: var(--surface-2);
+    background: rgb(255 255 255 / 0.75);
+    border: 1px solid var(--line);
     color: var(--ink-2);
     font-size: 0.8125rem;
     font-weight: 600;
@@ -578,7 +589,7 @@ dialog[open]::backdrop {
 
 /* The department's colour as a wash across the top of the sheet. */
 .sheet-head {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--wash, transparent) 10%, transparent), transparent 85%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--wash, transparent) 18%, transparent), transparent 85%);
 }
 
 @media (max-width: 1023.98px) {
@@ -593,14 +604,15 @@ dialog[open]::backdrop {
     transform: none;
     transition: none;
     will-change: auto;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 1rem;
-    box-shadow: 0 1px 2px rgb(41 29 20 / 0.04), 0 12px 32px -14px rgb(41 29 20 / 0.14);
+    background: var(--glass);
+    border: 1px solid var(--glass-edge);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md), var(--highlight);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
   }
 }
 
-.fp-card { filter: drop-shadow(0 10px 18px rgb(41 29 20 / 0.07)); }
 .fp-bg { fill: var(--fp-floor); }
 .fp-zone-outer { fill: var(--fp-outer); }
 .fp-shell { fill: var(--fp-shell); }
@@ -637,8 +649,8 @@ dialog[open]::backdrop {
 }
 .fp-or:active .fp-floor { filter: brightness(0.9); }
 /* A selected room gets a heavy wall and an inverted number badge, so it reads on every department colour without relying on a glow. */
-.fp-or.is-selected { filter: drop-shadow(0 4px 10px rgb(41 29 20 / 0.35)); }
-.fp-or.is-selected .fp-wall { stroke: var(--fp-ink); stroke-width: 8; }
+.fp-or.is-selected { filter: drop-shadow(0 0 8px rgb(41 29 20 / 0.4)); }
+.fp-or.is-selected .fp-wall { stroke: var(--fp-ink); stroke-width: 9; }
 .fp-or.is-selected .fp-badge { fill: var(--brand); stroke: #fff; stroke-width: 4; }
 .fp-or.is-selected .fp-label { fill: #fff; }
 .fp-recovery .fp-floor { fill: var(--fp-recovery); }
@@ -648,15 +660,13 @@ dialog[open]::backdrop {
 .fp-recovery:has(.fp-floor:focus-visible) .fp-wall { stroke: var(--focus); stroke-width: 10; }
 .fp-support .fp-floor { fill: var(--fp-support); }
 .fp-core .fp-floor { fill: var(--fp-core); }
-.fp-wall { fill: none; stroke: var(--fp-wall); stroke-width: 3; stroke-linejoin: round; stroke-linecap: butt; }
-.fp-wall.fp-thin { stroke-width: 2; }
+.fp-wall { fill: none; stroke: var(--fp-wall); stroke-width: 4; stroke-linejoin: miter; stroke-linecap: butt; }
+.fp-wall.fp-thin { stroke-width: 2.5; }
 .fp-wall.fp-outer { stroke: var(--fp-wall-outer); stroke-width: 3; }
-/* Operating rooms read as tiles: a white gap between neighbours instead of a dark wall. */
-.fp-or .fp-wall { stroke: var(--surface); stroke-width: 7; }
 .fp-detail { fill: none; stroke: var(--fp-detail); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .fp-cab { fill: none; stroke: var(--fp-detail); stroke-width: 2; }
 /* Room number sits in a white badge so it reads on any department colour. */
-.fp-badge { fill: #fff; stroke: none; pointer-events: none; }
+.fp-badge { fill: #fff; stroke: var(--fp-wall); stroke-width: 2.5; pointer-events: none; }
 .fp-label {
   font-family: var(--font-inter), var(--font-thai), sans-serif;
   font-size: 56px;

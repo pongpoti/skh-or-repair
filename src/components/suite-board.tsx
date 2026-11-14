@@ -184,7 +184,7 @@ export function SuiteBoard({
               {casesUnavailable ? <p className="pill px-4 text-[var(--stop)]">โหลดเคสที่แพทย์เพิ่มไม่สำเร็จ ลองรีเฟรช</p> : null}
             </div>
           ) : null}
-          <div className="flex min-h-0 flex-1 justify-center overflow-hidden px-2 pt-3 pb-1 lg:p-0">
+          <div className="flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0">
             <FloorPlan selectedId={selectedId} marks={marks} cases={counts} date={planDate} day={day} onSelect={onSelect} />
           </div>
           {adding ? (

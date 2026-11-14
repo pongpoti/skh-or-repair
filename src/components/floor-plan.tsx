@@ -170,12 +170,7 @@ export function FloorPlan({
   }
 
   return (
-    <svg viewBox="0 0 1207 1706" preserveAspectRatio="xMidYMin meet" className="fp-card h-full w-auto max-w-none" role="group" aria-label="แปลนห้องผ่าตัด">
-      {/* The plan is drawn as a card with rounded corners, like the sign-in card. */}
-      <clipPath id="fp-card-clip">
-        <rect x="20" y="20" width="1167" height="1666" rx="40" />
-      </clipPath>
-      <g clipPath="url(#fp-card-clip)">
+    <svg viewBox="0 0 1207 1706" preserveAspectRatio="xMidYMin meet" className="h-full w-auto max-w-none" role="group" aria-label="แปลนห้องผ่าตัด">
       <FloorScenery />
       <defs>
         {/* Closed rooms: thin diagonal stripes on a plain floor. */}
@@ -255,8 +250,7 @@ export function FloorPlan({
           );
         })}
       </g>
-      </g>
-      <rect className="fp-wall fp-outer" x="20" y="20" width="1167" height="1666" rx="40" pointerEvents="none" />
+      <rect className="fp-wall fp-outer" x="20" y="20" width="1167" height="1666" pointerEvents="none" />
     </svg>
   );
 }
