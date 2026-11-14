@@ -47,34 +47,35 @@ function dept(code: DeptCode, name: string, color: string, label: string = code)
 }
 
 /**
- * Department names and colours. The colours are taken from Pong's proposed-schedule image of 4 Nov 2026 (one flat
- * colour per department chip); CHEST, MINOR and UNK are not in it and keep the colours of the 30 Oct redesign. Each
- * is dark enough that its white label clears 4.5:1 (the tests check this).
+ * Department names and colours. Each colour stands for what the department does (Pong approved this palette on 14 Nov
+ * 2026, in place of the colours from the 4 Nov schedule image): red for emergencies, a deep heart red for CVT, vein
+ * blue for vascular, surgical-drape green for general surgery, and so on (the comment on each line). Every colour is
+ * dark enough that its white label clears 4.5:1 (the tests check this).
  */
 export const DEPARTMENTS: Record<DeptCode, Department> = {
-  GENSX: dept("GENSX", "ศัลยกรรมทั่วไป", "#0E5E6F"),
-  SCOPE: dept("SCOPE", "ส่องกล้องทางเดินอาหาร", "#B04A3A"),
-  VASCULAR: dept("VASCULAR", "ศัลยกรรมหลอดเลือด", "#B94769", "VAS"),
-  ORTHO: dept("ORTHO", "ออร์โธปิดิกส์", "#4F3D8C"),
-  OBGYN: dept("OBGYN", "สูติ-นรีเวชกรรม", "#8C3B6E"),
-  EYE: dept("EYE", "จักษุ", "#0F7FA0"),
-  URO: dept("URO", "ศัลยกรรมทางเดินปัสสาวะ", "#2E7D5B"),
-  PLASTIC: dept("PLASTIC", "ศัลยกรรมตกแต่ง", "#B45E04", "PLAST"),
-  ENT: dept("ENT", "โสต ศอ นาสิก", "#2F5FA8"),
-  NEPHRO: dept("NEPHRO", "อายุรกรรมโรคไต", "#667924", "NEPHR"),
+  GENSX: dept("GENSX", "ศัลยกรรมทั่วไป", "#1E7B3C"), // surgical drapes and scrubs
+  SCOPE: dept("SCOPE", "ส่องกล้องทางเดินอาหาร", "#6B7016"), // bile, the digestive tract
+  VASCULAR: dept("VASCULAR", "ศัลยกรรมหลอดเลือด", "#2E4FA8", "VAS"), // veins as anatomy drawings show them
+  ORTHO: dept("ORTHO", "ออร์โธปิดิกส์", "#455A64"), // X-ray film and implant steel
+  OBGYN: dept("OBGYN", "สูติ-นรีเวชกรรม", "#C2185B"), // women and mothers
+  EYE: dept("EYE", "จักษุ", "#0277BD"), // the iris
+  URO: dept("URO", "ศัลยกรรมทางเดินปัสสาวะ", "#9A6B00"), // urine
+  PLASTIC: dept("PLASTIC", "ศัลยกรรมตกแต่ง", "#A85C52", "PLAST"), // skin
+  ENT: dept("ENT", "โสต ศอ นาสิก", "#00838F"), // breath through nose and throat
+  NEPHRO: dept("NEPHRO", "อายุรกรรมโรคไต", "#6B4A2E", "NEPHR"), // a kidney bean
   /** Not in the schedule: the pulmonologists in the admin list. */
-  CHEST: dept("CHEST", "อายุรกรรมโรคปอด", "#6367BC"),
-  PEDSX: dept("PEDSX", "ศัลยกรรมเด็ก", "#937000"),
-  NEURO: dept("NEURO", "ศัลยกรรมระบบประสาท", "#8A5A22"),
-  CVT: dept("CVT", "ศัลยกรรมหัวใจและทรวงอก", "#5E6A73"),
-  MAXILLO: dept("MAXILLO", "แม็กซิลโลเฟเชียล", "#7E5C92", "MAXI"),
-  INFECT: dept("INFECT", "เคสทำแผล (ทุกสาขา)", "#7B7252", "D/S"),
-  EMER: dept("EMER", "เคสฉุกเฉิน (ทุกสาขา)", "#1C1C1C"),
-  MINOR: dept("MINOR", "เคส LA ทุกแผนก", "#6B7377"),
+  CHEST: dept("CHEST", "อายุรกรรมโรคปอด", "#5867B8"), // air and the lungs
+  PEDSX: dept("PEDSX", "ศัลยกรรมเด็ก", "#C25400"), // children, cheerful
+  NEURO: dept("NEURO", "ศัลยกรรมระบบประสาท", "#5E35B1"), // the brain
+  CVT: dept("CVT", "ศัลยกรรมหัวใจและทรวงอก", "#931A32"), // the heart
+  MAXILLO: dept("MAXILLO", "แม็กซิลโลเฟเชียล", "#8A5A83", "MAXI"), // the face and lips
+  INFECT: dept("INFECT", "เคสทำแผล (ทุกสาขา)", "#8E3E12", "D/S"), // betadine on a dressing
+  EMER: dept("EMER", "เคสฉุกเฉิน (ทุกสาขา)", "#D32F2F"), // an emergency
+  MINOR: dept("MINOR", "เคส LA ทุกแผนก", "#5F7380"), // a quiet small case
   /** Not in the schedule: a room for any department during the ventilation repair (lib/repair.ts). */
-  MIXED: dept("MIXED", "คละแผนก", "#6E5A4B", "OTHER"),
+  MIXED: dept("MIXED", "คละแผนก", "#5C5650", "OTHER"), // neutral: shared by any department
   /** Not in the schedule: the colour of a room that has cases but no department. */
-  UNK: dept("UNK", "ไม่ทราบสาขา", "#78746F"),
+  UNK: dept("UNK", "ไม่ทราบสาขา", "#7A746C"), // neutral: department not known
 };
 
 /** A department holding the room on a given day. `nth` limits it to those occurrences of the weekday in the month. */
