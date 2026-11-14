@@ -4,12 +4,15 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createTransport } from "nodemailer";
 import type { EmailConfig } from "../env";
+import { BRAND_MARK_CID, BRAND_MARK_PNG_BASE64 } from "./brand-mark";
+import { codeHtml as renderCodeHtml } from "./code-html";
 
 /**
- * Sends a doctor's sign-in code by email (lib/email-otp.ts):
+ * Sends a doctor's sign-in code by email (lib/email-otp.ts), as plain text with an HTML version in the app's theme
+ * (code-html.ts) that carries the app's mark as an inline image:
  * - smtp (the only mode on Vercel): through an SMTP server, e.g. Gmail (smtp.gmail.com:465) with an app password;
- * - console / file (development and tests): the email goes to the log, or to a JSON file {to, subject, text, code, at}
- *   in EMAIL_OUTBOX_DIR.
+ * - console / file (development and tests): the email goes to the log, or to a JSON file
+ *   {to, subject, text, html, code, at} in EMAIL_OUTBOX_DIR.
  */
 
 /** How long a code may be used, in minutes (lib/email-otp.ts). Kept here so the text and the check agree. */
@@ -35,10 +38,36 @@ export function codeText(code: string, name: string): string {
     `เรียน ${name}`,
     "",
     `รหัสเข้าสู่ระบบตารางห้องผ่าตัด (ORSKH) ของคุณคือ ${code}`,
-    `รหัสใช้ได้ ${EMAIL_CODE_TTL_MIN} นาที และใช้ได้ครั้งเดียว ห้ามบอกรหัสนี้กับผู้อื่น`,
-    "",
-    "หากคุณไม่ได้ขอรหัสนี้ ไม่ต้องทำอะไร บัญชีของคุณยังปลอดภัย",
+    `รหัสใช้ได้ ${EMAIL_CODE_TTL_MIN} นาที และใช้ได้ครั้งเดียว`,
   ].join("\n");
+}
+
+/** The HTML version of codeText(), laid out like the app's sign-in page. */
+export function codeHtml(code: string, name: string): string {
+  return renderCodeHtml(code, name, EMAIL_CODE_TTL_MIN);
+}
+
+/** The app's mark, referenced by codeHtml() as cid:BRAND_MARK_CID. */
+function brandMarkAttachment() {
+  return {
+    filename: "orskh.png",
+    content: Buffer.from(BRAND_MARK_PNG_BASE64, "base64"),
+    contentType: "image/png",
+    cid: BRAND_MARK_CID,
+    contentDisposition: "inline" as const,
+  };
+}
+
+/** The whole message: plain text, the HTML version and the mark it shows inline. */
+export function codeMessage(from: string, to: string[], code: string, name: string) {
+  return {
+    from,
+    to,
+    subject: codeSubject(code),
+    text: codeText(code, name),
+    html: codeHtml(code, name),
+    attachments: [brandMarkAttachment()],
+  };
 }
 
 export function emailTransport(cfg: EmailConfig): EmailTransport {
@@ -57,12 +86,7 @@ export function emailTransport(cfg: EmailConfig): EmailTransport {
       async sendCode({ to, code, name }) {
         try {
           // One message to all of the doctor's own addresses.
-          const info = await mailer.sendMail({
-            from: cfg.from,
-            to,
-            subject: codeSubject(code),
-            text: codeText(code, name),
-          });
+          const info = await mailer.sendMail(codeMessage(cfg.from, to, code, name));
           const accepted = Array.isArray(info.accepted) ? info.accepted.length : 0;
           return accepted > 0 ? { ok: true, accepted } : { ok: false, reason: "rejected" };
         } catch (e) {
@@ -76,7 +100,14 @@ export function emailTransport(cfg: EmailConfig): EmailTransport {
   }
   return {
     async sendCode({ to, code, name }) {
-      const message = { to, subject: codeSubject(code), text: codeText(code, name), code, at: new Date().toISOString() };
+      const message = {
+        to,
+        subject: codeSubject(code),
+        text: codeText(code, name),
+        html: codeHtml(code, name),
+        code,
+        at: new Date().toISOString(),
+      };
       try {
         if (cfg.kind === "file") {
           await mkdir(cfg.outboxDir, { recursive: true });

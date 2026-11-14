@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, test } from "node:test";
 import { NextRequest } from "next/server";
+import { createTransport } from "nodemailer";
 import type { Pool } from "pg";
 import { POST as sendRoute } from "@/app/api/auth/email/send/route";
 import { POST as verifyRoute } from "@/app/api/auth/email/verify/route";
@@ -13,7 +14,8 @@ import { userFromToken } from "@/lib/auth/user";
 import { isAuthorizedDoctor, isAuthorizedPhone, resetAuthzCache } from "@/lib/authz";
 import { doctorFor } from "@/lib/cases";
 import { db } from "@/lib/db";
-import { codeSubject, codeText, emailTransport, type EmailTransport } from "@/lib/email";
+import { codeHtml, codeMessage, codeSubject, codeText, emailTransport, type EmailTransport } from "@/lib/email";
+import { BRAND_MARK_CID } from "@/lib/email/brand-mark";
 import {
   doctorWithEmails,
   EMAIL_LIMITS,
@@ -118,6 +120,43 @@ describe("email configuration (EMAIL_PROVIDER, SMTP_*)", () => {
     assert.ok(!/https?:/.test(text));
   });
 
+  test("the HTML email: the app's look, the code and name, no links, nothing loaded from the web", () => {
+    const html = codeHtml("123456", "สมชาย ใจดี");
+    assert.match(html, /สมชาย ใจดี/);
+    assert.match(html, />123456</);
+    assert.match(html, /10 นาที/);
+    assert.match(html, /#fdfaf5/i, "the card is the app's cream surface");
+    assert.match(html, /name="color-scheme" content="light only"/, "the Gmail apps honour only 'light only'");
+    assert.ok(html.includes(`src="cid:${BRAND_MARK_CID}"`), "the mark is the inline image");
+    assert.ok(!/https?:/.test(html), "no link and no remote font or image");
+    assert.ok(!/<a\b/i.test(html));
+    assert.ok(!/src="\/\/|url\(\/\//.test(html), "no protocol-relative address either");
+    // What the reader sees: no text a mail app would take for a web address and turn into a link.
+    const visible = html
+      .replace(/<head>[\s\S]*?<\/head>|<!--[\s\S]*?-->|<[^>]+>/g, "")
+      .replace(/&zwnj;/g, "\u200c");
+    assert.ok(!/\b[a-z0-9-]+\.(app|com|net|org|th|co)\b/i.test(visible), "no domain-like text");
+  });
+
+  test("the HTML email escapes the doctor's name", () => {
+    const html = codeHtml("123456", `<img src=x onerror="alert(1)"> & 'co'`);
+    assert.ok(html.includes("&lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &#39;co&#39;"));
+    assert.ok(!html.includes("<img src=x"));
+  });
+
+  test("the SMTP message: text and HTML alternatives, with the mark as an inline image", async () => {
+    const msg = codeMessage("ORSKH <a@example.com>", ["d@example.com"], "246810", "สมชาย ใจดี");
+    assert.deepEqual([msg.subject, msg.text, msg.html], [codeSubject("246810"), codeText("246810", "สมชาย ใจดี"), codeHtml("246810", "สมชาย ใจดี")]);
+    const info = await createTransport({ streamTransport: true, buffer: true }).sendMail(msg);
+    const raw = (info.message as Buffer).toString("utf8");
+    assert.match(raw, /multipart\/alternative/);
+    assert.match(raw, /multipart\/related/);
+    assert.match(raw, /Content-Type: text\/plain/);
+    assert.match(raw, /Content-Type: text\/html/);
+    assert.ok(raw.includes(`Content-ID: <${BRAND_MARK_CID}>`));
+    assert.match(raw, /Content-Disposition: inline/);
+  });
+
   test("the file transport writes the message (with the code) to EMAIL_OUTBOX_DIR", async () => {
     const dir = mkdtempSync(join(tmpdir(), "orskh-outbox-"));
     try {
@@ -128,6 +167,7 @@ describe("email configuration (EMAIL_PROVIDER, SMTP_*)", () => {
       assert.equal(files.length, 1);
       const m = JSON.parse(readFileSync(join(dir, files[0]), "utf8"));
       assert.deepEqual([m.to, m.code, m.subject], [["a@example.com", "b@example.com"], "654321", codeSubject("654321")]);
+      assert.equal(m.html, codeHtml("654321", "x"));
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
