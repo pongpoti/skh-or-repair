@@ -1,4 +1,4 @@
-import { REPAIR_COLOR, repairOn } from "./repair.ts";
+import { repairOn, type RepairPeriods } from "./repair.ts";
 
 /**
  * Which department owns each operating room, Monday to Friday.
@@ -126,7 +126,7 @@ export type RoomAllocation = {
   pm: Department | null;
   /** Morning and afternoon belong to different departments. */
   split: boolean;
-  /** The ventilation repair's fixed use, not the weekly schedule; the department comes in the repair's one colour. */
+  /** The ventilation repair's fixed use, not the weekly schedule (the department keeps its own colour). */
   repair: boolean;
 };
 
@@ -161,20 +161,21 @@ function owner(slot: Slot, nth: number): Department | null {
  * Who holds `roomId` on `date` (YYYY-MM-DD). Null when the schedule says nothing:
  * a weekend, an unknown room, or an invalid date.
  *
- * During the ventilation repair (lib/repair.ts) the weekly schedule is set aside: a room in use holds its one
- * department all day, given in the repair's single colour, and a recovery or closed room holds none.
+ * During the ventilation repair (`periods`, lib/repair.ts) the weekly schedule is set aside: a room in use holds its
+ * one department all day, in the department's own colour (Pong, 14 Nov 2026), and a recovery, instrument or closed
+ * room holds none.
  */
-export function allocationFor(roomId: string, date: string): RoomAllocation | null {
+export function allocationFor(roomId: string, date: string, periods: RepairPeriods): RoomAllocation | null {
   const plan = PLAN[roomId];
   const day = weekdayIndex(date);
   const nth = weekOfMonth(date);
   if (!plan || day === null || nth === null || day > 4) return null;
 
-  const repair = repairOn(date);
+  const repair = repairOn(date, periods);
   if (repair) {
     const use = repair.rooms[roomId];
-    if (!use || use === "RR") return null;
-    const dept = { ...DEPARTMENTS[use], color: REPAIR_COLOR };
+    if (!use || use === "RR" || use === "INSTR") return null;
+    const dept = DEPARTMENTS[use];
     return { am: dept, pm: dept, split: false, repair: true };
   }
 

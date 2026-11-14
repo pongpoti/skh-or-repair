@@ -13,6 +13,10 @@
 // /login/doctor and type a code sent to their email (EMAIL_PROVIDER=file: the email is a JSON file in the outbox).
 // Only invented phone numbers (0812345678, 09000000xx, 0611111111) and invented names are used. Keep E2E_SCREENS_DIR
 // outside the repository.
+// The repair-phase tests near the end (MX's HOSxP upload, doctors' bookings with HN, the 16:00 turnover) move the app's
+// clock through APP_FAKE_NOW_FILE (lib/clock.ts reads it on every call) and read holidays from the Bank of Thailand
+// stub in tests/mock-line.mjs (BOT_HOLIDAYS_URL). They upload tests/fixtures/e2e-or-export.xlsx, the made-up sample
+// moved to Tue 17 Nov 2026 with invented HNs (tests/e2e/make-workbook.py).
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -117,6 +121,29 @@ const ADMIN_ID = Number(TG_CHAT); // a private chat's id is the user's id
 const STRANGER_ID = 5550001;
 const WEBHOOK_PATH = "/api/telegram/webhook";
 const WIDTHS = [360, 1280];
+// The repair phase: the app's clock is the time in this file (none: the real time), and BOT_TOKEN is the holidays
+// stub's token. The made-up workbook lists Tue 17 Nov 2026, the next workday after Mon 16 Nov (half 1 of the repair).
+const NOW_FILE = join(tmpdir(), `orskh-e2e-now-${APP_PORT}.txt`);
+const BOT_TOKEN = randomBytes(12).toString("hex");
+const E2E_WORKBOOK = join(repoRoot, "tests", "fixtures", "e2e-or-export.xlsx");
+const SAMPLE_WORKBOOK = join(repoRoot, "tests", "fixtures", "sample-or-export.xlsx");
+// Invented people of the users list, each given a number by hand (README: a claim without the claim page). The
+// admin's claim is held by the admin's LINE account, so /admin can name who saved the repair's dates.
+const RP = {
+  admin: { phone: "0900000021", name: "วิไล แสงทอง", sub: ADMIN_SUB },
+  mx: { phone: "0900000022", name: "ปราณี สายบุญ", sub: "U00000000000000000000000000000mx1" },
+  nurse: { phone: "0900000023", name: "อรุณี ศรีสุข", sub: "U00000000000000000000000000000rn1" },
+  drX: { phone: "0900000024", name: "ณัฐพล วงศ์ใหญ่", sub: "U00000000000000000000000000000dx1" },
+  drY: { phone: "0900000025", name: "ชัยวัฒน์ มีสุข", sub: "U00000000000000000000000000000dy1" },
+};
+// The bookings' HNs (invented): doctor X books one for Monday and two for Tuesday (one typed with a dash, matching the
+// workbook's 71000002; one HOSxP will not list); doctor Y books 71000015, which the workbook writes 0071000015.
+const HN_TODAY = "71900001";
+const HN_X_MATCH = "71-000002";
+const HN_X_MISSING = "71900002";
+const HN_Y_MATCH = "71000015";
+// The workbook's HNs (normalised), every one of them, kept or not.
+const WORKBOOK_HNS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 29].map((n) => `71${String(n).padStart(6, "0")}`);
 const PNG_1PX = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64",
@@ -503,6 +530,11 @@ async function usersSnapshot(db) {
 }
 
 async function main() {
+  // The upload tests send a generated workbook; say how to make it before a long build rather than fail midway.
+  if (!existsSync(SAMPLE_WORKBOOK)) throw new Error("tests/fixtures/sample-or-export.xlsx is missing");
+  if (!existsSync(E2E_WORKBOOK)) {
+    throw new Error("tests/fixtures/e2e-or-export.xlsx is missing: run python3 -I tests/e2e/make-workbook.py (needs openpyxl)");
+  }
   // Both ports must be free (checked before the build, and again before the servers start): a server
   // already listening there would answer in place of this build.
   const portsFree = async () => {
@@ -515,12 +547,14 @@ async function main() {
   rmSync(OUTBOX, { recursive: true, force: true });
   mkdirSync(OUTBOX, { recursive: true });
   mkdirSync(SCREENS, { recursive: true });
+  // the real time until the repair-phase tests set one
+  rmSync(NOW_FILE, { force: true });
 
   // Fresh database: drop the sign-in tables so the app's lazy schema creation is exercised too (the users list is
   // loaded once the app has created them, as in production: loadUsers() after the servers are up).
   const db = new pg.Pool({ connectionString: DB_URL, max: 2 });
   await assertDisposableUsers((sql) => db.query(sql), "E2E_DATABASE_URL"); // users holding real data: stop before the DROP
-  await db.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, user_claims, email_codes, user_emails, users, access_requests");
+  await db.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
 
   const appEnv = {
     ...baseEnv(),
@@ -550,8 +584,10 @@ async function main() {
     // doctors' email codes are written to files (one JSON per email, with the code)
     EMAIL_PROVIDER: "file",
     EMAIL_OUTBOX_DIR: join(OUTBOX, "email"),
-    // no holiday API calls from the tests
-    BOT_API_TOKEN: "",
+    // holidays from the Bank of Thailand stub in mock-line (never the real API), and the clock the tests move
+    BOT_API_TOKEN: BOT_TOKEN,
+    BOT_HOLIDAYS_URL: `${LINE}/financial-institutions-holidays/`,
+    APP_FAKE_NOW_FILE: NOW_FILE,
     // one admin (spaces and an empty entry are ignored); SUB_A, the first-login account, is not one
     AUTH_ADMIN_LINE_IDS: ` ${ADMIN_SUB} ,, `,
   };
@@ -570,6 +606,7 @@ async function main() {
     MOCK_LINE_PORT: String(LINE_PORT),
     MOCK_LINE_CLIENT_ID: LINE_ID,
     MOCK_LINE_CLIENT_SECRET: LINE_SECRET,
+    MOCK_BOT_TOKEN: BOT_TOKEN,
   });
   const sms = startProcess("mock-deesmsx", ["tests/mock-deesmsx.mjs"], {
     ...baseEnv(),
@@ -1716,7 +1753,7 @@ async function main() {
         assert(r.status === 404, `non-admin /admin -> ${r.status}`);
         // not even the loading screen: nothing of the admin page reaches a non-admin
         const body = await (await fetch(`${APP}/admin`, { headers: { cookie: `session=${token}` }, redirect: "manual" })).text();
-        assert(!body.includes("จัดการรายชื่อแพทย์") && !body.includes("รายชื่อแพทย์"), "no admin page or loading screen for a non-admin");
+        assert(!body.includes("จัดการระบบ") && !body.includes("รายชื่อแพทย์"), "no admin page or loading screen for a non-admin");
         const html = await (await fetch(`${APP}/`, { headers: { cookie: `session=${token}` } })).text();
         assert(!html.includes('href="/admin"'), "no admin link on a non-admin's board");
       }
@@ -1726,7 +1763,8 @@ async function main() {
       // an admin sub with an authorized number opens the page
       const admin = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB)}` }, redirect: "manual" });
       const adminHtml = await admin.text();
-      assert(admin.status === 200 && adminHtml.includes("จัดการรายชื่อแพทย์"), `admin /admin -> ${admin.status}`);
+      // the page is named for all it holds (the repair's dates, MX, the surgeon list), not the surgeon list alone
+      assert(admin.status === 200 && adminHtml.includes("จัดการระบบ") && adminHtml.includes("รายชื่อแพทย์"), `admin /admin -> ${admin.status}`);
 
       const ctx = await newContext(browser);
       await ctx.addCookies([{ name: "session", value: await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB), url: APP, httpOnly: true, sameSite: "Lax" }]);
@@ -1740,11 +1778,14 @@ async function main() {
         // below 390px the header button would cut the year off the date; the account menu's link stands in
         assert((await button.isVisible()) === (width >= 390), `admin button visible at ${width}px: ${await button.isVisible()}`);
         assert((await button.getAttribute("href")) === "/admin", "admin button opens /admin");
+        // named for the whole page (the repair's dates, MX and the surgeon list), not the surgeon list alone
+        assert((await button.getAttribute("aria-label")) === "จัดการระบบ", `admin button's name: ${await button.getAttribute("aria-label")}`);
         await page.click('[data-testid="user-menu"]');
         const menu = page.locator('[data-testid="account-menu"]');
         await menu.waitFor({ state: "visible" });
         const link = page.locator('[data-testid="account-admin-link"]');
         assert((await link.isVisible()) && (await link.getAttribute("href")) === "/admin", "admin link in the account menu");
+        assert(((await link.textContent()) ?? "").trim() === "จัดการระบบ", `the menu link's words: ${await link.textContent()}`);
         assert(((await link.boundingBox())?.height ?? 0) >= 44, "admin link is a 44px target");
         const file = `board-admin-menu-${width}.png`;
         await page.screenshot({ path: join(SCREENS, file) });
@@ -2020,7 +2061,530 @@ async function main() {
       await ctx.close();
     });
 
-    await t("no OTP code, deeSMSX token or key appears in server logs", async () => {
+    // ---- The repair phase: MX's HOSxP upload, doctors' bookings with HN, the 16:00 turnover, on the fake clock ----
+
+    /** Moves the app's clock: lib/clock.ts reads NOW_FILE on every call (an ISO time with its offset). */
+    const setNow = (iso) => writeFileSync(NOW_FILE, iso);
+    const sessionOf = (person) => sessionToken(person.phone, SESSION_SECRET, person.sub);
+    /** A browser signed in as `person`: a phone, 390 x 844 at 2x. */
+    async function contextAs(person) {
+      const ctx = await newContext(browser);
+      await ctx.addCookies([{ name: "session", value: await sessionOf(person), url: APP, httpOnly: true, sameSite: "Lax" }]);
+      return ctx;
+    }
+    /** The page's HTML for `person`, with React's payload: everything the browser is sent, every prop included. */
+    async function htmlAs(person, path = "/") {
+      const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(person)}` }, redirect: "manual" });
+      return { status: r.status, html: await r.text() };
+    }
+    /** An element's text with its spaces evened out. */
+    const textOf = async (page, selector) => ((await page.textContent(selector)) ?? "").replace(/\s+/g, " ").trim();
+    /**
+     * A screenshot for the owner at the phone's size. `tall` grows the window to show all of <main>; `upTo` then ends
+     * the picture at the bottom of that element.
+     */
+    async function ownerShot(page, file, { tall = false, upTo = null } = {}) {
+      const size = page.viewportSize();
+      const extra = tall ? await page.evaluate(() => {
+        const main = document.querySelector("main");
+        return main ? main.scrollHeight - main.clientHeight : 0;
+      }) : 0;
+      if (extra > 0) await page.setViewportSize({ width: size.width, height: size.height + extra });
+      const box = upTo ? await page.locator(upTo).boundingBox() : null;
+      const clip = box ? { x: 0, y: 0, width: size.width, height: Math.ceil(box.y + box.height + 16) } : undefined;
+      await page.screenshot({ path: join(SCREENS, file), clip });
+      shots.push(file);
+      if (extra > 0) await page.setViewportSize(size);
+    }
+    /** The rows of a room's sheet: [source, flag, has an HN]. */
+    const sheetRows = (page) =>
+      page.$$eval(".case-row", (rows) => rows.map((r) => [r.dataset.source, r.dataset.flag ?? null, r.querySelector('[data-testid="row-hn"]')?.textContent.trim() ?? null]));
+    // An old binary .xls starts with the OLE signature D0 CF 11 E0.
+    const OLE = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504)]);
+    const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
+    await t("repair phase: the board's day follows the app's clock and the Bank of Thailand holidays (16:00 turnover, a holiday stepped over)", async () => {
+      for (const [key, person] of Object.entries(RP)) {
+        const r = await db.query(
+          "INSERT INTO user_claims (user_id, phone, line_sub, line_name) SELECT id, $2, $3, $4 FROM users WHERE first_name || ' ' || last_name = $1 AND active",
+          [person.name, person.phone, person.sub, `e2e-${key}`],
+        );
+        assert(r.rowCount === 1, `a claim by hand for ${key}`);
+      }
+      const ctx = await contextAs(RP.nurse);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      for (const [at, eyebrow, date, label] of [
+        ["2026-11-16T10:00:00+07:00", "ตารางผ่าตัดวันนี้", "2026-11-16", "16 พ.ย. 2569"], // a workday before 16:00: today
+        ["2026-11-16T16:00:00+07:00", "ตารางผ่าตัดพรุ่งนี้", "2026-11-17", "17 พ.ย. 2569"], // from 16:00: the next workday
+        ["2026-11-14T09:00:00+07:00", "ตารางผ่าตัด", "2026-11-16", "16 พ.ย. 2569"], // a Saturday: Monday
+        ["2026-12-04T16:30:00+07:00", "ตารางผ่าตัด", "2026-12-08", "8 ธ.ค. 2569"], // Friday 16:30: the weekend and Mon 7 Dec (a BOT holiday) skipped
+      ]) {
+        setNow(at);
+        await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+        assert((await textOf(page, '[data-testid="board-eyebrow"]')) === eyebrow, `${at}: eyebrow ${await textOf(page, '[data-testid="board-eyebrow"]')}`);
+        assert((await page.getAttribute("header time", "datetime")) === date, `${at}: the board's date ${await page.getAttribute("header time", "datetime")}`);
+        // every one of these days is in the repair's first half, and nothing has been uploaded
+        assert((await textOf(page, '[data-testid="no-upload-alert"]')) === `ยังไม่มีตาราง HOSxP ของ ${label}`, `${at}: no-upload alert`);
+        assert((await textOf(page, '[data-testid="repair-note"]')) === "ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 26 ม.ค. 2570", `${at}: repair note`);
+        assert((await page.locator('[data-testid="upload-button"], [data-testid="account-upload-link"]').count()) === 0, "no upload link for a nurse");
+      }
+      // After the repair (it ends 17 Mar 2027) the board's rows still come only from MX's uploads, so a day without
+      // one still says so: an empty room must not look like a day with no cases.
+      setNow("2027-03-22T10:00:00+07:00");
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert((await page.getAttribute("header time", "datetime")) === "2027-03-22", "Monday 22 Mar 2027");
+      assert((await page.locator('[data-testid="repair-note"]').count()) === 0, "no repair note after the repair");
+      assert((await textOf(page, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 22 มี.ค. 2570", "no-upload alert after the repair");
+      const calls = await (await fetch(`${LINE}/__control/bot/calls`)).json();
+      assert(calls.some((c) => c.year === "2026") && calls.every((c) => c.authorized), `holidays from the BOT stub with its token: ${JSON.stringify(calls)}`);
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+    });
+
+    await t("the board refreshes itself: at 16:00 with no reload, after more than 5 minutes hidden, and at once when Back brings it back late", async () => {
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      const eyebrow = () => textOf(page, '[data-testid="board-eyebrow"]');
+      const boardDate = () => page.getAttribute("header time", "datetime");
+      const shows = (text, date, what, timeoutMs) =>
+        waitUntil(async () => (await eyebrow()) === text && (await boardDate()) === date, what, timeoutMs).catch(async (e) => {
+          throw new Error(`${e.message}: ${await eyebrow()} ${await boardDate()}`);
+        });
+
+      // 16:00 with the page left open: the board's own timer (components/board-refresh.tsx) refreshes it, with no
+      // reload (the marker on window survives) and nothing done by the test but moving the server's clock.
+      setNow("2026-11-16T15:59:52+07:00");
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      await shows("ตารางผ่าตัดวันนี้", "2026-11-16", "Monday's board before 16:00", 2_000);
+      await page.evaluate(() => {
+        window.__sameDocument = true;
+      });
+      setNow("2026-11-16T16:00:05+07:00");
+      await shows("ตารางผ่าตัดพรุ่งนี้", "2026-11-17", "Tuesday's board by itself after 16:00", 20_000);
+      assert(await page.evaluate(() => window.__sameDocument === true), "refreshed in place, not reloaded");
+
+      // Hidden for more than 5 minutes (the page's clock moved on by 6), then shown: refreshed at once, though the
+      // next turnover (midnight) is hours away. The server's clock has moved a day meanwhile.
+      await page.evaluate(() => {
+        let hidden = false;
+        Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+        const realNow = Date.now.bind(Date);
+        let skew = 0;
+        Date.now = () => realNow() + skew;
+        window.__setHidden = (h) => {
+          hidden = h;
+          document.dispatchEvent(new Event("visibilitychange"));
+        };
+        window.__skip = (ms) => {
+          skew += ms;
+        };
+      });
+      await page.evaluate(() => window.__setHidden(true));
+      await page.evaluate(() => window.__skip(6 * 60_000));
+      setNow("2026-11-17T16:00:05+07:00");
+      await page.evaluate(() => window.__setHidden(false));
+      await shows("ตารางผ่าตัดพรุ่งนี้", "2026-11-18", "Wednesday's board when the tab comes back", 5_000);
+      assert(await page.evaluate(() => window.__sameDocument === true), "refreshed in place after the tab came back");
+
+      // Back: the router brings the board back from its cache with the props it had. Its wait counts from when it was
+      // first seen, so a board whose turnover passed while another page was open refreshes at once, not a full delay
+      // later.
+      setNow("2026-11-16T15:59:50+07:00");
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      const seen = Date.now();
+      await shows("ตารางผ่าตัดวันนี้", "2026-11-16", "Monday's board at 15:59:50", 2_000);
+      await page.click('[data-testid="admin-button"]');
+      await page.waitForURL(`${APP}/admin`);
+      await page.waitForSelector("h1");
+      setNow("2026-11-16T16:00:05+07:00");
+      // The board's deadline was 11 s after it was seen (10 s to 16:00 and a second's margin).
+      await sleep(Math.max(0, seen + 12_000 - Date.now()));
+      await page.goBack();
+      await page.waitForURL(`${APP}/`);
+      await shows("ตารางผ่าตัดพรุ่งนี้", "2026-11-17", "the board brought back by Back refreshed at once", 4_000);
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+    });
+
+    await t("admin: the repair's dates on /admin: a wrong order is refused, a save moves the board to the other half at once, and back", async () => {
+      setNow("2026-11-16T10:00:00+07:00");
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      const dates = async () =>
+        Promise.all(["1-from", "1-to", "2-from", "2-to"].map((k) => page.inputValue(`[data-testid="repair-half-${k}"]`)));
+      assert(JSON.stringify(await dates()) === JSON.stringify(["2026-11-14", "2027-01-26", "2027-01-27", "2027-03-17"]), `the planned dates: ${await dates()}`);
+      assert((await textOf(page, '[data-testid="repair-half-1"]')).includes("กำลังปิดซ่อม"), "half 1 is running today");
+      assert(!(await textOf(page, '[data-testid="repair-half-2"]')).includes("กำลังปิดซ่อม"), "half 2 is not");
+      assert((await textOf(page, "#repair-periods-title + p")) === "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข", "nobody has saved yet");
+      assert(await page.isDisabled('[data-testid="repair-save"]'), "nothing to save yet");
+
+      // the second half must start after the first ends: refused here (the server checks again)
+      await page.fill('[data-testid="repair-half-2-from"]', "2027-01-20");
+      await page.click('[data-testid="repair-save"]');
+      await page.waitForSelector('[aria-labelledby="repair-periods-title"] [role="alert"]');
+      assert((await textOf(page, '[aria-labelledby="repair-periods-title"] [role="alert"]')) === "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1", "order message");
+      const stored = async () =>
+        (await db.query("SELECT half, from_date::text AS f, to_date::text AS t, updated_by FROM repair_periods ORDER BY half")).rows;
+      assert((await stored()).every((r) => r.updated_by === null), "nothing saved");
+
+      // Monday 16 Nov moved into the second half: the board follows at once
+      const save = async (h1from, h1to, h2from, h2to) => {
+        for (const [k, v] of [["1-from", h1from], ["1-to", h1to], ["2-from", h2from], ["2-to", h2to]]) await page.fill(`[data-testid="repair-half-${k}"]`, v);
+        await page.click('[data-testid="repair-save"]');
+        await waitUntil(async () => {
+          const rows = await stored();
+          return rows[0].f === h1from && rows[0].t === h1to && rows[1].f === h2from && rows[1].t === h2to;
+        }, "saved dates");
+        await page.waitForSelector('[aria-labelledby="repair-periods-title"] [role="status"]');
+      };
+      await save("2026-11-01", "2026-11-10", "2026-11-11", "2027-03-17");
+      assert((await stored()).every((r) => r.updated_by === ADMIN_SUB), "saved by the admin's LINE id");
+      assert(/^แก้ไขล่าสุด .+ โดย วิไล แสงทอง$/.test(await textOf(page, "#repair-periods-title + p")), `who saved: ${await textOf(page, "#repair-periods-title + p")}`);
+      const nurse = await contextAs(RP.nurse);
+      const board = await nurse.newPage();
+      await board.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert((await textOf(board, '[data-testid="repair-note"]')) === "ปิดซ่อมห้องผ่าตัด ช่วงที่ 2 · ถึง 17 มี.ค. 2570", `second half: ${await textOf(board, '[data-testid="repair-note"]')}`);
+      assert((await board.getAttribute("#or-1 .fp-floor", "role")) === "button", "OR 1 operates in the second half");
+      assert((await board.getAttribute("#or-12 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 12 is closed in the second half");
+
+      // and back to the planned dates
+      await save("2026-11-14", "2027-01-26", "2027-01-27", "2027-03-17");
+      await board.reload({ waitUntil: "networkidle" });
+      assert((await textOf(board, '[data-testid="repair-note"]')) === "ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 26 ม.ค. 2570", "first half again");
+      assert((await board.getAttribute("#or-1 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 1 closed again");
+      assert((await board.getAttribute("#or-12 .fp-floor", "role")) === "button", "OR 12 operates again");
+      assert((await board.locator('[data-testid="repair-zone"]').count()) === 1, "the repair zone is drawn");
+      await nurse.close();
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+    });
+
+    await t("admin: MX is granted and taken back on /admin; /upload and the upload link are for MX and admins only", async () => {
+      setNow("2026-11-16T10:00:00+07:00");
+      for (const person of [RP.mx, RP.nurse, RP.drX]) {
+        const r = await htmlAs(person, "/upload");
+        assert(r.status === 404, `/upload before MX -> ${r.status}`);
+      }
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      const add = async (search, name) => {
+        await page.click('[data-testid="mx-add"]');
+        await page.fill('[data-testid="mx-search"]', search);
+        await page.locator('[data-testid="mx-users"] button', { hasText: name }).click();
+        assert((await textOf(page, '[data-testid="mx-confirm"]')) === `เพิ่ม ${name}`, "two steps: pick, then confirm");
+        await page.click('[data-testid="mx-confirm"]');
+        await page.locator('[data-testid="mx-list"] li', { hasText: name }).waitFor();
+      };
+      const members = async () =>
+        (await db.query("SELECT u.first_name || ' ' || u.last_name AS name, m.added_by FROM mx_members m JOIN users u ON u.id = m.user_id ORDER BY 1")).rows;
+      await add("ปราณี", RP.mx.name);
+      await add("อรุณี", RP.nurse.name);
+      assert(JSON.stringify(await members()) === JSON.stringify([{ name: RP.mx.name, added_by: ADMIN_SUB }, { name: RP.nurse.name, added_by: ADMIN_SUB }].sort((a, b) => (a.name < b.name ? -1 : 1))), `members: ${JSON.stringify(await members())}`);
+      // taken back, after a confirmation
+      await page.click(`[aria-label="ถอดสิทธิ์ผู้จัดการตารางของ ${RP.nurse.name}"]`);
+      await page.click('dialog[open] button.btn-danger');
+      await page.locator('[data-testid="mx-list"] li', { hasText: RP.nurse.name }).waitFor({ state: "detached" });
+      assert(JSON.stringify((await members()).map((m) => m.name)) === JSON.stringify([RP.mx.name]), "one member left");
+      // a member is greyed out in the picker
+      await page.click('[data-testid="mx-add"]');
+      await page.fill('[data-testid="mx-search"]', "ปราณี");
+      const taken = page.locator('[data-testid="mx-users"] button', { hasText: RP.mx.name });
+      assert((await taken.isDisabled()) && (await taken.textContent()).includes("เป็น MX แล้ว"), "already MX");
+      await page.locator("dialog[open]").getByRole("button", { name: "ยกเลิก" }).click();
+      await page.waitForSelector("dialog[open]", { state: "detached" });
+
+      await page.setViewportSize({ width: 360, height: 780 });
+      await noSideScroll(page, "/admin at 360px");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await touchTargets(page, "/admin");
+      await page.evaluate(() => document.querySelector("main")?.scrollTo(0, 0));
+      // the two repair-phase sections (the surgeon list below them reads Neon's HTTP driver, which this database lacks)
+      await ownerShot(page, "admin-repair.png", { tall: true, upTo: 'section[aria-labelledby="mx-title"]' });
+
+      // MX: the upload page and the links to it; the nurse is back to none
+      const mx = await htmlAs(RP.mx, "/upload");
+      assert(mx.status === 200 && mx.html.includes("อัปโหลดตารางผ่าตัด"), `/upload for MX -> ${mx.status}`);
+      assert((await htmlAs(RP.nurse, "/upload")).status === 404, "/upload for the nurse after the revoke");
+      assert((await htmlAs(RP.mx)).html.includes('href="/upload"'), "an upload link on MX's board");
+      for (const person of [RP.nurse, RP.drX]) assert(!(await htmlAs(person)).html.includes('href="/upload"'), "no upload link for others");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+    });
+
+    await t("doctor: books rooms with an HN; before an upload the board warns everyone and still lists the bookings, the HN for its doctor only", async () => {
+      setNow("2026-11-16T10:00:00+07:00");
+      const book = async (page, date, room, hn, operation, { shot = null } = {}) => {
+        await page.fill('[data-testid="case-date"]', date);
+        await page.click(`[data-testid="case-rooms"] label:has(input[value="${room}"])`);
+        await page.fill('[data-testid="add-case-dialog"] input[data-testid="case-hn"]', hn);
+        await page.fill('[data-testid="case-operation"]', operation);
+        if (shot) await shot();
+        await page.click('[data-testid="case-submit"]');
+        const expected = `จอง OR ${room.slice(3)} ${date === "2026-11-16" ? "วันจันทร์ที่ 16" : "วันอังคารที่ 17"} พ.ย. 2569 แล้ว`;
+        await page.waitForFunction(
+          (want) => document.querySelector('[data-testid="add-case-dialog"] [role="status"]')?.textContent?.trim() === want,
+          expected,
+        );
+      };
+      const ctx = await contextAs(RP.drX);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert((await textOf(page, '[data-testid="add-case-button"]')) === "จองห้อง", "the booking button");
+      await page.click('[data-testid="add-case-button"]');
+      await page.waitForSelector('[data-testid="add-case-dialog"][open]');
+      assert((await textOf(page, "#add-case-title")) === "จองห้องผ่าตัด", "dialog title");
+      assert((await page.inputValue('[data-testid="case-date"]')) === "2026-11-16", "the form starts on the board's day");
+      // no HN: refused before anything is sent, with the box marked
+      await page.click('[data-testid="case-submit"]');
+      await page.waitForSelector('[data-testid="add-case-dialog"] [role="alert"]');
+      assert((await page.getAttribute('[data-testid="add-case-dialog"] input[data-testid="case-hn"]', "aria-invalid")) === "true", "the HN box is marked");
+      await book(page, "2026-11-16", "or-11", HN_TODAY, "");
+      await book(page, "2026-11-17", "or-12", HN_X_MISSING, "Excision lipoma back");
+      await book(page, "2026-11-17", "or-13", HN_X_MATCH, "ORIF Lt distal radius", {
+        shot: async () => {
+          // the HN is saved in its matching form, and the form says so before saving
+          assert((await textOf(page, "#case-hn-saved")) === "บันทึกเป็น 71000002", `saved-as hint: ${await textOf(page, "#case-hn-saved")}`);
+          await page.evaluate(() => document.querySelector('[data-testid="add-case-dialog"]')?.scrollTo(0, 0));
+          await ownerShot(page, "booking-form.png");
+        },
+      });
+      const mine = await page.$$eval('[data-testid="my-case-hn"]', (els) => els.map((e) => e.textContent.trim()));
+      assert(JSON.stringify(mine) === JSON.stringify([`HN ${HN_TODAY}`, `HN ${HN_X_MISSING}`, "HN 71000002"]), `the doctor's bookings: ${JSON.stringify(mine)}`);
+      const rows = await db.query(
+        "SELECT c.op_date::text AS d, c.room_id, c.hn, coalesce(c.operation, '') AS op FROM cases c JOIN users u ON u.id = c.surgeon_id WHERE u.first_name || ' ' || u.last_name = $1 ORDER BY c.id",
+        [RP.drX.name],
+      );
+      assert(
+        JSON.stringify(rows.rows) ===
+          JSON.stringify([
+            { d: "2026-11-16", room_id: "or-11", hn: HN_TODAY, op: "" },
+            { d: "2026-11-17", room_id: "or-12", hn: HN_X_MISSING, op: "Excision lipoma back" },
+            { d: "2026-11-17", room_id: "or-13", hn: "71000002", op: "ORIF Lt distal radius" },
+          ]),
+        `stored bookings: ${JSON.stringify(rows.rows)}`,
+      );
+      // After 16:00 the form opens on the board's day, holidays stepped over: on Fri 4 Dec at 16:30 the board shows
+      // Tue 8 Dec (Mon 7 Dec is a holiday in the BOT stub), and so does the form, not the holiday.
+      setNow("2026-12-04T16:30:00+07:00");
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert((await page.getAttribute("header time", "datetime")) === "2026-12-08", "the board shows Tuesday 8 Dec");
+      await page.click('[data-testid="add-case-button"]');
+      await page.waitForSelector('[data-testid="add-case-dialog"][open]');
+      const startDay = await page.inputValue('[data-testid="case-date"]');
+      assert(startDay === "2026-12-08", `the form starts on the board's day, past the holiday: ${startDay}`);
+      setNow("2026-11-16T10:00:00+07:00");
+      await ctx.close();
+
+      // a second doctor books Tuesday too
+      const ctxY = await contextAs(RP.drY);
+      const pageY = await ctxY.newPage();
+      pageY.on("pageerror", (e) => errors.push(e.message));
+      await pageY.goto(`${APP}/`, { waitUntil: "networkidle" });
+      await pageY.click('[data-testid="add-case-button"]');
+      await pageY.waitForSelector('[data-testid="add-case-dialog"][open]');
+      await book(pageY, "2026-11-17", "or-12", HN_Y_MATCH, "");
+      await ctxY.close();
+
+      // the board (Monday, nothing uploaded): the alert for everyone, and the room still opens its booking
+      const nurse = await contextAs(RP.nurse);
+      const board = await nurse.newPage();
+      board.on("pageerror", (e) => errors.push(e.message));
+      await board.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert((await textOf(board, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569", "no-upload alert");
+      assert((await board.locator('[data-testid="mismatch-alert"]').count()) === 0, "nothing to compare yet");
+      await ownerShot(board, "board-no-upload.png");
+      await board.click("#or-11 .fp-floor");
+      await board.waitForSelector(".case-row");
+      assert(JSON.stringify(await sheetRows(board)) === JSON.stringify([["booking", null, null]]), `OR 11: ${JSON.stringify(await sheetRows(board))}`);
+      assert((await textOf(board, ".case-row p")).startsWith("จองห้อง (รอข้อมูล HOSxP)"), "a booking without an operation name");
+      // the chip's word, and the longer name a screen reader gets
+      assert((await textOf(board, '.case-row [data-source="booking"] span[aria-hidden="true"]')) === "จอง", "the booking chip");
+      assert((await textOf(board, '.case-row [data-source="booking"] .sr-only')) === "แพทย์จองห้อง", "the booking chip's spoken name");
+      await nurse.close();
+
+      // HN: the booking doctor sees theirs; nobody else gets another doctor's in the page at all
+      const nurseHtml = (await htmlAs(RP.nurse)).html;
+      const yHtml = (await htmlAs(RP.drY)).html;
+      const xHtml = (await htmlAs(RP.drX)).html;
+      for (const hn of [HN_TODAY, HN_X_MISSING, "71000002"]) {
+        assert(!nurseHtml.includes(hn), "no HN in the nurse's page");
+        assert(!yHtml.includes(hn), "no HN of doctor X's bookings in doctor Y's page");
+        assert(xHtml.includes(hn), "doctor X's own HNs in their page");
+      }
+      assert(yHtml.includes(HN_Y_MATCH) && !xHtml.includes(HN_Y_MATCH) && !nurseHtml.includes(HN_Y_MATCH), "doctor Y's HN only in their own page");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+    });
+
+    await t("MX upload: closed before 15:00; .xls refused; a file of other days refused; refused by the server at 16:00; accepted in the window, with its summary", async () => {
+      setNow("2026-11-16T14:30:00+07:00");
+      const ctx = await contextAs(RP.mx);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/upload`, { waitUntil: "networkidle" });
+      assert((await textOf(page, "header p")) === "ผู้จัดการตาราง", `MX's eyebrow: ${await textOf(page, "header p")}`);
+      assert((await textOf(page, "#upload-title")) === "ตารางของวันอังคารที่ 17 พฤศจิกายน 2569", `the target day: ${await textOf(page, "#upload-title")}`);
+      assert((await textOf(page, '[data-testid="upload-window"]')) === "ยังไม่เปิดรับ", "the window is not open yet");
+      assert(await page.isDisabled('[data-testid="upload-submit"]'), "MX cannot send before 15:00");
+      assert(!(await textOf(page, '[data-testid="upload-card"]')).includes("ผู้ดูแลอัปโหลดได้ทุกเวลา"), "no admin note for MX");
+      const admin = (await htmlAs(RP.admin, "/upload")).html;
+      assert(admin.includes("ผู้ดูแลอัปโหลดได้ทุกเวลา") && admin.includes("ผู้ดูแลระบบ"), "the admin may upload at any time");
+
+      setNow("2026-11-16T15:10:00+07:00");
+      await page.reload({ waitUntil: "networkidle" });
+      assert((await textOf(page, '[data-testid="upload-window"]')) === "เปิดรับอยู่", "open from 15:00");
+      assert(!(await page.isDisabled('[data-testid="upload-submit"]')), "MX can send now");
+      const result = async () => {
+        await page.waitForSelector('[data-testid="upload-result"]');
+        return textOf(page, '[data-testid="upload-result"]');
+      };
+      const send = async (file) => {
+        // choosing a file clears the last answer, so the answer waited for is this file's
+        await page.setInputFiles('[data-testid="upload-file"]', file);
+        await page.click('[data-testid="upload-submit"]');
+        await page.waitForFunction(
+          () => document.querySelector('[data-testid="upload-result"]') && document.querySelector('[data-testid="upload-submit"]')?.getAttribute("aria-busy") !== "true",
+        );
+        return result();
+      };
+      // an .xls is refused by its name before it is sent
+      await page.setInputFiles('[data-testid="upload-file"]', { name: "or-export.xls", mimeType: "application/vnd.ms-excel", buffer: OLE });
+      await page.waitForSelector("#upload-file-problem");
+      assert((await textOf(page, "#upload-file-problem")).includes("บันทึกเป็น .xlsx"), `xls by name: ${await textOf(page, "#upload-file-problem")}`);
+      // an .xls renamed .xlsx is refused by the server, which reads the file itself
+      assert((await send({ name: "or-export.xlsx", mimeType: XLSX_TYPE, buffer: OLE })).includes("บันทึกเป็น .xlsx"), "renamed xls refused");
+      // the whole sample holds several days: refused, and the message names the day it must be
+      const several = await send(SAMPLE_WORKBOOK);
+      assert(several.includes("ต้องเป็นวันที่ 17 พ.ย. 2569 ทุกแถว"), `a file of other days: ${several}`);
+      // the right file, but 16:00 has struck by the time it is sent: the server's clock decides
+      await page.setInputFiles('[data-testid="upload-file"]', E2E_WORKBOOK);
+      setNow("2026-11-16T16:00:00+07:00");
+      await page.click('[data-testid="upload-submit"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"]')?.textContent?.includes("15:00–16:00"));
+      assert((await result()) === "อัปโหลดได้เฉพาะเวลา 15:00–16:00 น.", `after 16:00: ${await result()}`);
+      assert((await db.query("SELECT count(*)::int AS n FROM workbook_uploads")).rows[0].n === 0, "nothing saved so far");
+
+      // inside the window: saved, and the page shows the upload with its summary and the matching
+      setNow("2026-11-16T15:20:00+07:00");
+      await page.click('[data-testid="upload-submit"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"] [role="status"]'));
+      assert(
+        (await result()) === "บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว ลงห้อง 7 จาก 7 เคส · ขึ้นกระดานเวลา 16:00 น.",
+        `saved: ${await result()}`,
+      );
+      await page.waitForSelector('[data-testid="upload-matching"]');
+      assert((await textOf(page, '[data-testid="upload-latest"] h2 + p')) === `15:20 น. · ${RP.mx.name}`, "when and by whom");
+      const stats = await page.$$eval('[data-testid="upload-latest"] dd', (els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
+      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "7 เคส", "6 รายการ"]), `counts: ${JSON.stringify(stats)}`);
+      const latest = await textOf(page, '[data-testid="upload-latest"]');
+      for (const line of ["ยกเลิกการผ่าตัด", "เคสของ รพ.นครท่าฉลอม", "OR 12 · GENSX", "ID ซ้ำ นับครั้งเดียว"]) assert(latest.includes(line), `summary shows ${line}`);
+      assert((await textOf(page, '[data-testid="upload-matching"]')) === "แพทย์จองไว้ 3 รายการ · ตรงกัน 2 รายการ", `matching: ${await textOf(page, '[data-testid="upload-matching"]')}`);
+      assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 5, "five HOSxP cases nobody booked");
+      const missing = await textOf(page, '[data-testid="upload-not-in-hosxp"]');
+      assert(missing.includes(`HN ${HN_X_MISSING}`) && missing.includes(RP.drX.name) && missing.includes("OR 12"), `the booking HOSxP does not list: ${missing}`);
+
+      // stored: one upload for Tuesday made on Monday, its cases with normalised HNs and nothing about the patient
+      const up = (await db.query("SELECT id, cycle_day::text AS c, target_date::text AS t, uploaded_by, uploader_name, file_name, total_rows, kept, placed FROM workbook_uploads")).rows;
+      assert(
+        up.length === 1 && up[0].c === "2026-11-16" && up[0].t === "2026-11-17" && up[0].uploaded_by === RP.mx.sub && up[0].uploader_name === RP.mx.name &&
+          up[0].file_name === "e2e-or-export.xlsx" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 7,
+        `upload row: ${JSON.stringify(up)}`,
+      );
+      const cases = (await db.query("SELECT row_to_json(w)::text AS j, hn, room_id FROM workbook_cases w WHERE upload_id = $1 ORDER BY position", [up[0].id])).rows;
+      assert(cases.length === 7 && cases.some((c) => c.hn === "71000015" && c.room_id === "or-12"), `stored cases: ${cases.length}`);
+      assert(cases.every((c) => !/ผู้ป่วย|ประกัน|690000|ปี \d/.test(c.j)), "no patient name, age, AN or cover stored");
+
+      await page.setViewportSize({ width: 360, height: 780 });
+      await noSideScroll(page, "/upload at 360px");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await touchTargets(page, "/upload");
+      await ownerShot(page, "upload-summary.png", { tall: true });
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+    });
+
+    await t("16:00: the board turns to Tuesday with the upload: HOSxP, จอง and ตรงกัน rows, flags, the mismatch alert; HN only for who may see it", async () => {
+      // until 16:00 the board keeps Monday: the upload is the next cycle's
+      setNow("2026-11-16T15:59:00+07:00");
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดวันนี้", "Monday's board until 16:00");
+      assert((await textOf(page, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569", "Monday has no upload of its own");
+
+      setNow("2026-11-16T16:30:00+07:00");
+      await page.reload({ waitUntil: "networkidle" });
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดพรุ่งนี้", "tomorrow's list");
+      assert((await page.getAttribute("header time", "datetime")) === "2026-11-17", "dated Tuesday");
+      assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "uploaded: no alert");
+      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 6 รายการ", `mismatch alert: ${await textOf(page, '[data-testid="mismatch-alert"]')}`);
+      for (const [room, flagged] of [["or-10", true], ["or-11", true], ["or-12", true], ["or-13", false]]) {
+        const label = (await page.getAttribute(`#${room} .fp-floor`, "aria-label")) ?? "";
+        assert(label.includes("ข้อมูลไม่ตรงกับการจอง") === flagged, `${room} mismatch mark: ${label}`);
+      }
+      await ownerShot(page, "board-after-upload.png");
+
+      // OR 12: two HOSxP cases nobody booked, doctor Y's booking matched, doctor X's booking HOSxP does not list
+      await page.goto(`${APP}/?room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".case-row");
+      assert(
+        JSON.stringify(await sheetRows(page)) ===
+          JSON.stringify([
+            ["hosxp", "unbooked", "HN 71000001"],
+            ["hosxp", "unbooked", "HN 71000003"],
+            ["matched", null, `HN ${HN_Y_MATCH}`],
+            ["booking", "not-in-hosxp", `HN ${HN_X_MISSING}`],
+          ]),
+        `OR 12 for the admin: ${JSON.stringify(await sheetRows(page))}`,
+      );
+      const chips = await page.$$eval(".case-row [data-source], .case-row [data-flag]", (els) =>
+        els.map((e) => (e.querySelector('span[aria-hidden="true"]') ?? e).textContent.trim()),
+      );
+      assert(
+        JSON.stringify(chips) === JSON.stringify(["HOSxP", "ไม่มีการจอง", "HOSxP", "ไม่มีการจอง", "ตรงกัน", "จอง", "ไม่พบใน HOSxP"]),
+        `source chips and flags: ${JSON.stringify(chips)}`,
+      );
+      assert((await page.locator(".case-row").nth(2).textContent()).includes("Total thyroidectomy"), "a matched row has the workbook's operation");
+      // the list scrolled to its end, so the booking row and its flag are in the picture too
+      await page.evaluate(() => {
+        const list = document.querySelector(".case-row")?.parentElement;
+        list?.scrollTo(0, list.scrollHeight);
+      });
+      await ownerShot(page, "room-sheet.png");
+      await page.goto(`${APP}/?room=or-13`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".case-row");
+      assert(JSON.stringify(await sheetRows(page)) === JSON.stringify([["matched", null, "HN 71000002"]]), `OR 13: ${JSON.stringify(await sheetRows(page))}`);
+
+      // the HN in each viewer's page: everything for MX, a doctor's own bookings only, none for a nurse
+      const html = {};
+      for (const key of ["mx", "nurse", "drX", "drY"]) html[key] = (await htmlAs(RP[key])).html;
+      const placed = ["71000001", "71000002", "71000003", "71000010", "71000011", "71000014", "71000015", HN_X_MISSING];
+      for (const hn of placed) assert(html.mx.includes(hn), `MX sees ${hn}`);
+      for (const hn of [...WORKBOOK_HNS, HN_TODAY, HN_X_MISSING]) assert(!html.nurse.includes(hn), "no HN in the nurse's page");
+      for (const hn of WORKBOOK_HNS.filter((h) => h !== "71000002")) assert(!html.drX.includes(hn), "doctor X gets no HN but their own");
+      for (const hn of [...WORKBOOK_HNS.filter((h) => h !== HN_Y_MATCH), HN_TODAY, HN_X_MISSING]) assert(!html.drY.includes(hn), "doctor Y gets no HN but their own");
+      assert(html.drX.includes(HN_X_MISSING) && html.drX.includes("71000002") && html.drY.includes(HN_Y_MATCH), "each doctor's own HNs");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+      rmSync(NOW_FILE, { force: true });
+    });
+
+    await t("no OTP code, deeSMSX token, key, HN or workbook row appears in server logs", async () => {
       assert(issuedCodes.length >= 20, `codes and tokens collected: ${issuedCodes.length}`);
       for (const proc of [app, fileApp].filter(Boolean)) {
         const log = proc.log();
@@ -2028,6 +2592,10 @@ async function main() {
         assert(!log.includes(SESSION_SECRET) && !log.includes(OTP_PEPPER) && !log.includes(TG_TOKEN), `secret in the ${proc.name} log`);
         assert(!log.includes(SMS_API_KEY) && !log.includes(SMS_SECRET_KEY), `deeSMSX key in the ${proc.name} log`);
         assert(webhookSecret && !log.includes(webhookSecret), `webhook secret in the ${proc.name} log`);
+        assert(!log.includes(BOT_TOKEN), `the holidays token in the ${proc.name} log`);
+        // no HN and nothing of a workbook row (patients' made-up names, operations) is ever logged
+        for (const hn of [...WORKBOOK_HNS, HN_TODAY, HN_X_MISSING]) assert(!log.includes(hn), `an HN in the ${proc.name} log`);
+        assert(!/ตัวอย่าง|cholecystectomy|thyroidectomy/i.test(log), `a workbook row in the ${proc.name} log`);
       }
       assert(/\[sms\] deeSMSX OTP request failed: code 102/.test(app.log()), "provider failures are logged by reference code");
     });

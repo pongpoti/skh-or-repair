@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WEEK_DATA } from "../data/week-data.ts";
 import { boardHref, DAY_KEYS, DAY_NAMES, parseDay, thaiDate, todayIso, weekDates, workdayIndex } from "./days.ts";
+import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { boardFor, isDressingCase, isScopeCase, resolveSurgeon, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
+
+// These weeks are before the ventilation repair, so the weekly schedule places the cases (lib/repair.test.ts and
+// lib/placement.test.ts cover the repair).
+const REPAIR = DEFAULT_REPAIR_PERIODS;
 
 function fixture(cases: Partial<WeekCase>[]): WeekFile {
   return {
@@ -14,13 +19,13 @@ function fixture(cases: Partial<WeekCase>[]): WeekFile {
   };
 }
 const GENSX_SURGEON = "ขจรศักดิ์ โภคสมบัติ";
-const roomsOf = (data: WeekFile, day = 0) => weekBoard(data)[day].operations.map((item) => item.roomId);
+const roomsOf = (data: WeekFile, day = 0) => weekBoard(data, REPAIR)[day].operations.map((item) => item.roomId);
 
 test("the export week runs Monday to Friday", () => {
   assert.deepEqual([...DAY_NAMES], ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]);
   assert.deepEqual([...DAY_KEYS], ["mon", "tue", "wed", "thu", "fri"]);
-  assert.deepEqual(weekBoard().map((day) => day.name), [...DAY_NAMES]);
-  assert.deepEqual(weekBoard(fixture([])).map((day) => day.date), ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"]);
+  assert.deepEqual(weekBoard(WEEK_DATA, REPAIR).map((day) => day.name), [...DAY_NAMES]);
+  assert.deepEqual(weekBoard(fixture([]), REPAIR).map((day) => day.date), ["2026-09-28", "2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"]);
   assert.deepEqual(weekDates("2026-10-29"), ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"]);
   assert.deepEqual(weekDates("2026-11-01"), ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"]); // Sunday
   assert.deepEqual(weekDates("2026-12-31"), ["2026-12-28", "2026-12-29", "2026-12-30", "2026-12-31", "2027-01-01"]); // across the year end
@@ -40,9 +45,9 @@ test("shows today's date in Thailand and that weekday's cases", () => {
   assert.equal(workdayIndex("2026-11-01"), null);
   assert.equal(thaiDate("2026-10-27"), "วันอังคารที่ 27 ตุลาคม 2569");
   assert.equal(thaiDate("2026-11-26", "short"), "วันพฤหัสบดีที่ 26 พ.ย. 2569");
-  assert.equal(boardFor("2026-10-27")?.key, "tue");
-  assert.equal(boardFor("2026-10-31"), null);
-  assert.equal(boardFor("2026-10-31", 2)?.key, "wed");
+  assert.equal(boardFor("2026-10-27", REPAIR)?.key, "tue");
+  assert.equal(boardFor("2026-10-31", REPAIR), null);
+  assert.equal(boardFor("2026-10-31", REPAIR, 2)?.key, "wed");
 });
 
 test("builds room links and keeps other parameters", () => {
@@ -55,18 +60,18 @@ test("builds room links and keeps other parameters", () => {
 test("no case data is loaded, so today's board is empty and follows this week's allocation", () => {
   assert.equal(WEEK_DATA.cases.length, 0);
   assert.deepEqual(WEEK_DATA.meta.days, []);
-  const today = boardFor("2026-10-27");
+  const today = boardFor("2026-10-27", REPAIR);
   assert.equal(today?.date, "2026-10-27");
   assert.deepEqual(today?.operations, []);
-  assert.equal(boardFor("2026-10-27", 4)?.date, "2026-10-30"); // the preview's ?day=fri shows this week's Friday
+  assert.equal(boardFor("2026-10-27", REPAIR, 4)?.date, "2026-10-30"); // the preview's ?day=fri shows this week's Friday
 });
 
 test("every placed case lands in an OR", () => {
   const data = fixture([{ dept: "GENSX" }, { day: 2, dept: "ORTHO" }, { day: 4, dept: "EYE", proc: "dressing" }]);
-  for (const day of weekBoard(data)) {
+  for (const day of weekBoard(data, REPAIR)) {
     for (const item of day.operations) assert.match(item.roomId, /^or-(1[0-3]|[1-9])$/);
   }
-  assert.equal(weekBoard(data).reduce((sum, day) => sum + day.operations.length, 0), 3);
+  assert.equal(weekBoard(data, REPAIR).reduce((sum, day) => sum + day.operations.length, 0), 3);
 });
 
 test("keeps no patient fields in the case data", () => {
@@ -106,14 +111,14 @@ test("a department with several rooms is pooled across them", () => {
 
 test("a case whose department holds no room that day is left off the board", () => {
   // Cardiothoracic surgery has no room on Tuesday.
-  const day = weekBoard(fixture([{ day: 1, dept: "CVT" }, { day: 1, dept: "GENSX" }]))[1];
+  const day = weekBoard(fixture([{ day: 1, dept: "CVT" }, { day: 1, dept: "GENSX" }]), REPAIR)[1];
   assert.equal(day.operations.length, 1);
   assert.notEqual(day.operations[0].roomId, "");
   assert.deepEqual(day.operations.map((item) => item.order), [1]);
 });
 
 test("orders each room's cases and tells the surgeon's department", () => {
-  const day = weekBoard(fixture([{ dept: "GENSX", surgeon: GENSX_SURGEON, proc: "EGD" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "ERCP" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "hernia" }]))[0];
+  const day = weekBoard(fixture([{ dept: "GENSX", surgeon: GENSX_SURGEON, proc: "EGD" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "ERCP" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "hernia" }]), REPAIR)[0];
   assert.deepEqual(day.operations.map((item) => [item.roomId, item.order]), [["or-3", 1], ["or-3", 2], ["or-2", 1]]);
   assert.equal(day.operations[0].specialty, "ศัลยกรรม · GENSX");
 });
