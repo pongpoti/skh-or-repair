@@ -33,7 +33,7 @@ export function SignOutButton({ showLabel = false }: { showLabel?: boolean }) {
     } finally {
       // Full page load on purpose: drops the client router cache that may hold protected data.
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-      window.location.assign("/login");
+      window.location.assign("/login?signed_out=1");
     }
   }
 
