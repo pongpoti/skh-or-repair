@@ -111,6 +111,24 @@ describe("verifyIdToken against a stub verify endpoint", () => {
     assert.equal(lastForm?.get("nonce"), "the-nonce");
   });
 
+  test("a LIFF ID token (no nonce of ours): posts no nonce, still checks iss, aud, exp and sub", async () => {
+    status = 200;
+    claims = { ...good(), nonce: undefined };
+    const p = await verifyIdToken(lineConfig(), "liff.id.token", null);
+    assert.equal(p.sub, "U0123456789abcdef");
+    assert.equal(lastForm?.get("id_token"), "liff.id.token");
+    assert.equal(lastForm?.has("nonce"), false);
+    for (const [name, c] of [
+      ["iss", { ...good(), iss: "https://evil.test" }],
+      ["aud", { ...good(), aud: "999" }],
+      ["exp", { ...good(), exp: Math.floor(Date.now() / 1000) - 1 }],
+      ["sub", { ...good(), sub: "../etc" }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      claims = c;
+      await assert.rejects(verifyIdToken(lineConfig(), "t", null), Error, name);
+    }
+  });
+
   test("rejects wrong iss, aud, expired token, nonce mismatch, bad sub and HTTP errors", async () => {
     status = 200;
     const cases: Array<[string, Record<string, unknown>]> = [

@@ -1,15 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isAuthorizedDoctor, isAuthorizedPhone } from "@/lib/authz";
+import { lineSignIn } from "@/lib/auth/line-signin";
 import { clearCookie, cookieName, setCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
-import { freshEmailClaim } from "@/lib/email-otp";
 import { appUrl, ConfigError, lineConfig, sessionSecret } from "@/lib/env";
 import { redirectToError, type ErrorCode } from "@/lib/http";
 import { GATE_PATH, clientAllowed, gateMode } from "@/lib/gate";
 import { exchangeCode, LineAuthError, verifyIdToken } from "@/lib/line";
-import { findFreshBinding, logEvent, touchBinding } from "@/lib/otp";
 import { clientIp, safeEqual, safeNextPath, userAgent } from "@/lib/security";
-import { openTx, signPending, signSession } from "@/lib/tokens";
+import { openTx } from "@/lib/tokens";
 
 function fail(req: NextRequest, code: ErrorCode): NextResponse {
   const res = redirectToError(req, code);
@@ -48,8 +46,6 @@ export async function GET(req: NextRequest) {
     const profile = await verifyIdToken(cfg, idToken, tx.nonce);
     const next = safeNextPath(tx.next);
 
-    // Fast path: this LINE account was verified by an SMS code within 180 days and the number is still
-    // authorized (a claimed name on the users list, an approved access request, or ALLOWED_PHONES).
     let pool;
     try {
       pool = await db();
@@ -58,50 +54,19 @@ export async function GET(req: NextRequest) {
       console.error("[auth] database unavailable:", (e as Error).message);
       return fail(req, "config");
     }
-    const signIn = (token: string) => {
-      const res = NextResponse.redirect(new URL(next, origin), 303);
-      res.headers.set("Cache-Control", "no-store");
-      clearCookie(res, "tx");
-      clearCookie(res, "pending");
-      clearCookie(res, "access");
-      setCookie(res, "session", token);
-      return res;
-    };
-    // A doctor whose email code was checked by this LINE account within 180 days, still holding the (active) name.
-    const doctorId = await freshEmailClaim(pool, profile.sub);
-    if (doctorId && (await isAuthorizedDoctor(doctorId, profile.sub))) {
-      await logEvent(pool, {
-        event: "login_email_binding",
-        sub: profile.sub,
-        ip: clientIp(req.headers),
-        userAgent: userAgent(req.headers),
-      });
-      return signIn(
-        await signSession({ sub: profile.sub, phone: null, userId: doctorId, name: profile.name, picture: profile.picture }, secret),
-      );
-    }
-    const binding = await findFreshBinding(pool, profile.sub);
-    if (binding && (await isAuthorizedPhone(binding.phone))) {
-      await touchBinding(pool, profile.sub, profile.name);
-      await logEvent(pool, {
-        event: "login_binding",
-        sub: profile.sub,
-        phone: binding.phone,
-        ip: clientIp(req.headers),
-        userAgent: userAgent(req.headers),
-      });
-      return signIn(
-        await signSession({ sub: profile.sub, phone: binding.phone, userId: null, name: profile.name, picture: profile.picture }, secret),
-      );
-    }
-
-    // Otherwise: prove a mobile number first (then sign in, or request access if it is not authorized), or, for a
+    const result = await lineSignIn(pool, profile, next, secret, { ip: clientIp(req.headers), userAgent: userAgent(req.headers) });
+    // Signed in, or: prove a mobile number first (then sign in, or request access if it is not authorized), or, for a
     // doctor, their name by an email code (/login/doctor, linked from /login/verify).
-    const pending = await signPending({ sub: profile.sub, name: profile.name, picture: profile.picture, next }, secret);
-    const res = NextResponse.redirect(new URL("/login/verify", origin), 303);
+    const res = NextResponse.redirect(new URL(result.kind === "session" ? next : "/login/verify", origin), 303);
     res.headers.set("Cache-Control", "no-store");
     clearCookie(res, "tx");
-    setCookie(res, "pending", pending);
+    if (result.kind === "session") {
+      clearCookie(res, "pending");
+      clearCookie(res, "access");
+      setCookie(res, "session", result.token);
+    } else {
+      setCookie(res, "pending", result.token);
+    }
     return res;
   } catch (e) {
     if (e instanceof ConfigError) {
