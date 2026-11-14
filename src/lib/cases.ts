@@ -2,7 +2,7 @@ import "server-only";
 import type { Pool, PoolClient } from "pg";
 import type { AddedCase, CaseInput } from "./added-cases";
 import type { Shift } from "./schedule";
-import { fullName, userForPhone, type ListedUser } from "./user-list";
+import { fullName, userForPhone, userForSession, type ListedUser, type SessionIdentity } from "./user-list";
 
 type Q = Pool | PoolClient;
 
@@ -41,9 +41,12 @@ function toCase(r: CaseRow): AddedCase {
   };
 }
 
-/** The doctor whose current claim holds this number, or null for anyone else (nurses, approved requests, ALLOWED_PHONES). */
-export async function doctorFor(pool: Q, phone: string): Promise<ListedUser | null> {
-  const user = await userForPhone(pool, phone);
+/**
+ * The doctor whose current claim holds this number (or this session: a doctor signed in by email), or null for anyone
+ * else (nurses, approved requests, ALLOWED_PHONES).
+ */
+export async function doctorFor(pool: Q, who: string | SessionIdentity): Promise<ListedUser | null> {
+  const user = typeof who === "string" ? await userForPhone(pool, who) : await userForSession(pool, who);
   return user?.type === "DR" ? user : null;
 }
 

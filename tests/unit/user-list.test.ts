@@ -94,13 +94,14 @@ describe("users and claims (database)", () => {
   const usersSnapshot = async () => (await pool.query("SELECT * FROM users ORDER BY id")).rows;
 
   async function load() {
-    await pool.query("TRUNCATE cases, user_claims, users, line_bindings, login_events, access_requests RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY");
     const { rows } = await pool.query<{ id: string; key: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype, active) VALUES
-         ('สมชาย', 'ใจดี', 'DR', 'ORTHO', true),
-         ('กมล', 'ทองดี', 'DR', 'OBGYN', true),
-         ('ชัยวัฒน์', 'มีสุข', 'DR', 'NEURO', true),
-         ('เกษียณ', 'แล้ว', 'DR', 'EYE', false),
+         ('สมชาย', 'ใจดี', 'PCA', 'OR', true),
+         ('กมล', 'ทองดี', 'PCA', 'ANES', true),
+         ('ชัยวัฒน์', 'มีสุข', 'PCA', 'ICU', true),
+         ('เกษียณ', 'แล้ว', 'PCA', 'OR', false),
+         ('หมอ', 'อีเมล', 'DR', 'ORTHO', true),
          ('ปราณี', 'สายบุญ', 'RN', 'OR', true),
          ('วิไล', 'แสงทอง', 'RN', 'ANES', true),
          ('สมชาย', 'ใจงาม', 'RN', 'OR', true)
@@ -118,21 +119,21 @@ describe("users and claims (database)", () => {
     await load();
   });
   after(async () => {
-    await pool.query("TRUNCATE cases, user_claims, users, line_bindings, login_events, access_requests RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY");
     await pool.end();
   });
 
   test("listClaimable: active names of one type in Thai order, whether taken (a current claim), and nothing else", async () => {
-    await hold(ids["DR:กมล"], "0900000201", "U-secret");
-    const undone = await hold(ids["DR:สมชาย"], "0900000203", "U-old");
+    await hold(ids["PCA:กมล"], "0900000201", "U-secret");
+    const undone = await hold(ids["PCA:สมชาย"], "0900000203", "U-old");
     await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE id = $1", [undone.rows[0].id]);
-    const list = await listClaimable(pool, "DR");
+    const list = await listClaimable(pool, "PCA");
     assert.deepEqual(
       list.map((n) => [n.first_name, n.last_name, n.subtype, n.claimed]),
       [
-        ["กมล", "ทองดี", "OBGYN", true],
-        ["ชัยวัฒน์", "มีสุข", "NEURO", false],
-        ["สมชาย", "ใจดี", "ORTHO", false],
+        ["กมล", "ทองดี", "ANES", true],
+        ["ชัยวัฒน์", "มีสุข", "ICU", false],
+        ["สมชาย", "ใจดี", "OR", false],
       ],
     );
     for (const n of list) assert.deepEqual(Object.keys(n).sort(), ["claimed", "first_name", "id", "last_name", "subtype"]);
@@ -143,18 +144,18 @@ describe("users and claims (database)", () => {
   test("claim: one user_claims row (users untouched); the number is then authorized and named from users", async () => {
     const before = await usersSnapshot();
     assert.equal(await isAuthorizedPhone("0900000202"), false);
-    const r = await claimUser(pool, args(ids["DR:สมชาย"], "0900000202", "U-a"));
+    const r = await claimUser(pool, args(ids["PCA:สมชาย"], "0900000202", "U-a"));
     assert.equal(r.status, "claimed");
     assert.ok(r.status === "claimed");
-    assert.deepEqual(r.user, { id: ids["DR:สมชาย"], firstName: "สมชาย", lastName: "ใจดี", type: "DR", subtype: "ORTHO" });
-    assert.equal(r.claim.userId, ids["DR:สมชาย"]);
+    assert.deepEqual(r.user, { id: ids["PCA:สมชาย"], firstName: "สมชาย", lastName: "ใจดี", type: "PCA", subtype: "OR" });
+    assert.equal(r.claim.userId, ids["PCA:สมชาย"]);
     assert.equal(r.claim.phone, "0900000202");
     assert.equal(r.claim.lineSub, "U-a");
     assert.equal(r.claim.lineName, "LINE U-a");
     assert.equal(r.claim.undoneAt, null);
     assert.equal(r.claim.undoReason, null);
     assert.deepEqual(await usersSnapshot(), before, "users is never written");
-    assert.deepEqual(await current(ids["DR:สมชาย"]), { phone: "0900000202", line_sub: "U-a" });
+    assert.deepEqual(await current(ids["PCA:สมชาย"]), { phone: "0900000202", line_sub: "U-a" });
     assert.deepEqual(await userForPhone(pool, "0900000202"), r.user);
     assert.equal(await holdsActiveName(pool, "0900000202"), true);
     assert.deepEqual([...(await activePhones(pool))], ["0900000202"]);
@@ -166,23 +167,23 @@ describe("users and claims (database)", () => {
     const b = await pool.query("SELECT line_sub, display_name FROM line_bindings WHERE phone = '0900000202'");
     assert.deepEqual(b.rows, [{ line_sub: "U-a", display_name: "LINE U-a" }]);
     // a current claim on an inactive user authorizes nothing (and names nothing)
-    await pool.query("UPDATE users SET active = false WHERE id = $1", [ids["DR:สมชาย"]]);
+    await pool.query("UPDATE users SET active = false WHERE id = $1", [ids["PCA:สมชาย"]]);
     assert.equal(await holdsActiveName(pool, "0900000202"), false);
     assert.equal(await userForPhone(pool, "0900000202"), null);
     assert.equal((await activePhones(pool)).size, 0);
     assert.equal(await isAuthorizedPhone("0900000202", { fresh: true }), false);
     // back on the list: the same claim authorizes again
-    await pool.query("UPDATE users SET active = true WHERE id = $1", [ids["DR:สมชาย"]]);
+    await pool.query("UPDATE users SET active = true WHERE id = $1", [ids["PCA:สมชาย"]]);
     assert.equal(await isAuthorizedPhone("0900000202", { fresh: true }), true);
   });
 
   test("first claim wins under concurrency; the others are told the name is taken", async () => {
     const results = await Promise.all(
-      Array.from({ length: 6 }, (_, i) => claimUser(pool, args(ids["DR:กมล"], `09000003${String(i).padStart(2, "0")}`, `U-race-${i}`))),
+      Array.from({ length: 6 }, (_, i) => claimUser(pool, args(ids["PCA:กมล"], `09000003${String(i).padStart(2, "0")}`, `U-race-${i}`))),
     );
     assert.equal(results.filter((r) => r.status === "claimed").length, 1, JSON.stringify(results.map((r) => r.status)));
     assert.equal(results.filter((r) => r.status === "taken").length, 5);
-    const { rows } = await pool.query("SELECT count(*)::int AS n FROM user_claims WHERE user_id = $1", [ids["DR:กมล"]]);
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM user_claims WHERE user_id = $1", [ids["PCA:กมล"]]);
     assert.equal(rows[0].n, 1, "one claim recorded");
     const failed = await pool.query("SELECT count(*)::int AS n FROM login_events WHERE event = 'claim_failed'");
     assert.equal(failed.rows[0].n, 5, "lost attempts are counted");
@@ -194,22 +195,22 @@ describe("users and claims (database)", () => {
       claimUser(pool, args(ids["RN:วิไล"], "0900000204", "U-b2")),
     ]);
     assert.deepEqual(both.map((r) => r.status).sort(), ["claimed", "phone_has_claim"]);
-    const again = await claimUser(pool, args(ids["DR:ชัยวัฒน์"], "0900000204", "U-b"));
+    const again = await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000204", "U-b"));
     assert.equal(again.status, "phone_has_claim");
     // a name someone else holds reads "taken" first, even for a number (and a LINE account) that holds a name
-    assert.equal((await claimUser(pool, args(ids["DR:กมล"], "0900000219", "U-z"))).status, "claimed");
-    assert.equal((await claimUser(pool, args(ids["DR:กมล"], "0900000204", "U-b"))).status, "taken");
+    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000219", "U-z"))).status, "claimed");
+    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000204", "U-b"))).status, "taken");
   });
 
   test("a current claim on a deactivated user (e.g. a corrected spelling) is closed as 'inactive', without a block, when the person claims again", async () => {
-    const old = await hold(ids["DR:เกษียณ"], "0900000205", "U-c");
+    const old = await hold(ids["PCA:เกษียณ"], "0900000205", "U-c");
     const before = await usersSnapshot();
     // a lost attempt changes nothing on the old claim
-    await hold(ids["DR:กมล"], "0900000250", "U-c-other");
-    assert.equal((await claimUser(pool, args(ids["DR:กมล"], "0900000205", "U-c"))).status, "taken");
+    await hold(ids["PCA:กมล"], "0900000250", "U-c-other");
+    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000205", "U-c"))).status, "taken");
     assert.equal((await getClaim(pool, old.rows[0].id))?.undoneAt, null, "kept after a failed claim");
     // the claim of the corrected name goes through, and is not blocked (no undo was needed)
-    const r = await claimUser(pool, args(ids["DR:ชัยวัฒน์"], "0900000205", "U-c"));
+    const r = await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000205", "U-c"));
     assert.equal(r.status, "claimed");
     const closed = await getClaim(pool, old.rows[0].id);
     assert.ok(closed?.undoneAt instanceof Date);
@@ -218,23 +219,23 @@ describe("users and claims (database)", () => {
     assert.equal(await claimBlocked(pool, "0900000205", "U-c"), false, "'inactive' never blocks");
     assert.deepEqual(await userForPhone(pool, "0900000205"), r.status === "claimed" ? r.user : null);
     // the same for a LINE account whose only name went inactive
-    await pool.query("UPDATE users SET active = false WHERE id = $1", [ids["DR:ชัยวัฒน์"]]);
-    assert.equal((await claimUser(pool, args(ids["DR:สมชาย"], "0900000251", "U-c"))).status, "claimed");
+    await pool.query("UPDATE users SET active = false WHERE id = $1", [ids["PCA:ชัยวัฒน์"]]);
+    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000251", "U-c"))).status, "claimed");
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM user_claims WHERE line_sub = 'U-c' AND undone_at IS NULL");
     assert.equal(rows[0].n, 1);
     assert.equal(await claimBlocked(pool, "0900000251", "U-c"), false);
     // users was only read (the test's own deactivation aside)
-    await pool.query("UPDATE users SET active = true WHERE id = $1", [ids["DR:ชัยวัฒน์"]]);
+    await pool.query("UPDATE users SET active = true WHERE id = $1", [ids["PCA:ชัยวัฒน์"]]);
     const after = await usersSnapshot();
     assert.deepEqual(after.map((u) => [u.id, u.active]), before.map((u) => [u.id, u.active]));
   });
 
   test("one LINE account claims one name, also with a second verified number and when it races itself", async () => {
-    const first = await claimUser(pool, args(ids["DR:สมชาย"], "0900000260", "U-two"));
+    const first = await claimUser(pool, args(ids["PCA:สมชาย"], "0900000260", "U-two"));
     assert.equal(first.status, "claimed");
-    const second = await claimUser(pool, args(ids["DR:กมล"], "0900000261", "U-two"));
+    const second = await claimUser(pool, args(ids["PCA:กมล"], "0900000261", "U-two"));
     assert.equal(second.status, "line_has_claim");
-    assert.equal(await current(ids["DR:กมล"]), null);
+    assert.equal(await current(ids["PCA:กมล"]), null);
     const race = await Promise.all([
       claimUser(pool, args(ids["RN:ปราณี"], "0900000262", "U-race2")),
       claimUser(pool, args(ids["RN:วิไล"], "0900000263", "U-race2")),
@@ -244,14 +245,14 @@ describe("users and claims (database)", () => {
 
   test("the partial unique indexes: one current claim per user, per number and per LINE account; ended claims do not count", async () => {
     const code = (constraint: string) => (e: { code?: string; constraint?: string }) => e.code === "23505" && e.constraint === constraint;
-    const a = await hold(ids["DR:สมชาย"], "0900000265", "U-idx");
-    await assert.rejects(hold(ids["DR:สมชาย"], "0900000266", "U-idx2"), code("user_claims_current_user_key"));
-    await assert.rejects(hold(ids["DR:กมล"], "0900000265", "U-idx2"), code("user_claims_current_phone_key"));
-    await assert.rejects(hold(ids["DR:กมล"], "0900000266", "U-idx"), code("user_claims_current_line_sub_key"));
+    const a = await hold(ids["PCA:สมชาย"], "0900000265", "U-idx");
+    await assert.rejects(hold(ids["PCA:สมชาย"], "0900000266", "U-idx2"), code("user_claims_current_user_key"));
+    await assert.rejects(hold(ids["PCA:กมล"], "0900000265", "U-idx2"), code("user_claims_current_phone_key"));
+    await assert.rejects(hold(ids["PCA:กมล"], "0900000266", "U-idx"), code("user_claims_current_line_sub_key"));
     await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE id = $1", [a.rows[0].id]);
-    await hold(ids["DR:สมชาย"], "0900000265", "U-idx");
+    await hold(ids["PCA:สมชาย"], "0900000265", "U-idx");
     await assert.rejects(hold("999999", "0900000267", "U-idx3"), (e: { code?: string }) => e.code === "23503");
-    await assert.rejects(hold(ids["DR:กมล"], "081-234-5678", "U-idx3"), (e: { code?: string }) => e.code === "23514");
+    await assert.rejects(hold(ids["PCA:กมล"], "081-234-5678", "U-idx3"), (e: { code?: string }) => e.code === "23514");
     // an ended claim names its reason, and a current one has none
     await assert.rejects(
       pool.query("UPDATE user_claims SET undone_at = now() WHERE undone_at IS NULL"),
@@ -264,32 +265,32 @@ describe("users and claims (database)", () => {
   });
 
   test("retrying one's own claim (another tab, a lost answer) signs in: no new claim, no attempt counted, the binding is kept", async () => {
-    const r = await claimUser(pool, args(ids["DR:สมชาย"], "0900000270", "U-own"));
+    const r = await claimUser(pool, args(ids["PCA:สมชาย"], "0900000270", "U-own"));
     assert.ok(r.status === "claimed");
     await pool.query("DELETE FROM line_bindings");
-    const again = await claimUser(pool, args(ids["DR:สมชาย"], "0900000270", "U-own"));
+    const again = await claimUser(pool, args(ids["PCA:สมชาย"], "0900000270", "U-own"));
     assert.equal(again.status, "own_claim");
-    assert.ok(again.status === "own_claim" && again.user.id === ids["DR:สมชาย"]);
+    assert.ok(again.status === "own_claim" && again.user.id === ids["PCA:สมชาย"]);
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM user_claims")).rows[0].n, 1);
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM login_events WHERE event = 'claim_failed'")).rows[0].n, 0);
     assert.equal((await pool.query("SELECT phone FROM line_bindings WHERE line_sub = 'U-own'")).rows[0]?.phone, "0900000270");
     // another number picking that name: taken
-    assert.equal((await claimUser(pool, args(ids["DR:สมชาย"], "0900000271", "U-other"))).status, "taken");
+    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000271", "U-other"))).status, "taken");
   });
 
   test("a claim and an access request of one number exclude each other (in either order and at once)", async () => {
     const req = (phone: string, sub: string) =>
       createRequest(pool, { phone, sub, lineName: "x", firstName: "ทดสอบ", lastName: "ระบบ", position: "RN", ip: "203.0.113.7" });
     // claim first: the request is refused, the number signs in with its name
-    assert.equal((await claimUser(pool, args(ids["DR:สมชาย"], "0900000280", "U-cr"))).status, "claimed");
+    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000280", "U-cr"))).status, "claimed");
     assert.deepEqual(await req("0900000280", "U-cr"), { status: "exists", view: "signin" });
     // request first: the claim is refused (pending, approved, recently rejected) and no attempt is counted
     const pending = await req("0900000281", "U-rc");
     assert.equal(pending.status, "created");
-    assert.equal((await claimUser(pool, args(ids["DR:กมล"], "0900000281", "U-rc"))).status, "requested");
+    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000281", "U-rc"))).status, "requested");
     assert.ok(pending.status === "created");
     await decideRequest(pool, pending.request.id, "approved", "111");
-    assert.equal((await claimUser(pool, args(ids["DR:กมล"], "0900000281", "U-rc"))).status, "requested");
+    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000281", "U-rc"))).status, "requested");
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM login_events WHERE phone = '0900000281'")).rows[0].n, 0);
     // at once: exactly one goes through
     for (let i = 0; i < 4; i++) {
@@ -304,32 +305,32 @@ describe("users and claims (database)", () => {
   });
 
   test("inactive and unknown names are refused", async () => {
-    assert.equal((await claimUser(pool, args(ids["DR:เกษียณ"], "0900000206", "U-d"))).status, "unavailable");
+    assert.equal((await claimUser(pool, args(ids["PCA:เกษียณ"], "0900000206", "U-d"))).status, "unavailable");
     assert.equal((await claimUser(pool, args("999999", "0900000206", "U-d"))).status, "unavailable");
-    assert.equal(await current(ids["DR:เกษียณ"]), null);
+    assert.equal(await current(ids["PCA:เกษียณ"]), null);
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM login_events WHERE event = 'claim_failed'")).rows[0].n, 2);
   });
 
   test(`rate limit: ${CLAIM_LIMITS.perSubDay} attempts per LINE account and ${CLAIM_LIMITS.perPhoneDay} per number in 24 h`, async () => {
-    await hold(ids["DR:กมล"], "0900000299", "U-holder"); // taken
+    await hold(ids["PCA:กมล"], "0900000299", "U-holder"); // taken
     for (let i = 0; i < CLAIM_LIMITS.perSubDay; i++) {
-      assert.equal((await claimUser(pool, args(ids["DR:กมล"], `09000004${i}0`, "U-many"))).status, "taken");
+      assert.equal((await claimUser(pool, args(ids["PCA:กมล"], `09000004${i}0`, "U-many"))).status, "taken");
     }
-    const limited = await claimUser(pool, args(ids["DR:สมชาย"], "0900000499", "U-many"));
+    const limited = await claimUser(pool, args(ids["PCA:สมชาย"], "0900000499", "U-many"));
     assert.equal(limited.status, "limited", "even for a free name");
     assert.ok(limited.status === "limited" && limited.retryAfterS > 23 * 3600 && limited.retryAfterS <= 24 * 3600);
     // per number, across LINE accounts
     for (let i = 0; i < CLAIM_LIMITS.perPhoneDay; i++) {
-      assert.equal((await claimUser(pool, args(ids["DR:กมล"], "0900000498", `U-acct-${i}`))).status, "taken");
+      assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000498", `U-acct-${i}`))).status, "taken");
     }
-    assert.equal((await claimUser(pool, args(ids["DR:สมชาย"], "0900000498", "U-fresh"))).status, "limited");
+    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000498", "U-fresh"))).status, "limited");
     // older than 24 h: free again
     await pool.query("UPDATE login_events SET at = now() - interval '25 hours'");
-    assert.equal((await claimUser(pool, args(ids["DR:สมชาย"], "0900000499", "U-many"))).status, "claimed");
+    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000499", "U-many"))).status, "claimed");
   });
 
   test("undo ends the claim ('admin'), frees the name, deletes the number's LINE bindings and blocks a new claim by that number or account for 24 h", async () => {
-    const r = await claimUser(pool, args(ids["DR:สมชาย"], "0900000207", "U-e"));
+    const r = await claimUser(pool, args(ids["PCA:สมชาย"], "0900000207", "U-e"));
     assert.ok(r.status === "claimed");
     await upsertBinding(pool, "U-e", "0900000207", "LINE U-e");
     await upsertBinding(pool, "U-e-phone2", "0900000207", "second device");
@@ -343,32 +344,32 @@ describe("users and claims (database)", () => {
     assert.ok(u.claim.undoneAt instanceof Date);
     assert.equal(u.user.firstName, "สมชาย");
     assert.deepEqual(await usersSnapshot(), before, "users is never written");
-    assert.equal(await current(ids["DR:สมชาย"]), null);
+    assert.equal(await current(ids["PCA:สมชาย"]), null);
     const b = await pool.query("SELECT line_sub FROM line_bindings ORDER BY line_sub");
     assert.deepEqual(b.rows.map((x) => x.line_sub), ["U-other"], "every binding of that number, only that number");
     assert.equal(await userForPhone(pool, "0900000207"), null);
     // the name is free for its real owner at once
-    assert.equal((await listClaimable(pool, "DR")).find((n) => n.id === ids["DR:สมชาย"])?.claimed, false);
+    assert.equal((await listClaimable(pool, "PCA")).find((n) => n.id === ids["PCA:สมชาย"])?.claimed, false);
     // the undone number and LINE account cannot claim again for 24 h, any name
     assert.equal(await claimBlocked(pool, "0900000207", "U-x"), true);
     assert.equal(await claimBlocked(pool, "0900000209", "U-e"), true);
-    assert.equal((await claimUser(pool, args(ids["DR:ชัยวัฒน์"], "0900000207", "U-new"))).status, "blocked");
-    assert.equal((await claimUser(pool, args(ids["DR:ชัยวัฒน์"], "0900000209", "U-e"))).status, "blocked");
-    assert.equal((await claimUser(pool, args(ids["DR:สมชาย"], "0900000210", "U-owner"))).status, "claimed", "others may claim");
+    assert.equal((await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000207", "U-new"))).status, "blocked");
+    assert.equal((await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000209", "U-e"))).status, "blocked");
+    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000210", "U-owner"))).status, "claimed", "others may claim");
     await pool.query("UPDATE user_claims SET undone_at = now() - interval '25 hours' WHERE id = $1", [r.claim.id]);
     assert.equal(await claimBlocked(pool, "0900000207", "U-e"), false);
-    assert.equal((await claimUser(pool, args(ids["DR:ชัยวัฒน์"], "0900000207", "U-e"))).status, "claimed");
+    assert.equal((await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000207", "U-e"))).status, "claimed");
   });
 
   test("only an administrator's undo blocks: a claim released by hand ('manual') or closed as 'inactive' does not", async () => {
-    const a = await hold(ids["DR:สมชาย"], "0900000217", "U-m");
+    const a = await hold(ids["PCA:สมชาย"], "0900000217", "U-m");
     await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE id = $1", [a.rows[0].id]);
-    const b = await hold(ids["DR:กมล"], "0900000218", "U-n");
+    const b = await hold(ids["PCA:กมล"], "0900000218", "U-n");
     await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'inactive' WHERE id = $1", [b.rows[0].id]);
     assert.equal(await claimBlocked(pool, "0900000217", "U-m"), false);
     assert.equal(await claimBlocked(pool, "0900000218", "U-n"), false);
-    assert.equal((await claimUser(pool, args(ids["DR:สมชาย"], "0900000217", "U-m"))).status, "claimed");
-    assert.equal((await claimUser(pool, args(ids["DR:กมล"], "0900000218", "U-n"))).status, "claimed");
+    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000217", "U-m"))).status, "claimed");
+    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000218", "U-n"))).status, "claimed");
   });
 
   test("undo: a second tap, concurrent taps, an unknown claim and an ended claim change nothing", async () => {
@@ -403,7 +404,7 @@ describe("users and claims (database)", () => {
   test("claims are open only with Telegram and at least one numeric admin id; otherwise both claim endpoints send to the request", async () => {
     const grant = await signAccess({ sub: "U-off", name: "x", picture: null, phone: "0900000216" }, TEST_SESSION_SECRET);
     const cookie = `access=${grant}`;
-    const post = (userId: unknown = Number(ids["DR:สมชาย"])) =>
+    const post = (userId: unknown = Number(ids["PCA:สมชาย"])) =>
       claimRoute(
         new NextRequest("http://localhost:3999/api/auth/claim", {
           method: "POST",
@@ -411,7 +412,7 @@ describe("users and claims (database)", () => {
           body: JSON.stringify({ userId }),
         }),
       );
-    const list = () => listRoute(new NextRequest("http://localhost:3999/api/auth/claim/list?type=DR", { headers: { cookie } }));
+    const list = () => listRoute(new NextRequest("http://localhost:3999/api/auth/claim/list?type=PCA", { headers: { cookie } }));
     try {
       // unset, only a group and a channel (nobody may tap undo), malformed
       for (const chats of [null, "-1001234567890, @orskh_alerts", "not a chat"]) {
@@ -446,8 +447,8 @@ describe("users and claims (database)", () => {
   test("the claim-page list endpoint needs the access cookie, is never cached, and names no number or LINE id", async (t) => {
     telegram("111");
     t.after(() => telegram(null));
-    await hold(ids["DR:กมล"], "0900000214", "U-hidden-sub");
-    const url = "http://localhost:3999/api/auth/claim/list?type=DR";
+    await hold(ids["PCA:กมล"], "0900000214", "U-hidden-sub");
+    const url = "http://localhost:3999/api/auth/claim/list?type=PCA";
     const none = await listRoute(new NextRequest(url));
     assert.equal(none.status, 401);
     const forged = await listRoute(new NextRequest(url, { headers: { cookie: "access=not-a-token" } }));
@@ -459,16 +460,21 @@ describe("users and claims (database)", () => {
     const text = await ok.text();
     assert.ok(!text.includes("0900000214") && !text.includes("U-hidden-sub") && !/0[689]\d{8}/.test(text), text);
     const body = JSON.parse(text) as { type: string; names: Record<string, unknown>[] };
-    assert.equal(body.type, "DR");
+    assert.equal(body.type, "PCA");
     assert.deepEqual(
       body.names.map((n) => [n.first_name, n.subtype_label, n.claimed]),
       [
-        ["กมล", "สูติ-นรีเวชกรรม", true],
-        ["ชัยวัฒน์", subtypeLabel("DR", "NEURO"), false],
-        ["สมชาย", "ออร์โธปิดิกส์", false],
+        ["กมล", "วิสัญญี", true],
+        ["ชัยวัฒน์", "ICU", false],
+        ["สมชาย", "ห้องผ่าตัด", false],
       ],
     );
     for (const n of body.names) assert.deepEqual(Object.keys(n).sort(), ["claimed", "first_name", "id", "last_name", "subtype", "subtype_label"]);
+    // doctors are not picked here: they sign in by email (/login/doctor)
+    const doctors = await listRoute(new NextRequest("http://localhost:3999/api/auth/claim/list?type=DR", { headers: { cookie: `access=${grant}` } }));
+    assert.equal(doctors.status, 400);
+    assert.deepEqual(await doctors.json(), { error: MSG.claimType, reason: "doctor_email", redirect: "/login/doctor" });
+    assert.equal((await claimUser(pool, args(ids["DR:หมอ"], "0900000220", "U-dr"))).status, "unavailable");
     for (const bad of ["", "dr", "doctor", "__proto__"]) {
       const r = await listRoute(new NextRequest(`http://localhost:3999/api/auth/claim/list?type=${bad}`, { headers: { cookie: `access=${grant}` } }));
       assert.equal(r.status, 400, bad);

@@ -43,6 +43,13 @@ export const MSG = {
   claimBlocked: CLAIM_BLOCKED,
   claimTooMany: "เลือกชื่อบ่อยเกินไป กรุณาลองใหม่ภายหลัง หรือส่งคำขอเข้าใช้งาน",
   claimRequested: "เบอร์นี้ส่งคำขอเข้าใช้งานไว้แล้ว",
+  // doctors' email codes (/login/doctor)
+  emailPick: "กรุณาเลือกชื่อของคุณ",
+  emailNotDoctor: "ไม่พบชื่อนี้ในรายชื่อแพทย์ กรุณาเลือกใหม่",
+  emailNone: "ยังไม่มีอีเมลของชื่อนี้ในระบบ กรุณาติดต่อผู้ดูแล",
+  emailDailyCap: "ระบบส่งอีเมลครบจำนวนของวันนี้แล้ว กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล",
+  emailFailed: "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
+  emailLineHasName: "บัญชี LINE นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล",
 } as const;
 
 export function json(body: unknown, status = 200, init?: { headers?: Record<string, string> }): NextResponse {

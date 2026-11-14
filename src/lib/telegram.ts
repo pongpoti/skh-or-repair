@@ -200,11 +200,33 @@ export function buildDecidedMessage(r: AccessRequest, decision: "approved" | "re
  * "🪪 ยืนยันชื่อ: <name> (<type> · <subtype>)", the number in full with the LINE name, the time in Bangkok.
  */
 export function buildClaimMessage(user: ListedUser, claim: Pick<UserClaim, "phone" | "lineName" | "createdAt">): string {
+  const proof = claim.phone ? `เบอร์ ${whole(formatPhone(claim.phone))}` : "ยืนยันทางอีเมล";
   return [
     `🪪 ยืนยันชื่อ: ${userLine(user)}`,
-    `เบอร์ ${whole(formatPhone(claim.phone))} · LINE: ${text(claim.lineName ?? "") || "ไม่ระบุ"}`,
+    `${proof} · LINE: ${text(claim.lineName ?? "") || "ไม่ระบุ"}`,
     `เวลา ${thaiDateTime(claim.createdAt)}`,
   ].join("\n");
+}
+
+/**
+ * A doctor proved their name with a code sent to their own email (lib/email-otp.ts): a notice without a button (the
+ * code went to the doctor's own addresses, so there is nothing to undo). `replaced` says that an earlier claim of the
+ * name (another LINE account, or a number) ended with it.
+ */
+export function buildEmailSignInMessage(
+  user: ListedUser,
+  a: { lineName: string; at: Date; replaced: { phone: string | null; lineName: string | null } | null },
+): string {
+  const lines = [
+    `📧 แพทย์ยืนยันตัวตนทางอีเมล: ${userLine(user)}`,
+    `LINE: ${text(a.lineName) || "ไม่ระบุ"}`,
+    `เวลา ${thaiDateTime(a.at)}`,
+  ];
+  if (a.replaced) {
+    const before = a.replaced.phone ? `เบอร์ ${whole(formatPhone(a.replaced.phone))}` : "อีเมล";
+    lines.push(`↪️ แทนการยืนยันเดิม (${before} · LINE: ${text(a.replaced.lineName ?? "") || "ไม่ระบุ"}) ซึ่งออกจากระบบแล้ว`);
+  }
+  return lines.join("\n");
 }
 
 /** The claim message once undone (sent as an edit without the button). `by` is the Telegram name of whoever tapped. */

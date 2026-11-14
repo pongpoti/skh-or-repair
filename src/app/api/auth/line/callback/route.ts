@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { isAuthorizedPhone } from "@/lib/authz";
+import { isAuthorizedDoctor, isAuthorizedPhone } from "@/lib/authz";
 import { clearCookie, cookieName, setCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
+import { freshEmailClaim } from "@/lib/email-otp";
 import { appUrl, ConfigError, lineConfig, sessionSecret } from "@/lib/env";
 import { redirectToError, type ErrorCode } from "@/lib/http";
 import { exchangeCode, LineAuthError, verifyIdToken } from "@/lib/line";
@@ -53,6 +54,28 @@ export async function GET(req: NextRequest) {
       console.error("[auth] database unavailable:", (e as Error).message);
       return fail(req, "config");
     }
+    const signIn = (token: string) => {
+      const res = NextResponse.redirect(new URL(next, origin), 303);
+      res.headers.set("Cache-Control", "no-store");
+      clearCookie(res, "tx");
+      clearCookie(res, "pending");
+      clearCookie(res, "access");
+      setCookie(res, "session", token);
+      return res;
+    };
+    // A doctor whose email code was checked by this LINE account within 180 days, still holding the (active) name.
+    const doctorId = await freshEmailClaim(pool, profile.sub);
+    if (doctorId && (await isAuthorizedDoctor(doctorId, profile.sub))) {
+      await logEvent(pool, {
+        event: "login_email_binding",
+        sub: profile.sub,
+        ip: clientIp(req.headers),
+        userAgent: userAgent(req.headers),
+      });
+      return signIn(
+        await signSession({ sub: profile.sub, phone: null, userId: doctorId, name: profile.name, picture: profile.picture }, secret),
+      );
+    }
     const binding = await findFreshBinding(pool, profile.sub);
     if (binding && (await isAuthorizedPhone(binding.phone))) {
       await touchBinding(pool, profile.sub, profile.name);
@@ -63,20 +86,13 @@ export async function GET(req: NextRequest) {
         ip: clientIp(req.headers),
         userAgent: userAgent(req.headers),
       });
-      const token = await signSession(
-        { sub: profile.sub, phone: binding.phone, name: profile.name, picture: profile.picture },
-        secret,
+      return signIn(
+        await signSession({ sub: profile.sub, phone: binding.phone, userId: null, name: profile.name, picture: profile.picture }, secret),
       );
-      const res = NextResponse.redirect(new URL(next, origin), 303);
-      res.headers.set("Cache-Control", "no-store");
-      clearCookie(res, "tx");
-      clearCookie(res, "pending");
-      clearCookie(res, "access");
-      setCookie(res, "session", token);
-      return res;
     }
 
-    // Otherwise: prove a mobile number first (then sign in, or request access if it is not authorized).
+    // Otherwise: prove a mobile number first (then sign in, or request access if it is not authorized), or, for a
+    // doctor, their name by an email code (/login/doctor, linked from /login/verify).
     const pending = await signPending({ sub: profile.sub, name: profile.name, picture: profile.picture, next }, secret);
     const res = NextResponse.redirect(new URL("/login/verify", origin), 303);
     res.headers.set("Cache-Control", "no-store");

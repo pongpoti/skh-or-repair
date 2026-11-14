@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       ip: clientIp(req.headers),
       userAgent: userAgent(req.headers),
     });
-    const token = await signSession({ sub: grant.sub, phone: grant.phone, name: grant.name, picture: grant.picture }, sessionSecret());
+    const token = await signSession({ sub: grant.sub, phone: grant.phone, userId: null, name: grant.name, picture: grant.picture }, sessionSecret());
     const res = NextResponse.json({ ok: true, redirect: "/" }, { headers: { "Cache-Control": "no-store" } });
     clearCookie(res, "access");
     clearCookie(res, "pending");

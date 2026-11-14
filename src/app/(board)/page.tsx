@@ -9,7 +9,7 @@ import { db } from "@/lib/db";
 import { todayIso } from "@/lib/days";
 import { holidayOn } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
-import { fullName } from "@/lib/user-list";
+import { fullName, type SessionIdentity } from "@/lib/user-list";
 import { boardFor, type DayBoard } from "@/lib/week";
 import { addCase, deleteCase } from "./actions";
 
@@ -19,10 +19,10 @@ export const dynamic = "force-dynamic";
  * The day's board with the doctors' added cases, and the add-case form for a doctor. A database problem leaves the
  * imported cases on the board (with a notice) and hides the form.
  */
-async function withCases(board: DayBoard | null, phone: string, today: string) {
+async function withCases(board: DayBoard | null, who: SessionIdentity, today: string) {
   try {
     const pool = await db();
-    const [doctor, added] = await Promise.all([doctorFor(pool, phone), board ? listCasesOn(pool, board.date) : []]);
+    const [doctor, added] = await Promise.all([doctorFor(pool, who), board ? listCasesOn(pool, board.date) : []]);
     const adding: CaseAdding | null = doctor
       ? {
           doctor: { name: fullName(doctor), subtype: doctor.subtype },
@@ -47,13 +47,14 @@ export default async function BoardPage({
   const user = await requireUser();
   const params = await searchParams;
   const today = todayIso();
-  // The full name of the user the number has claimed, read on every request (a corrected name shows without signing out).
+  // The full name of the user the number (or the doctor's email sign-in) has claimed, read on every request (a corrected
+  // name shows without signing out).
   const [profile, holiday] = await Promise.all([
-    profileFor(user.phone, user.name),
+    profileFor(user, user.name),
     // On a Thai public or special holiday the suite runs no list, so the plan shows no allocation.
     holidayOn(today),
   ]);
-  const { board, adding, failed } = await withCases(holiday ? null : boardFor(today), user.phone, today);
+  const { board, adding, failed } = await withCases(holiday ? null : boardFor(today), user, today);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -61,7 +62,7 @@ export default async function BoardPage({
         date={today}
         name={profile.name}
         role={profile.role}
-        phone={formatPhone(user.phone)}
+        phone={user.phone ? formatPhone(user.phone) : undefined}
         image={user.picture}
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
         adminHref={isAdmin(user.sub) ? "/admin" : null}

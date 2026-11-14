@@ -4,7 +4,8 @@ import { EncryptJWT, jwtDecrypt, jwtVerify, SignJWT } from "jose";
 
 /**
  * Token formats (all keyed from SESSION_SECRET):
- * - session: HS256 JWT, key = SESSION_SECRET bytes, aud "session", 30 days
+ * - session: HS256 JWT, key = SESSION_SECRET bytes, aud "session", 30 days; carries "phone" (SMS sign-in) or "uid"
+ *   (users.id of a doctor signed in by email), never both
  * - pending: HS256 JWT, key = HKDF(SESSION_SECRET, "pending"), aud "pending", 15 min
  * - access: HS256 JWT, key = HKDF(SESSION_SECRET, "access"), aud "access", 12 h (verified number that is not
  *   authorized yet: lets its owner request access and wait for the decision, never a session)
@@ -16,10 +17,16 @@ export const PENDING_TTL_S = 15 * 60;
 export const TX_TTL_S = 10 * 60;
 export const ACCESS_TTL_S = 12 * 3600;
 
+/**
+ * A signed-in LINE account and what it proved: a mobile number (an SMS code), or, for a doctor, their name by a code
+ * sent to their email (users.id; lib/email-otp.ts). Exactly one of phone and userId is set.
+ */
 export interface SessionUser {
   sub: string;
-  /** Canonical Thai mobile number, 0812345678. */
-  phone: string;
+  /** Canonical Thai mobile number, 0812345678, or null for a doctor signed in by email. */
+  phone: string | null;
+  /** users.id of a doctor signed in by email (a current user_claims row with via = 'email'), or null. */
+  userId: string | null;
   name: string;
   picture: string | null;
 }
@@ -62,8 +69,16 @@ function phoneClaim(v: unknown): string | null {
   return typeof v === "string" && /^0[689]\d{8}$/.test(v) ? v : null;
 }
 
+/** A users.id claim ("uid", email sign-in of a doctor). */
+function userIdClaim(v: unknown): string | null {
+  return typeof v === "string" && /^[1-9]\d{0,9}$/.test(v) ? v : null;
+}
+
 export async function signSession(u: SessionUser, secret: string, ttlS = SESSION_TTL_S): Promise<string> {
-  return new SignJWT({ phone: u.phone, name: u.name, picture: u.picture })
+  const phone = u.phone === null ? null : phoneClaim(u.phone);
+  const uid = u.userId === null ? null : userIdClaim(u.userId);
+  if ((phone === null) === (uid === null)) throw new Error("A session holds either a phone number or a user id");
+  return new SignJWT(phone ? { phone, name: u.name, picture: u.picture } : { uid, name: u.name, picture: u.picture })
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setSubject(u.sub)
     .setIssuer(ISSUER)
@@ -85,8 +100,10 @@ export async function verifySession(token: string | undefined, secret: string): 
     });
     const sub = str(payload.sub, 128);
     const phone = phoneClaim(payload.phone);
-    if (!sub || !phone) return null;
-    return { sub, phone, name: str(payload.name, 200) ?? "", picture: str(payload.picture, 1024) };
+    const userId = userIdClaim(payload.uid);
+    // exactly one of the two (a token carrying both, or neither, is refused)
+    if (!sub || (phone === null) === (userId === null)) return null;
+    return { sub, phone, userId, name: str(payload.name, 200) ?? "", picture: str(payload.picture, 1024) };
   } catch {
     return null;
   }

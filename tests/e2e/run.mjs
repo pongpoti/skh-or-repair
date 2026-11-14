@@ -9,7 +9,8 @@
 //   ALLOW_REMOTE_TEST_DB=1 (allow a non-local E2E_DATABASE_URL; see tests/db-guard.mjs)
 // The database's sign-in tables are dropped first (the built app creates them again on first use), then the list of
 // people (table users) is loaded with scripts/sync-users.mjs from a CSV in Pong's format in a new temp folder. People
-// claim their names on /login/claim after the SMS code (table user_claims).
+// claim their names on /login/claim after the SMS code (table user_claims); doctors (DR) instead pick their name on
+// /login/doctor and type a code sent to their email (EMAIL_PROVIDER=file: the email is a JSON file in the outbox).
 // Only invented phone numbers (0812345678, 09000000xx, 0611111111) and invented names are used. Keep E2E_SCREENS_DIR
 // outside the repository.
 import { spawn } from "node:child_process";
@@ -51,24 +52,29 @@ const LINE_SECRET = randomBytes(16).toString("hex");
 const SMS_API_KEY = randomBytes(16).toString("hex");
 const SMS_SECRET_KEY = randomBytes(24).toString("hex");
 // The users list (table users, invented names, no numbers): DOC1 claims DOC1_NAME at the first login, DOC2 claims
-// DOC2_NAME from a second LINE account; RETIRED's name is deactivated (it holds a claim made by hand); BREAK_GLASS is
-// only in ALLOWED_PHONES.
+// DOC2_NAME from a second LINE account (both nurses: doctors no longer claim by number, they sign in by email, see
+// EMAIL_DOC); RETIRED's name is deactivated (it holds a claim made by hand); BREAK_GLASS is only in ALLOWED_PHONES.
 const DOC1 = "0812345678";
 const DOC1_NAME = "สมชาย ใจดี";
-const DOC1_ROLE = "แพทย์ · ออร์โธปิดิกส์";
+const DOC1_ROLE = "พยาบาล · ห้องผ่าตัด";
 const DOC1_FIXED = "สมชาย ใจงาม"; // the name after a correction in the users table
 const DOC2 = "0900000001";
 const DOC2_NAME = "สมหญิง รักดี";
-const DOC2_DEPT = "ศัลยกรรมทั่วไป";
+const DOC2_DEPT = "วิสัญญี";
 const RETIRED = "0900000002";
 const RETIRED_NAME = "สมศักดิ์ เกษียณ";
 const BREAK_GLASS = "0611111111";
+// a doctor who signs in with an email code (addresses in user_emails); NO_EMAIL_DOC has no address on file
+const EMAIL_DOC = "กมล ทองดี";
+const EMAIL_DOC_ROLE = "แพทย์ · สูติ-นรีเวชกรรม";
+const EMAIL_DOC_ADDRESSES = ["kamon.t@example.com", "kt@example.org"];
+const NO_EMAIL_DOC = "สมใจ ใจเย็น";
 const LOCKED = "0900000008"; // locks its code with 5 wrong guesses
 const USERS_CSV = [
   "\uFEFFfirst_name,last_name,type,subtype",
-  "สมชาย,ใจดี,DR,ORTHO",
-  "สมหญิง,รักดี,DR,GENSX",
-  "สมศักดิ์,เกษียณ,DR,EYE",
+  "สมชาย,ใจดี,RN,OR",
+  "สมหญิง,รักดี,RN,ANES",
+  "สมศักดิ์,เกษียณ,RN,OR",
   "กมล,ทองดี,DR,OBGYN",
   "ชัยวัฒน์,มีสุข,DR,ANES",
   "ณัฐพล,วงศ์ใหญ่,DR,NEPHRO",
@@ -94,6 +100,7 @@ const SUB_K = "U0000000000000000000000000000000k";
 const SUB_L = "U0000000000000000000000000000000l";
 const SUB_M = "U0000000000000000000000000000000m";
 const SUB_N = "U0000000000000000000000000000000n";
+const SUB_DOC = "U000000000000000000000000000000dc";
 // AUTH_ADMIN_LINE_IDS: admins are listed by LINE user id, the session's sub
 const ADMIN_SUB = "U00000000000000000000000000000ad1";
 const TG_TOKEN = "123456789:AAe2eTOKENe2eTOKENe2eTOKEN_test";
@@ -467,7 +474,7 @@ async function loadUsers(db) {
   );
   await db.query("UPDATE users SET active = false, updated_at = now() WHERE first_name || ' ' || last_name = $1", [RETIRED_NAME]);
   const counts = await db.query("SELECT type, count(*)::int AS n FROM users WHERE active GROUP BY type ORDER BY type");
-  assert(JSON.stringify(counts.rows) === JSON.stringify([{ type: "DR", n: 6 }, { type: "PCA", n: 1 }, { type: "PN", n: 1 }, { type: "RN", n: 3 }]), `users: ${JSON.stringify(counts.rows)}`);
+  assert(JSON.stringify(counts.rows) === JSON.stringify([{ type: "DR", n: 4 }, { type: "PCA", n: 1 }, { type: "PN", n: 1 }, { type: "RN", n: 5 }]), `users: ${JSON.stringify(counts.rows)}`);
   const claimed = await db.query(
     "SELECT count(*)::int AS n FROM user_claims c JOIN users u ON u.id = c.user_id WHERE u.active AND c.undone_at IS NULL",
   );
@@ -513,7 +520,7 @@ async function main() {
   // loaded once the app has created them, as in production: loadUsers() after the servers are up).
   const db = new pg.Pool({ connectionString: DB_URL, max: 2 });
   await assertDisposableUsers((sql) => db.query(sql), "E2E_DATABASE_URL"); // users holding real data: stop before the DROP
-  await db.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, user_claims, users, access_requests");
+  await db.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, user_claims, email_codes, user_emails, users, access_requests");
 
   const appEnv = {
     ...baseEnv(),
@@ -540,6 +547,9 @@ async function main() {
     TELEGRAM_BOT_TOKEN: TG_TOKEN,
     TELEGRAM_CHAT_ID: TG_CHAT,
     TELEGRAM_API_URL: LINE,
+    // doctors' email codes are written to files (one JSON per email, with the code)
+    EMAIL_PROVIDER: "file",
+    EMAIL_OUTBOX_DIR: join(OUTBOX, "email"),
     // no holiday API calls from the tests
     BOT_API_TOKEN: "",
     // one admin (spaces and an empty entry are ignored); SUB_A, the first-login account, is not one
@@ -785,22 +795,28 @@ async function main() {
       const typeLabels = await page.$$eval('[data-testid^="claim-type-"]', (els) => els.map((e) => [e.dataset.testid, e.textContent.trim()]));
       assert(
         JSON.stringify(typeLabels) ===
-          JSON.stringify([["claim-type-DR", "แพทย์"], ["claim-type-RN", "พยาบาล"], ["claim-type-PN", "ผู้ช่วยพยาบาล"], ["claim-type-PCA", "พนักงานช่วยเหลือคนไข้"]]),
+          JSON.stringify([
+            ["claim-type-DR", "แพทย์ยืนยันตัวตนด้วยรหัสทางอีเมล"],
+            ["claim-type-RN", "พยาบาล"],
+            ["claim-type-PN", "ผู้ช่วยพยาบาล"],
+            ["claim-type-PCA", "พนักงานช่วยเหลือคนไข้"],
+          ]),
         `type buttons: ${JSON.stringify(typeLabels)}`,
       );
+      assert((await page.getAttribute('[data-testid="claim-type-DR"]', "href")) === "/login/doctor", "doctors go to the email sign-in");
       assert((await page.getAttribute('[data-testid="claim-request-link"]', "href")) === "/login/request", "a way to the access request");
       await touchTargets(page, "/login/claim (types)");
       await shoot(page, "claim-types", { narrow: true });
 
       // step 2: the names of that type (active rows only), searchable by first or last name
-      await page.click('[data-testid="claim-type-DR"]');
+      await page.click('[data-testid="claim-type-RN"]');
       await page.waitForSelector('[data-testid="claim-names"]');
-      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "แพทย์", "chosen type shown");
+      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "พยาบาล", "chosen type shown");
       const names = await page.$$eval('[data-testid="claim-name"] .font-semibold', (els) => els.map((e) => e.textContent.trim()));
-      assert(names.length === 6 && names.includes(DOC1_NAME) && names.includes(DOC2_NAME), `DR names: ${names.length}`);
+      assert(names.length === 5 && names.includes(DOC1_NAME) && names.includes(DOC2_NAME), `RN names: ${names.length}`);
       assert(!names.includes(RETIRED_NAME), "a deactivated name is not offered");
       assert(JSON.stringify(names) === JSON.stringify([...names].sort((a, b) => a.localeCompare(b, "th"))), "sorted in Thai order");
-      assert((await page.textContent('[data-testid="claim-count"]')).trim() === "6 รายชื่อ · เลือกได้ 6", `count: ${await page.textContent('[data-testid="claim-count"]')}`);
+      assert((await page.textContent('[data-testid="claim-count"]')).trim() === "5 รายชื่อ · เลือกได้ 5", `count: ${await page.textContent('[data-testid="claim-count"]')}`);
       // one scroller (the page): the list is not a box of its own, and the search bar stays on top while names scroll by
       const layout = await page.evaluate(() => ({
         list: getComputedStyle(document.querySelector('[data-testid="claim-names"]')).overflowY,
@@ -822,22 +838,22 @@ async function main() {
       await page.fill("#claim-search", "xyz");
       await page.waitForSelector('[data-testid="claim-empty"]');
       const empty = await page.textContent('[data-testid="claim-empty"]');
-      assert(empty.includes("ไม่พบ “xyz” ในรายชื่อแพทย์"), `the empty search names the list it searched: ${empty}`);
+      assert(empty.includes("ไม่พบ “xyz” ในรายชื่อพยาบาล"), `the empty search names the list it searched: ${empty}`);
       assert((await page.locator('[data-testid="claim-other-type"]').count()) === 1, "a way to another position");
       // another position keeps what was typed
       await page.click('[data-testid="claim-other-type"]');
       await page.waitForSelector('[data-testid="claim-types"]');
-      await page.click('[data-testid="claim-type-RN"]');
+      await page.click('[data-testid="claim-type-PN"]');
       await page.waitForSelector('[data-testid="claim-empty"]');
       assert((await page.inputValue("#claim-search")) === "xyz", "the search text carries over");
       await page.click('[data-testid="claim-change-type"]');
-      await page.click('[data-testid="claim-type-DR"]');
+      await page.click('[data-testid="claim-type-RN"]');
       await page.waitForSelector('[data-testid="claim-empty"]');
       await page.fill("#claim-search", " ใจ ดี"); // spaces ignored
       await page.waitForFunction(() => document.querySelectorAll('[data-testid="claim-name"]').length === 1);
       assert((await page.textContent('[data-testid="claim-name"]')).includes(DOC1_NAME), "search by last name");
-      assert((await page.textContent('[data-testid="claim-name"]')).includes("ออร์โธปิดิกส์"), "subtype shown in Thai");
-      assert((await page.textContent('[data-testid="claim-count"]')).trim() === "พบ 1 จาก 6 รายชื่อ", "search count");
+      assert((await page.textContent('[data-testid="claim-name"]')).includes("ห้องผ่าตัด"), "subtype shown in Thai");
+      assert((await page.textContent('[data-testid="claim-count"]')).trim() === "พบ 1 จาก 5 รายชื่อ", "search count");
       await touchTargets(page, "/login/claim (names)");
       await shoot(page, "claim-names", { narrow: true });
 
@@ -997,16 +1013,16 @@ async function main() {
       page.on("pageerror", (e) => errors.push(e.message));
       const before = (await telegramMessages()).length;
       await verifyToClaim(page, DOC2);
-      await page.click('[data-testid="claim-type-DR"]');
+      await page.click('[data-testid="claim-type-RN"]');
       await page.waitForSelector('[data-testid="claim-names"]');
       const taken = page.locator('[data-testid="claim-name"][data-claimed="true"]');
       assert((await taken.count()) === 1 && (await taken.textContent()).includes(DOC1_NAME), "the claimed name is marked");
       assert(await taken.isDisabled(), "and cannot be chosen");
       assert((await taken.textContent()).includes("มีผู้เลือกแล้ว"), "taken badge");
-      assert((await page.textContent('[data-testid="claim-count"]')).trim() === "6 รายชื่อ · เลือกได้ 5", "count of free names");
+      assert((await page.textContent('[data-testid="claim-count"]')).trim() === "5 รายชื่อ · เลือกได้ 4", "count of free names");
       await shoot(page, "claim-names-taken", { narrow: true });
       // the API agrees, and leaks no number or LINE id
-      const list = await page.request.get(`${APP}/api/auth/claim/list?type=DR`);
+      const list = await page.request.get(`${APP}/api/auth/claim/list?type=RN`);
       const body = await list.text();
       assert(list.status() === 200 && !body.includes(DOC1) && !body.includes(SUB_A), "list without numbers or LINE ids");
       const headers = { origin: APP, "content-type": "application/json" };
@@ -1023,9 +1039,9 @@ async function main() {
       assert(new URL(page.url()).pathname === "/login/claim", `Back stays on the claim page: ${page.url()}`);
       await page.goForward();
       await page.waitForSelector('[data-testid="claim-names"]');
-      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "แพทย์", "Forward reopens the names");
+      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "พยาบาล", "Forward reopens the names");
       // a name taken while its dialog is open: the message is shown above the list, with focus, and links the request
-      const kamol = "กมล ทองดี";
+      const kamol = "ปราณี สายบุญ";
       await page.locator('[data-testid="claim-name"]', { hasText: kamol }).click();
       await page.waitForSelector('[data-testid="claim-confirm"][open]');
       await db.query(
@@ -1047,12 +1063,12 @@ async function main() {
       await page.waitForSelector('[data-testid="request-form"]');
       await page.click('[data-testid="back-to-claim"]');
       await page.waitForURL(`${APP}/login/claim`);
-      await pickName(page, "DR", DOC2_NAME, "สมหญิง");
+      await pickName(page, "RN", DOC2_NAME, "สมหญิง");
       await page.click('[data-testid="claim-confirm-yes"]');
       await page.waitForURL(`${APP}/`);
       assert((await boardName(page)) === DOC2_NAME, `second account's name: ${await boardName(page)}`);
       const msgs = await waitForTelegram(before + 1);
-      assert(msgs.length === before + 1 && msgs[before].text.startsWith(`🪪 ยืนยันชื่อ: ${DOC2_NAME} (แพทย์ · ${DOC2_DEPT})`), "claim message");
+      assert(msgs.length === before + 1 && msgs[before].text.startsWith(`🪪 ยืนยันชื่อ: ${DOC2_NAME} (พยาบาล · ${DOC2_DEPT})`), "claim message");
       const held = await db.query(
         "SELECT count(*)::int AS n FROM user_claims c JOIN users u ON u.id = c.user_id WHERE c.undone_at IS NULL AND u.active",
       );
@@ -1576,7 +1592,7 @@ async function main() {
         async () => (await telegramMessages()).slice(tgBefore).find((m) => m.text.startsWith("⚠️") || m.text.startsWith("🆕")),
         "verified alert",
       );
-      assert(verified.text.includes(`\n🩺 แพทย์: ${DOC2_NAME} (${DOC2_DEPT})\n`), `alert names the claimed name: ${verified.text}`);
+      assert(verified.text.includes(`\n🩺 พยาบาล: ${DOC2_NAME} (${DOC2_DEPT})\n`), `alert names the claimed name: ${verified.text}`);
       await ctx.close();
     });
 
@@ -1898,6 +1914,95 @@ async function main() {
       await page.click('[data-testid="claim-blocked"] a[href="/login/request"]');
       await page.waitForURL(`${APP}/login/request`);
       await page.waitForSelector('[data-testid="request-form"]');
+      await ctx.close();
+    });
+
+    await t("doctor: LINE -> แพทย์ -> name -> code by email -> board; a Telegram notice without a button; next time LINE alone", async () => {
+      await db.query(
+        "INSERT INTO user_emails (user_id, email) SELECT u.id, e FROM users u, unnest($2::text[]) e WHERE u.first_name || ' ' || u.last_name = $1",
+        [EMAIL_DOC, EMAIL_DOC_ADDRESSES],
+      );
+      await setIdentity({ sub: SUB_DOC, name: "หมอกมล" });
+      let ctx = await newContext(browser);
+      let page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      const csp = [];
+      trackCsp(page, csp);
+      const before = (await telegramMessages()).length;
+      await lineLogin(page);
+      assert(new URL(page.url()).pathname === "/login/verify", `at ${page.url()}`);
+      await page.click('[data-testid="doctor-email-link"]');
+      await page.waitForURL(`${APP}/login/doctor`);
+      await page.waitForSelector('[data-testid="doctor-pick-step"]');
+      assert((await page.textContent("h1")).includes("แพทย์ ยืนยันตัวตนทางอีเมล"), `title: ${await page.textContent("h1")}`);
+      const names = await page.$$eval('[data-testid="doctor-name"] .font-semibold', (els) => els.map((e) => e.textContent.trim()));
+      assert(names.length === 4 && names.includes(EMAIL_DOC) && !names.includes(DOC1_NAME), `doctors only: ${JSON.stringify(names)}`);
+      const html = await page.content();
+      assert(!EMAIL_DOC_ADDRESSES.some((a) => html.includes(a)), "no address leaves the server with the list");
+      const none = page.locator('[data-testid="doctor-name"]', { hasText: NO_EMAIL_DOC });
+      assert((await none.isDisabled()) && (await none.getAttribute("data-no-email")) === "true", "a doctor without an address cannot be picked");
+      assert((await page.getAttribute('[data-testid="doctor-sms-link"]', "href")) === "/login/verify", "the way back to the SMS sign-in");
+      await touchTargets(page, "/login/doctor (names)");
+      await shoot(page, "doctor-names", { narrow: true });
+
+      await page.fill('[data-testid="doctor-search"]', "กมล");
+      await page.locator('[data-testid="doctor-name"]', { hasText: EMAIL_DOC }).click();
+      await page.waitForSelector('[data-testid="doctor-send-step"]');
+      assert((await page.textContent('[data-testid="doctor-selected"]')).trim() === EMAIL_DOC, "the chosen name");
+      await shoot(page, "doctor-send", { narrow: true });
+      await page.click('[data-testid="doctor-send"]');
+      await page.waitForSelector('[data-testid="doctor-code-step"]');
+      const sentTo = await page.textContent('[data-testid="doctor-sent-to"]');
+      assert(sentTo.includes("ka•••@example.com") && sentTo.includes("k•••@example.org"), `masked addresses: ${sentTo}`);
+      assert(!EMAIL_DOC_ADDRESSES.some((a) => sentTo.includes(a)), "only masked addresses are shown");
+      assert((await page.evaluate(() => document.activeElement?.id)) === "email-code", "focus on the code field");
+      const mail = await waitUntil(() => {
+        const dir = join(OUTBOX, "email");
+        if (!existsSync(dir)) return null;
+        const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
+        return files.length ? JSON.parse(readFileSync(join(dir, files[files.length - 1]), "utf8")) : null;
+      }, "the email in the outbox");
+      assert(JSON.stringify(mail.to) === JSON.stringify(EMAIL_DOC_ADDRESSES), `one email to every address: ${JSON.stringify(mail.to)}`);
+      assert(/^\d{6}$/.test(mail.code) && mail.subject === `รหัสเข้าสู่ระบบ ORSKH: ${mail.code}`, `subject: ${mail.subject}`);
+      assert(mail.text.includes(EMAIL_DOC) && !/https?:/.test(mail.text), "the email names the doctor and has no link");
+      issuedCodes.push(mail.code);
+      await touchTargets(page, "/login/doctor (code)");
+      await shoot(page, "doctor-code", { narrow: true });
+
+      // a wrong code first, then the one from the email (Thai digits too)
+      await page.fill("#email-code", mail.code === "000000" ? "111111" : "000000");
+      await page.waitForSelector('[data-testid="doctor-error"]');
+      assert((await page.textContent('[data-testid="doctor-error"]')).includes("เหลือโอกาสอีก 4"), "attempts left");
+      await page.fill("#email-code", mail.code.replace(/\d/g, (d) => String.fromCharCode(0x0e50 + Number(d))));
+      await page.waitForURL(`${APP}/`);
+      assert((await boardName(page)) === EMAIL_DOC, `the doctor's name: ${await boardName(page)}`);
+      assert((await page.locator('[data-testid="account-phone"]').count()) === 0, "no number in the account menu");
+      assert((await page.textContent('[data-testid="account-role"]')).trim() === EMAIL_DOC_ROLE, "role in the account menu");
+      const session = await cookie(ctx, "session");
+      const payload = JSON.parse(Buffer.from(session.value.split(".")[1], "base64url").toString("utf8"));
+      assert(payload.uid === (await userId(db, EMAIL_DOC)) && payload.phone === undefined, `session carries the user id: ${JSON.stringify(payload)}`);
+      assert(!(await cookie(ctx, "pending"))?.value, "pending cleared");
+      const claim = await currentClaim(db, EMAIL_DOC);
+      assert(claim?.phone === null && claim.line_sub === SUB_DOC, `an email claim without a number: ${JSON.stringify(claim)}`);
+      const via = await db.query("SELECT via, email_verified_at IS NOT NULL AS verified FROM user_claims WHERE id = $1", [claim.id]);
+      assert(via.rows[0].via === "email" && via.rows[0].verified, "via email, verified now");
+      const msgs = await waitForTelegram(before + 1);
+      assert(msgs[before].text.startsWith(`📧 แพทย์ยืนยันตัวตนทางอีเมล: ${EMAIL_DOC} (${EMAIL_DOC_ROLE})`), `notice: ${msgs[before].text}`);
+      assert(!msgs[before].reply_markup, "no undo button");
+      await page.waitForLoadState("networkidle");
+      assert(csp.length === 0, `CSP violations: ${csp.join(" | ")}`);
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+
+      // the next sign-in of this LINE account needs no code
+      ctx = await newContext(browser);
+      page = await ctx.newPage();
+      await lineLogin(page);
+      assert(new URL(page.url()).pathname === "/", `email binding fast path: ${page.url()}`);
+      assert((await boardName(page)) === EMAIL_DOC, "signed in as the doctor");
+      const ev = await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND event = 'login_email_binding'", [SUB_DOC]);
+      assert(ev.rowCount === 1, "login_email_binding logged");
       await ctx.close();
     });
 

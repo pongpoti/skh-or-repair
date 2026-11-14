@@ -383,7 +383,17 @@ export type LoginEvent =
   | "claim_failed"
   | "claim_refused"
   | "claim_undone"
-  | "logout";
+  | "logout"
+  // doctors' email codes (lib/email-otp.ts); these rows hold no number
+  | "login_email"
+  | "login_email_binding"
+  | "email_sent"
+  | "email_send_failed"
+  | "email_rate_limited"
+  | "email_daily_cap"
+  | "email_failed"
+  | "email_locked"
+  | "email_refused";
 
 export interface EventRow {
   event: LoginEvent;
