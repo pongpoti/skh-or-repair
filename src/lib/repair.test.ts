@@ -115,7 +115,7 @@ withRepair("rooms hold one department all day, whatever the weekly schedule says
   assert.equal(allocation.am, allocation.pm);
   assert.equal(allocation.am?.color, REPAIR_COLOR, "the repair's colour, not the department's");
   assert.equal(allocation.am?.label, "GENSX", "the department's label");
-  assert.equal(DEPARTMENTS.GENSX.color, "#0E5E6F", "the department list keeps its colour");
+  assert.equal(DEPARTMENTS.GENSX.color, "#1E7B3C", "the department list keeps its colour");
   assert.equal(readableTextOn(REPAIR_COLOR), "#ffffff");
 
   assert.equal(allocationFor("or-2", "2026-12-12"), null, "Saturday");

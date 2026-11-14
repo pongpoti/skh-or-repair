@@ -138,19 +138,19 @@ test("keeps the plan labels short", () => {
   for (const dept of Object.values(DEPARTMENTS)) assert.ok(dept.label.length <= 5, dept.code);
 });
 
-test("uses the department colours of the 4 Nov 2026 schedule image", () => {
+test("uses the meaning-based department colours approved on 14 Nov 2026", () => {
   const list = {
-    GENSX: "#0E5E6F", EYE: "#0F7FA0", ENT: "#2F5FA8", CVT: "#5E6A73", ORTHO: "#4F3D8C", MAXILLO: "#7E5C92",
-    OBGYN: "#8C3B6E", VASCULAR: "#B94769", SCOPE: "#B04A3A", PLASTIC: "#B45E04", PEDSX: "#937000", NEURO: "#8A5A22",
-    INFECT: "#7B7252", NEPHRO: "#667924", CHEST: "#6367BC", URO: "#2E7D5B", EMER: "#1C1C1C", MINOR: "#6B7377", MIXED: "#6E5A4B",
-    UNK: "#78746F",
+    GENSX: "#1E7B3C", SCOPE: "#6B7016", VASCULAR: "#2E4FA8", ORTHO: "#455A64", OBGYN: "#C2185B", EYE: "#0277BD",
+    URO: "#9A6B00", PLASTIC: "#A85C52", ENT: "#00838F", NEPHRO: "#6B4A2E", CHEST: "#5867B8", PEDSX: "#C25400",
+    NEURO: "#5E35B1", CVT: "#931A32", MAXILLO: "#8A5A83", INFECT: "#8E3E12", EMER: "#D32F2F", MINOR: "#5F7380",
+    MIXED: "#5C5650", UNK: "#7A746C",
   };
   assert.deepEqual(Object.fromEntries(Object.values(DEPARTMENTS).map((dept) => [dept.code, dept.color])), list);
   assert.equal(new Set(Object.values(DEPARTMENTS).map((dept) => dept.color)).size, 20);
 });
 
 test("picks white or ink text, whichever reads better", () => {
-  assert.equal(readableTextOn("#0E5E6F"), "#ffffff");
+  assert.equal(readableTextOn("#1E7B3C"), "#ffffff");
   assert.equal(readableTextOn("#1D3F8F"), "#ffffff");
   assert.equal(readableTextOn("#B3261E"), "#ffffff");
   assert.equal(readableTextOn("#C9D86A"), INK);
