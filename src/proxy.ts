@@ -42,7 +42,8 @@ function buildCsp(nonce: string, isDev: boolean, https: boolean): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https://profile.line-scdn.net https://*.line-scdn.net",
     "font-src 'self'",
-    `connect-src 'self'${isDev ? " ws: wss:" : ""}`,
+    // LINE's APIs for the LIFF SDK (liff.init() in components/liff-sign-in.tsx)
+    `connect-src 'self' https://api.line.me https://access.line.me https://liffsdk.line-scdn.net${isDev ? " ws: wss:" : ""}`,
     "frame-ancestors 'none'",
     "form-action 'self' https://access.line.me",
     "base-uri 'none'",

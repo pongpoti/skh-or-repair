@@ -1635,7 +1635,7 @@ async function main() {
       assert(new URL(page.url()).pathname === "/", "still signed in");
       await page.click('[data-testid="user-menu"]');
       await page.click('[data-testid="logout"]');
-      // sign-out lands on /login?signed_out=1, which keeps the LINE button instead of signing straight back in (#4)
+      // Sign-out lands on /login?signed_out=1, which waits for the button instead of signing straight back in.
       await page.waitForURL(`${APP}/login?signed_out=1`);
       assert(!(await cookie(ctxA, "session"))?.value, "session cookie cleared");
       await page.goto(`${APP}/`);
