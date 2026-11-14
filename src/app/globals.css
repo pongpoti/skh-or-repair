@@ -66,6 +66,9 @@
   --fp-delayed: #d98c00;
   --fp-closed: #ebe6df;
   --fp-closed-line: #e0d9cf;
+  /* The repair's closed zone: dark taupe stripes inside a dashed amber-brown edge. */
+  --fp-zone: #483c32;
+  --fp-zone-edge: #7a4700;
 
   --background: var(--canvas);
   --foreground: var(--ink);
@@ -187,6 +190,11 @@ body {
   .badge-warning { color: var(--late); background: var(--late-tint); border-color: rgb(217 140 0 / 0.3); }
   .badge-success { color: var(--live); background: var(--live-tint); border-color: rgb(21 127 61 / 0.25); }
   .badge-muted { color: var(--ink-3); background: #fff; border-color: var(--line-strong); }
+  .badge-stop { color: var(--stop); background: rgb(253 236 234); border-color: rgb(192 57 43 / 0.22); }
+  /* A case row's source (components/case-source.tsx): an icon and a word in place of the status dot. */
+  .badge-source { gap: 4px; color: var(--ink-2); background: #fff; border-color: var(--line-strong); }
+  .badge-source::before { content: none; }
+  .badge-matched { color: var(--live); background: var(--live-tint); border-color: rgb(21 127 61 / 0.25); }
 
   /* Department chip, coloured by --chip (the department's own colour). */
   .chip {
@@ -654,6 +662,8 @@ dialog[open]::backdrop {
 .fp-or.is-selected .fp-badge { fill: var(--brand); stroke: #fff; stroke-width: 4; }
 .fp-or.is-selected .fp-label { fill: #fff; }
 .fp-recovery .fp-floor { fill: var(--fp-recovery); }
+/* A recovery-area room closed for the repair takes the closed rooms' stripes (set as --rf). */
+.fp-recovery.is-closed .fp-floor { fill: var(--rf, var(--fp-recovery)); }
 /* Keyboard focus lands on the floor path; show it as a blue wall instead of a box around the shape. */
 .fp-floor:focus-visible { outline: none; stroke: #fff; stroke-width: 22; stroke-linejoin: round; }
 .fp-or:has(.fp-floor:focus-visible) .fp-wall,
@@ -689,6 +699,28 @@ dialog[open]::backdrop {
 .fp-mark { stroke: #fff; stroke-width: 5; stroke-linejoin: round; filter: drop-shadow(0 0 2px rgb(41 29 20 / 0.6)); pointer-events: none; }
 .fp-mark-active { fill: var(--fp-active); }
 .fp-mark-delayed { fill: var(--fp-delayed); }
+/* Cases that do not match the bookings: an amber triangle with an ink "!" (6:1 on the amber). */
+.fp-mark-mismatch { fill: var(--fp-delayed); }
+.fp-mismatch-text {
+  font-family: var(--font-inter), sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  fill: var(--fp-ink);
+  text-anchor: middle;
+  pointer-events: none;
+}
+/* The repair's closed zone: drawn over the closed rooms, thin enough that their numbers still read, never over a room in use. */
+.fp-zone-tint { fill: var(--fp-zone); fill-opacity: 0.1; }
+.fp-zone-stripe { stroke: var(--fp-zone); stroke-opacity: 0.3; }
+.fp-zone-area { fill: url(#fp-zone); stroke: var(--fp-zone-edge); stroke-width: 6; stroke-dasharray: 24 14; stroke-linejoin: round; }
+.fp-zone-tag { fill: var(--fp-zone); stroke: #fff; stroke-width: 3; }
+.fp-zone-text {
+  font-family: var(--font-inter), var(--font-thai), sans-serif;
+  font-size: 34px;
+  font-weight: 700;
+  fill: #fff;
+  text-anchor: middle;
+}
 
 /* Without the Popover API the account menu cannot open, so the bar falls back to a plain sign-out button. */
 .no-popover-only { display: none; }
