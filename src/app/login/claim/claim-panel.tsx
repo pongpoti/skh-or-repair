@@ -273,8 +273,7 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
           เลือกตำแหน่งของคุณ
         </h2>
         <p className={HELP}>
-          เลือกตำแหน่ง แล้วเลือกชื่อของคุณจากรายชื่อ <span className="whitespace-nowrap">ทำครั้งเดียว</span>{" "}
-          <span className="whitespace-nowrap">ครั้งต่อไปเข้าด้วย LINE</span> <span className="whitespace-nowrap">ได้ทันที</span>
+          ทำครั้งเดียว <span className="whitespace-nowrap">ครั้งต่อไปเข้าด้วย LINE</span> <span className="whitespace-nowrap">ได้ทันที</span>
         </p>
         <ul className="mt-4 grid gap-2">
           {USER_TYPES.map((t) => (

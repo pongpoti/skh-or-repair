@@ -221,8 +221,7 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
         </h2>
         {selectedBox}
         <p className={HELP}>
-          ระบบจะส่งรหัส 6&nbsp;หลักไปที่อีเมลของคุณที่มีในรายชื่อแพทย์ของโรงพยาบาล{" "}
-          <span className="whitespace-nowrap">ทำครั้งเดียว</span> ครั้งต่อไปเข้าด้วย LINE ได้ทันที
+          รหัส 6&nbsp;หลักจะส่งไปที่อีเมลของคุณในรายชื่อแพทย์ ครั้งต่อไปเข้าด้วย LINE ได้ทันที
         </p>
         {errorBox}
         <button

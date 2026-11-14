@@ -42,7 +42,7 @@ export default async function ClaimPage() {
   return (
     <AuthShell title="ยืนยันชื่อของคุณ">
       <VerifiedIdentity lineName={grant.name} picture={grant.picture} phone={phone} />
-      <div className="mt-5">
+      <div className="mt-6">
         <ClaimPanel start={start} phone={phone} />
       </div>
     </AuthShell>

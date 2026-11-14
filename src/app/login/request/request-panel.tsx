@@ -63,8 +63,8 @@ export function StateIcon({ icon, tone }: { icon: keyof typeof ICONS; tone: keyo
   );
 }
 
-export const H2 = "text-lg leading-snug font-bold text-ink";
-export const HELP = "mt-2 text-sm leading-6 text-muted";
+export const H2 = "text-base leading-snug font-semibold text-ink";
+export const HELP = "mt-1 text-sm leading-6 text-muted";
 export const NOTE = "mt-3 text-[0.8125rem] leading-5 text-muted";
 export const LABEL = "mb-1.5 block text-sm font-semibold text-ink-2";
 export const EXPIRED_MESSAGE = EXPIRED;
@@ -366,7 +366,7 @@ export function RequestPanel({ initial, phone, claims = true }: { initial: Panel
         ส่งคำขอเข้าใช้งาน
       </h2>
       <p className={HELP}>
-        {claims ? "สำหรับผู้ที่ไม่พบชื่อในรายชื่อ หรือชื่อมีผู้เลือกแล้ว " : ""}กรอกข้อมูลด้านล่างเพื่อส่งคำขอให้ผู้ดูแลอนุมัติ
+        {claims ? "ไม่พบชื่อ หรือชื่อมีผู้เลือกแล้ว " : ""}ส่งคำขอให้ผู้ดูแลอนุมัติ
       </p>
       <div className="mt-4 grid gap-4">
         <div>

@@ -30,7 +30,7 @@ export default async function RequestPage() {
   return (
     <AuthShell title="ขอสิทธิ์เข้าใช้งาน">
       <VerifiedIdentity lineName={grant.name} picture={grant.picture} phone={phone} />
-      <div className="mt-5">
+      <div className="mt-6">
         <RequestPanel initial={view} phone={phone} claims={claimsEnabled()} />
       </div>
     </AuthShell>

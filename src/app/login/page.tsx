@@ -42,15 +42,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   }
 
   return (
-    <AuthShell title="ตารางห้องผ่าตัด" description="เข้าสู่ระบบเพื่อดูเคสผ่าตัดของวันนี้">
+    <AuthShell title="เข้าสู่ระบบ" description="ตารางห้องผ่าตัด สำหรับเจ้าหน้าที่ที่ได้รับอนุญาต">
       {liff ? <LiffSignIn liffId={liff} next={next} auto={auto} /> : <LineLoginButton next={next} />}
-      <p className="mt-4 text-center text-sm leading-6 text-muted">
-        สำหรับเจ้าหน้าที่ห้องผ่าตัดที่ได้รับอนุญาตเท่านั้น
-        <br />
-        ครั้งแรกต้องยืนยันเบอร์มือถือด้วยรหัสทาง SMS
-        <br />
-        แพทย์ยืนยันด้วยรหัสทางอีเมล
-      </p>
+      <p className="mt-4 text-center text-[0.8125rem] leading-5 text-muted">ครั้งแรกยืนยันตัวตนด้วยรหัสทาง SMS แพทย์ใช้รหัสทางอีเมล</p>
       {resume === "request" ? (
         <a className="btn btn-secondary mt-4 w-full" href="/login/request" data-testid="request-status-link">
           ดูสถานะคำขอเข้าใช้งาน
