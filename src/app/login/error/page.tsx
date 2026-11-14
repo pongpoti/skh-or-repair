@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { AuthShell, Notice } from "@/components/auth-shell";
 
 const MESSAGES: Record<string, { title: string; body: string }> = {
@@ -22,9 +21,10 @@ export default async function LoginErrorPage({ searchParams }: { searchParams: P
         <Notice tone="warning" role="alert">
           {msg.body}
         </Notice>
-        <Link className="btn btn-primary mt-5 min-h-12 w-full" href="/login">
-          กลับไปหน้าเข้าสู่ระบบ
-        </Link>
+        {/* a full page load: /login goes straight on to LINE Login */}
+        <a className="btn btn-primary mt-5 min-h-12 w-full" href="/login">
+          ลองอีกครั้ง
+        </a>
       </div>
     </AuthShell>
   );

@@ -356,9 +356,9 @@ function trackCsp(page, sink) {
   });
 }
 
+// /login has no button: outside the LIFF app it goes straight on to LINE Login (the mock here) and back.
 async function lineLogin(page, next, base = APP) {
   await page.goto(next ? `${base}/login?next=${encodeURIComponent(next)}` : `${base}/login`);
-  await page.click('[data-testid="line-login"]');
   await page.waitForLoadState("networkidle");
 }
 
@@ -666,7 +666,15 @@ async function main() {
       const page = await ctx.newPage();
       const csp = [];
       trackCsp(page, csp);
-      const resp = await page.goto(`${APP}/`);
+      const root = await rawRequest("/", { host: `localhost:${APP_PORT}` });
+      assert(root.status === 307 && root.location === "/login", `/ -> ${root.status} ${root.location}`);
+      // no sign-in button: /login goes straight on to LINE Login (in the LIFF app, the LIFF SDK signs in instead)
+      const login = await rawRequest("/login", { host: `localhost:${APP_PORT}` });
+      assert(login.status === 307 && login.location === "/api/auth/line/start", `/login -> ${login.status} ${login.location}`);
+      const loginNext = await rawRequest("/login?next=%2F%3Froom%3Dor-7", { host: `localhost:${APP_PORT}` });
+      assert(loginNext.location === "/api/auth/line/start?next=%2F%3Froom%3Dor-7", `/login keeps next: ${loginNext.location}`);
+      // the page that renders, where signing out lands
+      const resp = await page.goto(`${APP}/login?signed_out=1`);
       assert(new URL(page.url()).pathname === "/login", `landed on ${page.url()}`);
       const h = resp.headers();
       const policy = h["content-security-policy"] ?? "";
@@ -687,10 +695,10 @@ async function main() {
       assert(scripts.length > 0 && scripts.every((s) => s.includes(`nonce="${nonce}"`)), "every script carries the nonce");
       await page.waitForLoadState("networkidle");
       assert(csp.length === 0, `CSP violations: ${csp.join(" | ")}`);
-      const btn = page.locator('[data-testid="line-login"]');
-      assert((await btn.getAttribute("href")) === "/api/auth/line/start", `LINE button href ${await btn.getAttribute("href")}`);
+      assert((await page.textContent("h1")).trim() === "ออกจากระบบแล้ว", "signed-out title");
+      assert((await page.locator('[data-testid="line-login"]').count()) === 0, "no LINE button");
       await touchTargets(page, "/login");
-      await shoot(page, "login");
+      await shoot(page, "login-signed-out");
 
       for (const headers of [{ RSC: "1" }, { RSC: "1", "Next-Router-Prefetch": "1" }, { Purpose: "prefetch" }]) {
         const r = await rawRequest("/", { host: `localhost:${APP_PORT}`, ...headers });
@@ -721,7 +729,7 @@ async function main() {
       const r2 = await rawRequest("//evil.test/path", { host: "orskh-abc123.vercel.app" });
       assert(r2.status === 308 && !r2.location.startsWith("//"), `protocol-relative Location: ${r2.location}`);
       assert(new URL(r2.location, APP).origin === APP, `no open redirect: ${r2.location}`);
-      const same = await rawRequest("/login", { host: `localhost:${APP_PORT}` });
+      const same = await rawRequest("/login?signed_out=1", { host: `localhost:${APP_PORT}` });
       assert(same.status === 200, `canonical host is served: ${same.status}`);
     });
 
@@ -1205,7 +1213,8 @@ async function main() {
       assert(new URL(page.url()).pathname === "/login", "protected pages still redirect");
       assert((await page.getAttribute('[data-testid="claim-resume-link"]', "href")) === "/login/claim", "resume link on /login");
       assert((await page.locator('[data-testid="request-status-link"]').count()) === 0, "no status link before a request");
-      assert((await page.textContent("main")).includes("SMS"), "/login mentions the SMS code");
+      assert((await page.locator('[data-testid="line-login"]').count()) === 0, "no LINE button on /login");
+      await shoot(page, "login-resume");
       assert(csp.length === 0, `CSP violations: ${csp.join(" | ")}`);
       await ctx.close();
     });
@@ -1228,7 +1237,7 @@ async function main() {
       assert((await status()).status === "signin", "status says sign in again");
       await page.reload();
       await page.waitForSelector('[data-testid="request-signin"]');
-      assert((await page.textContent('[data-testid="request-signin"] a')).includes("เข้าสู่ระบบด้วย LINE"), "sign-in link");
+      assert((await page.textContent('[data-testid="request-signin"] a')).trim() === "เข้าสู่ระบบ", "sign-in link");
       const claimPage = await rawRequest("/login/claim", { host: `localhost:${APP_PORT}`, cookie: `access=${(await cookie(ctx, "access")).value}` });
       assert(claimPage.status === 307 && claimPage.location === "/login/request", `a listed number skips the claim page: ${claimPage.status} ${claimPage.location}`);
       await db.query("UPDATE users SET active = false, updated_at = now() WHERE first_name || ' ' || last_name = $1", [RETIRED_NAME]);
@@ -1635,11 +1644,13 @@ async function main() {
       assert(new URL(page.url()).pathname === "/", "still signed in");
       await page.click('[data-testid="user-menu"]');
       await page.click('[data-testid="logout"]');
-      // Sign-out lands on /login?signed_out=1, which waits for the button instead of signing straight back in.
+      // Sign-out lands on /login?signed_out=1, which says so instead of signing straight back in.
       await page.waitForURL(`${APP}/login?signed_out=1`);
+      assert((await page.textContent("h1")).trim() === "ออกจากระบบแล้ว", "signed-out page");
       assert(!(await cookie(ctxA, "session"))?.value, "session cookie cleared");
-      await page.goto(`${APP}/`);
-      assert(new URL(page.url()).pathname === "/login", "redirected after logout");
+      // (not followed: /login would go straight on to LINE Login and sign back in)
+      const after = await page.request.get(`${APP}/`, { maxRedirects: 0 });
+      assert(after.status() === 307 && after.headers().location === "/login", `redirected after logout: ${after.status()} ${after.headers().location}`);
       const ev = await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND phone = $2 AND event = 'logout'", [SUB_A, DOC1]);
       assert(ev.rowCount === 1, "logout event logged");
       await ctxA.close();
@@ -1888,8 +1899,9 @@ async function main() {
       await waitUntil(async () => (await telegramCalls("answerCallbackQuery")).length === answers + 3, "second answer");
       assert((await telegramCalls("answerCallbackQuery"))[answers + 2].body.text === "ดำเนินการไปแล้ว", "already done");
       // the open session is refused at once on this instance (the cache is told)
-      await page.reload();
-      assert(new URL(page.url()).pathname === "/login", `session refused after the undo: ${page.url()}`);
+      const refused = await page.request.get(page.url(), { maxRedirects: 0 });
+      const to = refused.headers().location ?? "";
+      assert(refused.status() === 307 && to.startsWith("/login"), `session refused after the undo: ${refused.status()} ${to}`);
       await ctx.close();
 
       // signing in again: the code works, but the claim page is blocked for 24 h (the API too), the request remains

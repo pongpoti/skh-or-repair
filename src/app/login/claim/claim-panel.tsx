@@ -231,7 +231,7 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
           <Notice tone="warning">{restart}</Notice>
         </div>
         <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
-          เข้าสู่ระบบด้วย LINE อีกครั้ง
+          เริ่มใหม่
         </a>
       </div>
     );

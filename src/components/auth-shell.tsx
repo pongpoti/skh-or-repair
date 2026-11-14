@@ -73,7 +73,7 @@ export function AuthShell({
 }: {
   title: string;
   description?: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return (
     <main className="flex h-dvh overflow-y-auto overscroll-contain bg-canvas px-4 pt-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))]">
@@ -84,7 +84,7 @@ export function AuthShell({
             <h1 className="mt-4 text-xl leading-snug font-bold text-balance text-ink">{title}</h1>
             {description ? <p className="mt-1 text-sm leading-6 text-pretty text-muted">{description}</p> : null}
           </div>
-          <div className="mt-6">{children}</div>
+          {children ? <div className="mt-6">{children}</div> : null}
         </div>
         <p className="mt-4 text-center text-xs text-muted">
           <Wordmark className="text-xs" /> · ตารางห้องผ่าตัด

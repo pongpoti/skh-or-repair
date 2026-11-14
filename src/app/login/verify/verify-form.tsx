@@ -254,7 +254,7 @@ export function VerifyForm({ other }: { other?: React.ReactNode }) {
       <div role="alert">
         <Notice tone="warning">{error}</Notice>
         <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
-          เข้าสู่ระบบด้วย LINE อีกครั้ง
+          เริ่มใหม่
         </a>
       </div>
     );

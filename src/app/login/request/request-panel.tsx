@@ -11,7 +11,7 @@ type Field = "firstName" | "lastName" | "position";
 const POLL_MS = 10_000;
 /** Polling stops after this long; a button resumes it. */
 const POLL_FOR_MS = 30 * 60_000;
-const EXPIRED = "หมดเวลายืนยันตัวตน กรุณาเข้าสู่ระบบด้วย LINE อีกครั้ง";
+const EXPIRED = "หมดเวลายืนยันตัวตน กรุณาเริ่มใหม่";
 
 function toView(status: string | undefined): PanelView | null {
   return status === "form" || status === "pending" || status === "approved" || status === "rejected" || status === "signin"
@@ -232,7 +232,7 @@ export function RequestPanel({ initial, phone, claims = true }: { initial: Panel
           <Notice tone="warning">{restart}</Notice>
         </div>
         <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
-          เข้าสู่ระบบด้วย LINE อีกครั้ง
+          เริ่มใหม่
         </a>
       </div>
     );
@@ -267,7 +267,7 @@ export function RequestPanel({ initial, phone, claims = true }: { initial: Panel
         )}
         <p className={NOTE}>
           ปิดหน้านี้ได้ ระบบไม่ส่ง SMS แจ้งผล กลับมาดูผลได้ที่ปุ่ม “ดูสถานะคำขอเข้าใช้งาน” ในหน้าเข้าสู่ระบบภายใน
-          12&nbsp;ชั่วโมง (หลังจากนั้นหรือจากเครื่องอื่น ให้เข้าสู่ระบบด้วย LINE แล้วยืนยันเบอร์อีกครั้ง)
+          12&nbsp;ชั่วโมง (หลังจากนั้นหรือจากเครื่องอื่น ให้เปิดจากเมนูใน LINE แล้วยืนยันเบอร์อีกครั้ง)
         </p>
         <OtherPhone />
       </div>
@@ -331,9 +331,9 @@ export function RequestPanel({ initial, phone, claims = true }: { initial: Panel
         <h2 className={H2} ref={headingRef} tabIndex={-1}>
           เบอร์นี้ได้รับอนุญาตแล้ว
         </h2>
-        <p className={HELP}>กรุณาเข้าสู่ระบบด้วย LINE อีกครั้ง แล้วยืนยันเบอร์ด้วยรหัสทาง SMS</p>
+        <p className={HELP}>กรุณาเข้าสู่ระบบอีกครั้ง แล้วยืนยันเบอร์ด้วยรหัสทาง SMS</p>
         <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
-          เข้าสู่ระบบด้วย LINE
+          เข้าสู่ระบบ
         </a>
       </div>
     );
