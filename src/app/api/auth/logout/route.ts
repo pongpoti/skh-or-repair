@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
       // logging is best effort; logout must always succeed
     }
   }
-  const res = NextResponse.json({ ok: true, redirect: "/login" }, { headers: { "Cache-Control": "no-store" } });
+  const res = NextResponse.json({ ok: true, redirect: "/login?signed_out=1" }, { headers: { "Cache-Control": "no-store" } });
   clearCookie(res, "session");
   clearCookie(res, "pending");
   clearCookie(res, "access");

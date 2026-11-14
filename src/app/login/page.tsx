@@ -5,6 +5,7 @@ import { latestRequest, viewFor } from "@/lib/access";
 import { getAccessGrant, getUser } from "@/lib/auth/server";
 import { isListedUser } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { gateMode } from "@/lib/gate";
 import { safeNextPath } from "@/lib/security";
 import { claimsEnabled } from "@/lib/telegram";
 
@@ -22,13 +23,19 @@ async function continueAt(phone: string, sub: string): Promise<"request" | "clai
   }
 }
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string | string[] }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string | string[]; signed_out?: string | string[] }> }) {
   const sp = await searchParams;
   const next = safeNextPath(typeof sp.next === "string" ? sp.next : undefined);
   if (await getUser()) redirect(next);
   // A verified number that is not authorized yet (a name to pick, or an access request in progress, on this browser).
   const grant = await getAccessGrant();
   const resume = grant ? await continueAt(grant.phone, grant.sub) : null;
+  // Inside the LIFF app (the only place the gate lets this page render on Vercel) LINE signs the user in without a
+  // prompt, so start LINE Login straight away instead of showing a button to tap. Not after signing out (that would
+  // sign straight back in) and not while this browser has a name to pick or an access request to follow.
+  if (gateMode() === "liff" && !resume && sp.signed_out === undefined) {
+    redirect(next === "/" ? "/api/auth/line/start" : `/api/auth/line/start?next=${encodeURIComponent(next)}`);
+  }
 
   return (
     <AuthShell title="ตารางห้องผ่าตัด" description="เข้าสู่ระบบเพื่อดูเคสผ่าตัดของวันนี้">
