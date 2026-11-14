@@ -1,4 +1,4 @@
-import { repairOn } from "./repair.ts";
+import { repairOn, type RepairPeriods } from "./repair.ts";
 
 export type RoomKind = "or" | "recovery";
 
@@ -47,44 +47,61 @@ export function roomLabel(room: Room): string {
  */
 export const OPEN_ROOM_IDS: readonly string[] = ROOMS.filter((room) => room.kind === "or").map((room) => room.id);
 
-/** What an operating room is on a day: in use for operations, a recovery room (during the repair), or closed. */
-export type RoomUse = "open" | "recovery" | "closed";
+/**
+ * What an operating room is on a day: in use for operations, a recovery room or the instrument room (both during the
+ * repair), or closed.
+ */
+export type RoomUse = "open" | "recovery" | "instrument" | "closed";
 
-/** What `room` is used for on `date` (YYYY-MM-DD). Recovery-area rooms (r-1, r-2) and unknown ids are "closed". */
-export function roomUse(room: Room | string, date: string): RoomUse {
+/**
+ * What `room` is used for on `date` (YYYY-MM-DD) under the repair `periods`. Recovery-area rooms (r-1, r-2) and unknown
+ * ids are "closed": they never take a case (recoveryAreaClosed says whether the repair closes one).
+ */
+export function roomUse(room: Room | string, date: string, periods: RepairPeriods): RoomUse {
   const id = typeof room === "string" ? room : room.id;
   if (getRoom(id)?.kind !== "or") return "closed";
-  const repair = repairOn(date);
+  const repair = repairOn(date, periods);
   if (repair) {
     const use = repair.rooms[id];
-    return !use ? "closed" : use === "RR" ? "recovery" : "open";
+    return !use ? "closed" : use === "RR" ? "recovery" : use === "INSTR" ? "instrument" : "open";
   }
   return OPEN_ROOM_IDS.includes(id) ? "open" : "closed";
 }
 
 /** An operating room that is in use for operations on `date`. */
-export function isOpenRoom(room: Room | string, date: string): boolean {
-  return roomUse(room, date) === "open";
+export function isOpenRoom(room: Room | string, date: string, periods: RepairPeriods): boolean {
+  return roomUse(room, date, periods) === "open";
 }
 
 /** An operating room that is closed on `date`. */
-export function isClosedRoom(room: Room, date: string): boolean {
-  return room.kind === "or" && roomUse(room, date) === "closed";
+export function isClosedRoom(room: Room, date: string, periods: RepairPeriods): boolean {
+  return room.kind === "or" && roomUse(room, date, periods) === "closed";
 }
 
 /** An operating room used as a recovery room on `date` (during the repair). */
-export function isRecoveryUse(room: Room, date: string): boolean {
-  return room.kind === "or" && roomUse(room, date) === "recovery";
+export function isRecoveryUse(room: Room, date: string, periods: RepairPeriods): boolean {
+  return room.kind === "or" && roomUse(room, date, periods) === "recovery";
+}
+
+/** An operating room used as the instrument room on `date` (during the repair's second half). */
+export function isInstrumentUse(room: Room, date: string, periods: RepairPeriods): boolean {
+  return room.kind === "or" && roomUse(room, date, periods) === "instrument";
+}
+
+/** A recovery-area room (RR 1 or 2) closed on `date` because it lies inside the repair zone. */
+export function recoveryAreaClosed(room: Room | string, date: string, periods: RepairPeriods): boolean {
+  const id = typeof room === "string" ? room : room.id;
+  return getRoom(id)?.kind === "recovery" && (repairOn(date, periods)?.closedRecovery.includes(id) ?? false);
 }
 
 /** Only operating rooms in use on `date` can be chosen on the plan. */
-export function isSelectableRoom(room: Room, date: string): boolean {
-  return room.kind === "or" && isOpenRoom(room, date);
+export function isSelectableRoom(room: Room, date: string, periods: RepairPeriods): boolean {
+  return room.kind === "or" && isOpenRoom(room, date, periods);
 }
 
 /** The operating rooms in use on `date`, in number order. */
-export function openRooms(date: string): Room[] {
-  return ROOMS.filter((room) => room.kind === "or" && isOpenRoom(room, date));
+export function openRooms(date: string, periods: RepairPeriods): Room[] {
+  return ROOMS.filter((room) => room.kind === "or" && isOpenRoom(room, date, periods));
 }
 
 /** Room numbers as short ranges: [6, 7, 8, 10] gives "6–8, 10". */
@@ -102,14 +119,17 @@ export function numberRanges(numbers: readonly number[]): string {
 
 /**
  * One line on which operating rooms are not in use on `date`, e.g. "OR 6–13 ปิด", or during the repair
- * "OR 6–8 เป็นห้องพักฟื้น · OR 9–13 ปิด". Empty when every OR is open.
+ * "OR 7–8 เป็นห้องพักฟื้น · OR 1–6 ปิด" and "OR 6 เป็นห้องเครื่องมือ · OR 7–13 ปิด". Empty when every OR is open.
  */
-export function unusedRoomsText(date: string): string {
-  const numbers = (use: RoomUse) => ROOMS.filter((room) => room.kind === "or" && roomUse(room, date) === use).map((room) => Number(room.number));
+export function unusedRoomsText(date: string, periods: RepairPeriods): string {
+  const numbers = (use: RoomUse) =>
+    ROOMS.filter((room) => room.kind === "or" && roomUse(room, date, periods) === use).map((room) => Number(room.number));
   const recovery = numbers("recovery");
+  const instrument = numbers("instrument");
   const closed = numbers("closed");
   return [
     recovery.length ? `OR ${numberRanges(recovery)} เป็นห้องพักฟื้น` : "",
+    instrument.length ? `OR ${numberRanges(instrument)} เป็นห้องเครื่องมือ` : "",
     closed.length ? `OR ${numberRanges(closed)} ปิด` : "",
   ]
     .filter(Boolean)

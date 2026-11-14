@@ -196,7 +196,7 @@ BEGIN
   END IF;
 END $$;
 
--- Cases a doctor added on the board (lib/cases.ts, the board's เพิ่มเคส button). Only a signed-in doctor (a current claim on
+-- Cases a doctor added on the board (lib/cases.ts, the board's จองห้อง button). Only a signed-in doctor (a current claim on
 -- an active users row of type DR) adds them, and the surgeon is always that doctor. op_date is the operation's day in
 -- Thailand; room_id is an operating room (lib/rooms.ts: only open rooms are offered); shift is in (ในเวลา) or out
 -- (นอกเวลา). A removed case keeps its row with removed_at set, so the history stays.
@@ -213,4 +213,86 @@ CREATE TABLE IF NOT EXISTS cases (
 );
 CREATE INDEX IF NOT EXISTS cases_day_idx ON cases (op_date, created_at) WHERE removed_at IS NULL;
 CREATE INDEX IF NOT EXISTS cases_surgeon_idx ON cases (surgeon_id, op_date) WHERE removed_at IS NULL;
+
+-- Bookings: during the ventilation repair a doctor books a room for a patient by HN (lib/added-cases.ts), and the HOSxP
+-- workbook's cases are matched to the bookings by it (lib/board-rows.ts). hn is stored normalised (lib/hn.ts: upper
+-- case, no spaces or dashes, no leading zeros); cases saved before bookings carried an HN keep NULL. The operation name
+-- became optional (the workbook names the operation): a booking without one stores NULL, never an empty string, so
+-- the CHECK above still refuses a blank name. Applied to existing databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'hn' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN hn text CONSTRAINT cases_hn_check CHECK (hn ~ '^[0-9A-Z]{1,15}$');
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'operation' AND attnotnull) THEN
+    ALTER TABLE cases ALTER COLUMN operation DROP NOT NULL;
+  END IF;
+END $$;
+
+-- The ventilation repair's two halves, which an admin can move on /admin (lib/repair-store.ts; the room layout of each
+-- half is in lib/repair.ts). Seeded once with the planned dates; a saved row is never overwritten by the seed.
+-- updated_by is the LINE sub of the admin who saved it (NULL for the seed).
+CREATE TABLE IF NOT EXISTS repair_periods (
+  half        smallint    PRIMARY KEY CHECK (half IN (1, 2)),
+  from_date   date        NOT NULL,
+  to_date     date        NOT NULL,
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  updated_by  text,
+  CHECK (from_date <= to_date)
+);
+INSERT INTO repair_periods (half, from_date, to_date) VALUES (1, '2026-11-14', '2027-01-26'), (2, '2027-01-27', '2027-03-17')
+ON CONFLICT (half) DO NOTHING;
+
+-- MX (ผู้จัดการตาราง): the users who upload the HOSxP workbook (lib/roles.ts), granted and revoked by an admin on /admin.
+-- Revoking deletes the row. The role holds only while the user's current claim does (an inactive user loses it).
+-- added_by is the LINE sub of the admin who granted it.
+CREATE TABLE IF NOT EXISTS mx_members (
+  user_id   integer     PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+  added_at  timestamptz NOT NULL DEFAULT now(),
+  added_by  text
+);
+
+-- HOSxP workbook uploads (lib/workbook-store.ts): MX uploads the next workday's list between 15:00 and 16:00 Bangkok
+-- time. cycle_day is the Bangkok date of the upload and target_date the workday it lists; the board shows the latest
+-- upload of its cycle (lib/board-day.ts). uploaded_by is the uploader's LINE sub. summary holds counts only (rows read,
+-- dropped by reason, placed per room), never a row. Uploads older than 30 days go, with their cases, whenever a new
+-- one is saved.
+CREATE TABLE IF NOT EXISTS workbook_uploads (
+  id             bigserial   PRIMARY KEY,
+  target_date    date        NOT NULL,
+  cycle_day      date        NOT NULL,
+  uploaded_at    timestamptz NOT NULL DEFAULT now(),
+  uploaded_by    text        NOT NULL,
+  uploader_name  text,
+  file_name      text,
+  total_rows     integer,
+  kept           integer,
+  placed         integer,
+  summary        jsonb
+);
+CREATE INDEX IF NOT EXISTS workbook_uploads_cycle_idx ON workbook_uploads (cycle_day, target_date, uploaded_at DESC);
+
+-- The kept cases of one upload, with only what the board needs: never the patient's name, age, AN, diagnosis,
+-- illnesses or costs. hn is normalised (lib/hn.ts) for matching the bookings, and shown only to the doctor who booked
+-- the case, MX and admins. room_id is where the case was placed at upload (NULL when it was not, e.g. obstetrics
+-- during the repair); the board places the case again when it is read, from dept, team (the surgeon's team, for the
+-- SCOPE rule) and urgency, so a change of the repair's dates after the upload moves it. position is its order in the
+-- file.
+CREATE TABLE IF NOT EXISTS workbook_cases (
+  id           bigserial   PRIMARY KEY,
+  upload_id    bigint      NOT NULL REFERENCES workbook_uploads (id) ON DELETE CASCADE,
+  case_id      text        NOT NULL,
+  hn           text        NOT NULL,
+  operation    text        NOT NULL,
+  surgeon      text        NOT NULL,
+  dept         text,
+  team         text,
+  room_id      text        CHECK (room_id ~ '^or-([1-9]|1[0-3])$'),
+  shift        text        CHECK (shift IN ('in', 'out')),
+  status       text        NOT NULL CHECK (status IN ('scheduled', 'in-progress', 'delayed', 'done', 'cancelled', 'recovery')),
+  urgency      text,
+  booked_time  text,
+  position     integer     NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workbook_cases_upload_idx ON workbook_cases (upload_id);
 `;

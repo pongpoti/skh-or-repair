@@ -4,14 +4,16 @@ import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
 import { AddCase, type Doctor } from "@/components/add-case";
+import { BoardAlerts } from "@/components/board-alerts";
+import { CaseFlag, CaseSource } from "@/components/case-source";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
-import type { AddedCase } from "@/lib/added-cases";
+import { firstBookingDay, type AddedCase } from "@/lib/added-cases";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
+import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
 import { boardHref } from "@/lib/days";
-import { repairNote, repairOn } from "@/lib/repair";
+import { repairOn, type RepairPeriods } from "@/lib/repair";
 import { getRoom, isSelectableRoom, roomLabel } from "@/lib/rooms";
-import { casesForRoom, roomMark, type CaseStatus, type Operation } from "@/lib/schedule";
-import type { DayBoard } from "@/lib/week";
+import { roomMark, type CaseStatus } from "@/lib/schedule";
 
 const STATUS_LABEL: Record<CaseStatus, string> = {
   scheduled: "รอ",
@@ -22,7 +24,23 @@ const STATUS_LABEL: Record<CaseStatus, string> = {
   recovery: "พักฟื้น",
 };
 
-const NONE: Operation[] = [];
+const NONE: BoardRow[] = [];
+const NO_MISMATCH: Record<string, number> = {};
+
+/**
+ * The board's day: its date and case rows (lib/board-rows.ts: the HOSxP workbook's cases matched with the doctors'
+ * bookings). The server has already left out every HN the viewer may not see.
+ */
+export type BoardView = Pick<BoardRows, "uploaded" | "mismatchCount" | "mismatchByRoom"> & {
+  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts). */
+  date: string;
+  rows: readonly BoardRow[];
+};
+
+/** A room's rows in their order. */
+function rowsOf(rows: readonly BoardRow[], roomId: string): BoardRow[] {
+  return rows.filter((item) => item.roomId === roomId).sort((a, b) => a.order - b.order);
+}
 
 /** What a doctor needs to add cases (null for everyone else). */
 export type CaseAdding = {
@@ -71,31 +89,34 @@ function Owner({ dept, part, split = false }: { dept: Department | null; part?: 
 export function SuiteBoard({
   board,
   today,
+  periods,
   holiday = null,
   roomId = null,
   pathname = "/",
   adding = null,
   casesUnavailable = false,
 }: {
-  /** Today's cases, or null when the suite is closed (the weekend or a holiday). */
-  board: DayBoard | null;
+  /** The board's day, or null when the suite is closed (the preview of a weekend or holiday). */
+  board: BoardView | null;
   /** Today in Thailand, YYYY-MM-DD: decides which rooms are in use when there is no board. */
   today: string;
+  /** The repair's dates (lib/repair-store.ts), loaded by the page. */
+  periods: RepairPeriods;
   /** The name of today's Thai public or special holiday, if it is one. */
   holiday?: string | null;
   roomId?: string | null;
   pathname?: string;
-  /** Shown to doctors: the เพิ่มเคส button and its form. */
+  /** Shown to doctors: the จองห้อง button and its booking form. */
   adding?: CaseAdding | null;
-  /** The doctors' added cases could not be loaded, so the board shows the imported ones only. */
+  /** The bookings and the HOSxP cases could not be loaded, so the rooms show none. */
   casesUnavailable?: boolean;
 }) {
   const router = useRouter();
   // The day whose rooms are shown: the board's own date, or today when the suite is closed.
   const day = board?.date ?? today;
-  const repair = repairOn(day);
+  const repair = repairOn(day, periods);
   const found = getRoom(roomId);
-  const urlRoom = found && isSelectableRoom(found, day) ? found.id : null;
+  const urlRoom = found && isSelectableRoom(found, day, periods) ? found.id : null;
   const [selectedId, setSelectedId] = useState<string | null>(urlRoom);
   const [prevUrl, setPrevUrl] = useState(urlRoom);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -107,7 +128,7 @@ export function SuiteBoard({
     setSelectedId(urlRoom);
   }
 
-  const operations = board?.operations ?? NONE;
+  const operations = board?.rows ?? NONE;
   const room = getRoom(selectedId);
   const open = room !== null;
 
@@ -122,16 +143,16 @@ export function SuiteBoard({
     for (const item of operations) {
       if (next[item.roomId]) continue;
       const target = getRoom(item.roomId);
-      if (!target || !isSelectableRoom(target, day)) continue;
-      next[item.roomId] = roomMark(casesForRoom(operations, item.roomId));
+      if (!target || !isSelectableRoom(target, day, periods)) continue;
+      next[item.roomId] = roomMark(rowsOf(operations, item.roomId));
     }
     return next;
-  }, [operations, day]);
+  }, [operations, day, periods]);
 
   function choose(id: string | null) {
     if (id) {
       const next = getRoom(id);
-      if (!next || !isSelectableRoom(next, day)) return;
+      if (!next || !isSelectableRoom(next, day, periods)) return;
     }
     setSelectedId(id);
     startTransition(() => {
@@ -163,29 +184,33 @@ export function SuiteBoard({
   // The board's own date decides who holds each room (it matches the cases). When the suite is closed
   // (the weekend or a holiday) no one does, so every room keeps the plain colour.
   const planDate = board?.date ?? null;
-  const cases = room ? casesForRoom(operations, room.id) : [];
-  const allocation = room && planDate ? allocationFor(room.id, planDate) : null;
+  const cases = room ? rowsOf(operations, room.id) : NONE;
+  const allocation = room && planDate ? allocationFor(room.id, planDate, periods) : null;
   const wash = allocation?.am?.color ?? allocation?.pm?.color;
 
   return (
     <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="relative mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col overflow-hidden sm:px-3 lg:flex-row lg:gap-6 lg:px-6 lg:pt-3 lg:pb-4">
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {board === null || casesUnavailable || repair ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 pt-3 pb-1 lg:px-0 lg:pt-0 lg:pb-3">
-              {board === null ? (
-                <p className="pill px-4">{holiday ? `วันหยุด ${holiday} · ไม่มีตารางผ่าตัด` : "วันนี้เป็นวันหยุด ไม่มีตารางผ่าตัด"}</p>
-              ) : null}
-              {repair ? (
-                <p className="pill px-4" data-testid="repair-note">
-                  {repairNote(repair)}
-                </p>
-              ) : null}
-              {casesUnavailable ? <p className="pill px-4 text-[var(--stop)]">โหลดเคสที่แพทย์เพิ่มไม่สำเร็จ ลองรีเฟรช</p> : null}
-            </div>
-          ) : null}
+          <BoardAlerts
+            closed={board === null}
+            holiday={holiday}
+            failed={casesUnavailable}
+            missingUpload={missingUploadDay(board, casesUnavailable)}
+            mismatches={board?.mismatchCount ?? 0}
+            repair={repair}
+          />
           <div className="flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0">
-            <FloorPlan selectedId={selectedId} marks={marks} cases={counts} date={planDate} day={day} onSelect={onSelect} />
+            <FloorPlan
+              selectedId={selectedId}
+              marks={marks}
+              cases={counts}
+              date={planDate}
+              day={day}
+              periods={periods}
+              mismatches={board?.mismatchByRoom ?? NO_MISMATCH}
+              onSelect={onSelect}
+            />
           </div>
           {adding ? (
             // Below the plan's corner on every screen; on phones the room sheet covers it and carries its own button.
@@ -196,7 +221,7 @@ export function SuiteBoard({
               data-testid="add-case-button"
             >
               {PLUS}
-              เพิ่มเคส
+              จองห้อง
             </button>
           ) : null}
         </div>
@@ -265,11 +290,12 @@ export function SuiteBoard({
                 </div>
               </div>
               {cases.length === 0 ? (
-                <p className="px-5 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] text-center text-sm text-muted">ไม่มีรายการในวันนี้</p>
+                // The board may show the next workday (from 16:00), so the text names no day.
+                <p className="px-5 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] text-center text-sm text-muted">ไม่มีรายการ</p>
               ) : (
                 <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
                   {cases.map((item) => (
-                    <li key={item.id} data-status={item.status} className="case-row">
+                    <li key={item.id} data-status={item.status} data-source={item.source} data-flag={item.flag ?? undefined} className="case-row">
                       <span className="order-no mt-0.5">
                         <span className="sr-only">ลำดับ </span>
                         {item.order}
@@ -280,11 +306,18 @@ export function SuiteBoard({
                           <span className="sr-only"> ({STATUS_LABEL[item.status]})</span>
                         </p>
                         <p className="text-sm text-muted">{item.surgeon}</p>
-                        {item.shift === "out" ? (
-                          <p className="mt-1.5">
-                            <span className="badge badge-warning">นอกเวลา</span>
-                          </p>
-                        ) : null}
+                        {/* Where the row comes from, what does not match, and the HN only when the server sent it
+                            (the booking's doctor, MX and admins). */}
+                        <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <CaseSource source={item.source} />
+                          <CaseFlag flag={item.flag} />
+                          {item.shift === "out" ? <span className="badge badge-warning">นอกเวลา</span> : null}
+                          {item.hn ? (
+                            <span className="text-xs font-semibold text-ink-2 tabular-nums" data-testid="row-hn">
+                              HN {item.hn}
+                            </span>
+                          ) : null}
+                        </p>
                       </div>
                     </li>
                   ))}
@@ -298,7 +331,7 @@ export function SuiteBoard({
                   <path d="M5 3l14 7-6 2.2L10.8 19z" />
                 </svg>
               </span>
-              <p className="text-sm font-medium text-muted">เลือกห้องบนแปลนเพื่อดูรายการวันนี้</p>
+              <p className="text-sm font-medium text-muted">เลือกห้องบนแปลนเพื่อดูรายการ</p>
             </div>
           )}
         </aside>
@@ -309,7 +342,10 @@ export function SuiteBoard({
           onClosed={() => setAddRequest(null)}
           doctor={adding.doctor}
           today={adding.today}
-          todayClosed={board === null}
+          periods={periods}
+          // The form starts on the board's day: the next workday (holidays stepped over) once today's list has closed
+          // at 16:00.
+          firstDay={firstBookingDay(board?.date ?? null, today)}
           initialMine={adding.mine}
           onAdd={adding.onAdd}
           onRemove={adding.onRemove}

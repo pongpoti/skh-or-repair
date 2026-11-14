@@ -9,9 +9,12 @@
 //                                   getWebhookInfo, setWebhook (every call is recorded)
 //   GET  /__control/telegram     -> recorded sendMessage calls [{token, chat_id, text, parse_mode, reply_markup, message_id}]
 //   GET  /__control/telegram/calls -> every recorded Bot API call [{method, token, body}]
+//   GET  /financial-institutions-holidays/?year=YYYY -> Bank of Thailand holidays API stub (point BOT_HOLIDAYS_URL
+//                                   here): the fixed list below for that year; 401 unless Authorization is the token
+//   GET  /__control/bot/calls     -> every recorded holidays call [{year, authorized}]
 // Env: MOCK_LINE_PORT (4010), MOCK_LINE_CLIENT_ID / MOCK_LINE_CLIENT_SECRET (default: LINE_CHANNEL_ID /
 //      LINE_CHANNEL_SECRET from env or .env.local, so `npm run dev` works against it), MOCK_LINE_SUB,
-//      MOCK_LINE_NAME, MOCK_LINE_PICTURE
+//      MOCK_LINE_NAME, MOCK_LINE_PICTURE, MOCK_BOT_TOKEN (default "mock-bot-token": BOT_API_TOKEN of the app)
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { jwtVerify, SignJWT } from "jose";
@@ -30,6 +33,17 @@ let identity = {
   picture: env.MOCK_LINE_PICTURE ?? null,
   error: null,
 };
+const BOT_TOKEN = env.MOCK_BOT_TOKEN ?? "mock-bot-token";
+// The holidays the BOT stub lists, in the API's own shape. Fixed for the whole run: the app keeps a year's answer for
+// six hours, so a list changed mid-run would not be seen. Mon 7 Dec 2026 (the substitute day for Father's Day) is the
+// one the end-to-end tests step over.
+const BOT_HOLIDAYS = [
+  { Date: "2026-12-07", HolidayDescriptionThai: "ชดเชยวันพ่อแห่งชาติ", HolidayDescription: "Substitution for National Father's Day" },
+  { Date: "2026-12-10", HolidayDescriptionThai: "วันรัฐธรรมนูญ", HolidayDescription: "Constitution Day" },
+  { Date: "2026-12-31", HolidayDescriptionThai: "วันสิ้นปี", HolidayDescription: "New Year's Eve" },
+  { Date: "2027-01-01", HolidayDescriptionThai: "วันขึ้นปีใหม่", HolidayDescription: "New Year's Day" },
+];
+const botCalls = []; // every holidays call
 const codes = new Map(); // code -> { redirectUri, nonce, challenge, identity, used }
 const telegram = []; // recorded sendMessage calls
 const telegramCalls = []; // every Bot API call
@@ -65,6 +79,15 @@ const server = createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/__control/telegram") return send(res, 200, telegram);
     if (req.method === "GET" && url.pathname === "/__control/telegram/calls") return send(res, 200, telegramCalls);
+
+    if (req.method === "GET" && url.pathname === "/__control/bot/calls") return send(res, 200, botCalls);
+    if (req.method === "GET" && url.pathname === "/financial-institutions-holidays/") {
+      const year = url.searchParams.get("year") ?? "";
+      const authorized = eq(req.headers.authorization ?? "", BOT_TOKEN);
+      botCalls.push({ year, authorized });
+      if (!authorized) return send(res, 401, { message: "Unauthorized" });
+      return send(res, 200, { result: { api: "Financial Institutions' Holidays", data: BOT_HOLIDAYS.filter((h) => h.Date.startsWith(`${year}-`)) } });
+    }
 
     const tg = /^\/bot([^/]+)\/(\w+)$/.exec(url.pathname);
     if (req.method === "POST" && tg) {

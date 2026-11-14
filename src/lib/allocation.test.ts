@@ -9,12 +9,16 @@ import {
   weekdayIndex,
   weekOfMonth,
 } from "./allocation.ts";
+import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { ROOMS, roomBounds } from "./rooms.ts";
+
+// October 2026 is before the ventilation repair, so the weekly schedule applies (lib/repair.test.ts covers the repair).
+const REPAIR = DEFAULT_REPAIR_PERIODS;
 
 const MON = "2026-10-05";
 const WEEK = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"];
 const code = (roomId: string, date: string, part: "am" | "pm" = "am") =>
-  allocationFor(roomId, date)?.[part]?.code ?? null;
+  allocationFor(roomId, date, REPAIR)?.[part]?.code ?? null;
 
 test("reads the weekday and the week of the month from a date", () => {
   assert.equal(weekdayIndex(MON), 0);
@@ -52,21 +56,21 @@ test("gives each OR to the department the proposed schedule names", () => {
 });
 
 test("keeps each room's department all day, except OR 5 on Tuesday and OR 11 on Friday", () => {
-  const friday = allocationFor("or-11", "2026-10-09");
+  const friday = allocationFor("or-11", "2026-10-09", REPAIR);
   assert.deepEqual([friday?.am?.code, friday?.pm?.code, friday?.split], ["VASCULAR", "NEPHRO", true]);
   assert.equal(allocationText(friday!), "เช้า ศัลยกรรมหลอดเลือด · บ่าย อายุรกรรมโรคไต");
-  const tuesday = allocationFor("or-5", "2026-10-06");
+  const tuesday = allocationFor("or-5", "2026-10-06", REPAIR);
   assert.deepEqual([tuesday?.am?.code, tuesday?.pm?.code, tuesday?.split], ["PEDSX", "GENSX", true]);
   const split = new Set(["or-11 2026-10-09", "or-5 2026-10-06"]);
   for (const room of ROOMS.filter((item) => item.kind === "or")) {
     for (const date of WEEK) {
       if (split.has(`${room.id} ${date}`)) continue;
-      const allocation = allocationFor(room.id, date);
+      const allocation = allocationFor(room.id, date, REPAIR);
       assert.equal(allocation?.split, false, `${room.id} ${date}`);
       assert.equal(allocation?.am?.code, allocation?.pm?.code);
     }
   }
-  assert.equal(allocationText(allocationFor("or-7", MON)!), "ศัลยกรรมทางเดินปัสสาวะ");
+  assert.equal(allocationText(allocationFor("or-7", MON, REPAIR)!), "ศัลยกรรมทางเดินปัสสาวะ");
 });
 
 test("alternates OR 11 and OR 13 on Monday by the week of the month", () => {
@@ -76,7 +80,7 @@ test("alternates OR 11 and OR 13 on Monday by the week of the month", () => {
     ["2026-10-12", "ORTHO", "CVT"],
     ["2026-10-19", "CVT", "ORTHO"],
     ["2026-10-26", "ORTHO", "CVT"],
-    ["2026-11-30", "CVT", "ORTHO"], // a 5th Monday
+    ["2026-08-31", "CVT", "ORTHO"], // a 5th Monday (30 Nov 2026 is in the repair)
   ];
   for (const [date, or11, or13] of mondays) {
     for (const part of ["am", "pm"] as const) {
@@ -95,10 +99,10 @@ test("alternates OR 11 and OR 13 on Monday by the week of the month", () => {
 });
 
 test("knows when the schedule is silent", () => {
-  assert.equal(allocationFor("or-2", "2026-10-03"), null, "Saturday");
-  assert.equal(allocationFor("or-2", "2026-10-04"), null, "Sunday");
-  assert.equal(allocationFor("r-1", MON), null, "recovery room");
-  assert.equal(allocationFor("or-2", "nope"), null);
+  assert.equal(allocationFor("or-2", "2026-10-03", REPAIR), null, "Saturday");
+  assert.equal(allocationFor("or-2", "2026-10-04", REPAIR), null, "Sunday");
+  assert.equal(allocationFor("r-1", MON, REPAIR), null, "recovery room");
+  assert.equal(allocationFor("or-2", "nope", REPAIR), null);
 });
 
 test("gives every OR a department on every weekday", () => {
@@ -106,7 +110,7 @@ test("gives every OR a department on every weekday", () => {
   assert.equal(ors.length, 13);
   for (const room of ors) {
     for (const date of WEEK) {
-      const allocation = allocationFor(room.id, date);
+      const allocation = allocationFor(room.id, date, REPAIR);
       assert.ok(allocation?.am && allocation.pm, `${room.id} ${date}`);
     }
   }
@@ -117,7 +121,7 @@ test("matches the schedule's half-day periods per department", () => {
   const periods: Record<string, number> = {};
   for (const room of ROOMS.filter((item) => item.kind === "or")) {
     for (const date of WEEK) {
-      const allocation = allocationFor(room.id, date)!;
+      const allocation = allocationFor(room.id, date, REPAIR)!;
       for (const dept of [allocation.am!, allocation.pm!]) periods[dept.code] = (periods[dept.code] ?? 0) + 1;
     }
   }

@@ -13,16 +13,30 @@ const ADMIN_ICON = (
   </svg>
 );
 
-/** One bar: the mark, today's date as the page heading, the admin page for admins, and the account menu behind the avatar. */
+/** Lucide "upload" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */
+const UPLOAD_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <path d="M17 8l-5-5-5 5" />
+    <path d="M12 3v12" />
+  </svg>
+);
+
+/**
+ * One bar: the mark, the board's date as the page heading, the upload page for MX and admins, the admin page for
+ * admins, and the account menu behind the avatar.
+ */
 export function TopBar({
   name,
   role = null,
   phone,
   image,
   date,
+  eyebrow = "ตารางผ่าตัดวันนี้",
   pathname = "/",
   showAccount = true,
   adminHref = null,
+  uploadHref = null,
 }: {
   /** The person's full name (claimed user, else the approved request, else the LINE name). */
   name: string;
@@ -32,15 +46,24 @@ export function TopBar({
   phone?: string;
   /** LINE profile picture; only https *.line-scdn.net is shown, otherwise the name's first letter. */
   image?: string | null;
-  /** Today's date, YYYY-MM-DD. */
+  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts). */
   date: string;
+  /** The line above the date, saying how it stands to today (lib/board-day.ts boardEyebrow). */
+  eyebrow?: string;
   pathname?: string;
   showAccount?: boolean;
   /** The admin page, shown only to admins. */
   adminHref?: string | null;
+  /** The HOSxP upload page, shown only to MX and admins. */
+  uploadHref?: string | null;
 }) {
   const src = avatarSrc(image);
   const initial = initialOf(name);
+  // Each button beside the date takes 56px from it, so the month is abbreviated up to a wider screen with each one.
+  // With both, the name beside the avatar (from 640px) leaves too little room for the long month until 768px.
+  const buttons = (adminHref ? 1 : 0) + (uploadHref ? 1 : 0);
+  const shortDate = buttons === 2 ? "md:hidden" : buttons === 1 ? "min-[480px]:hidden" : "min-[400px]:hidden";
+  const longDate = buttons === 2 ? "hidden md:inline" : buttons === 1 ? "hidden min-[480px]:inline" : "hidden min-[400px]:inline";
 
   return (
     <header className="appbar z-30">
@@ -49,28 +72,44 @@ export function TopBar({
           <BrandMark className="h-10 w-10 rounded-xl transition-[filter] hover:brightness-115" />
         </Link>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs leading-5 font-medium text-muted">ตารางผ่าตัดวันนี้</p>
+          <p className="truncate text-xs leading-5 font-medium text-muted" data-testid="board-eyebrow">
+            {eyebrow}
+          </p>
           <h1 className="truncate text-[0.9375rem] leading-6 font-bold text-ink min-[400px]:text-base sm:text-lg">
             <time dateTime={date}>
               {/* The month is abbreviated on narrow phones so the whole date, year included, fits beside the avatar
-                  (and the admin button, which takes another 56px). */}
-              <span className={adminHref ? "min-[480px]:hidden" : "min-[400px]:hidden"}>{thaiDate(date, "short")}</span>
-              <span className={adminHref ? "hidden min-[480px]:inline" : "hidden min-[400px]:inline"}>{thaiDate(date)}</span>
+                  (and the upload and admin buttons, which take another 56px each). */}
+              <span className={shortDate}>{thaiDate(date, "short")}</span>
+              <span className={longDate}>{thaiDate(date)}</span>
             </time>
           </h1>
         </div>
+        {uploadHref ? (
+          // Like the admin button: the account menu's link stands in below 390px, and below 450px when the admin
+          // button is there too, so the date keeps its year. The label needs a wider screen with two buttons.
+          <Link
+            href={uploadHref}
+            className={`btn btn-ghost hidden size-11 min-h-0 shrink-0 p-0 ${adminHref ? "min-[450px]:inline-flex xl:w-auto xl:px-3.5" : "min-[390px]:inline-flex md:w-auto md:px-3.5"}`}
+            aria-label="อัปโหลดตาราง"
+            title="อัปโหลดตาราง HOSxP"
+            data-testid="upload-button"
+          >
+            {UPLOAD_ICON}
+            <span className={`hidden text-sm ${adminHref ? "xl:inline" : "md:inline"}`}>อัปโหลดตาราง</span>
+          </Link>
+        ) : null}
         {adminHref ? (
           // Below 390px the button would cut the year off the date, so narrow phones use the account menu's link.
           // Its label shows from 768px; between 640px and 768px the wider date needs the room.
           <Link
             href={adminHref}
             className="btn btn-ghost hidden size-11 min-h-0 shrink-0 p-0 min-[390px]:inline-flex md:w-auto md:px-3.5"
-            aria-label="จัดการแพทย์"
-            title="จัดการรายชื่อแพทย์"
+            aria-label="จัดการระบบ"
+            title="จัดการระบบ: ช่วงปิดซ่อม ผู้จัดการตาราง และรายชื่อแพทย์"
             data-testid="admin-button"
           >
             {ADMIN_ICON}
-            <span className="hidden text-sm md:inline">จัดการแพทย์</span>
+            <span className="hidden text-sm md:inline">จัดการระบบ</span>
           </Link>
         ) : null}
         {showAccount ? (
@@ -113,10 +152,16 @@ export function TopBar({
                   ) : null}
                 </div>
               </div>
+              {uploadHref ? (
+                <Link href={uploadHref} className="btn btn-ghost mb-2 w-full" data-testid="account-upload-link">
+                  {UPLOAD_ICON}
+                  อัปโหลดตาราง
+                </Link>
+              ) : null}
               {adminHref ? (
                 <Link href={adminHref} className="btn btn-ghost mb-2 w-full" data-testid="account-admin-link">
                   {ADMIN_ICON}
-                  จัดการรายชื่อแพทย์
+                  จัดการระบบ
                 </Link>
               ) : null}
               <SignOutButton showLabel />
