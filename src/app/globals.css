@@ -149,18 +149,12 @@ body {
   /* Text mark: a brown tile with the second letter picked out in light tan. */
   .logo-mark {
     display: inline-flex;
+    flex: none;
     align-items: center;
     justify-content: center;
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    color: #fff;
+    overflow: hidden;
     background: linear-gradient(180deg, var(--brand-top), var(--brand));
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16), 0 1px 2px rgb(41 29 20 / 0.25);
-  }
-  .logo-mark b {
-    color: var(--accent-light);
-    font-weight: 800;
   }
 
   /* shadcn Badge, with a status dot. */

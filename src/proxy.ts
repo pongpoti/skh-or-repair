@@ -3,6 +3,7 @@ import { isAdmin } from "@/lib/admin";
 import { userFromToken } from "@/lib/auth/user";
 import { cookieName, cookieOptions } from "@/lib/cookies";
 import { appUrl } from "@/lib/env";
+import { GATE_PATH, clientAllowed, gateMode } from "@/lib/gate";
 import { isSameOrigin, safeNextPath } from "@/lib/security";
 import { TELEGRAM_WEBHOOK_PATH } from "@/lib/telegram";
 
@@ -11,10 +12,13 @@ import { TELEGRAM_WEBHOOK_PATH } from "@/lib/telegram";
  * 1. canonical-host redirect (production only)
  * 2. CSRF origin check for non-GET requests
  * 3. per-request CSP nonce
- * 4. auth gate: everything except /login*, /api/auth/*, the Telegram webhook and /preview* needs a valid session
+ * 4. device gate (lib/gate.ts): on Vercel, outside the LIFF app in LINE on a phone every page shows the "open in LINE"
+ *    page and every API call answers 403, before the sign-in gate, so LINE Login never starts outside LIFF. The
+ *    Telegram webhook and /preview* are exempt.
+ * 5. auth gate: everything except /login*, /api/auth/*, the Telegram webhook and /preview* needs a valid session
  *    (pages ALSO verify the session themselves; this is the first line, not the only one). The /preview pages answer
  *    404 unless NODE_ENV is development.
- * 5. admin gate: /admin* answers the mistyped-address 404 to a session whose sub is not in AUTH_ADMIN_LINE_IDS, before
+ * 6. admin gate: /admin* answers the mistyped-address 404 to a session whose sub is not in AUTH_ADMIN_LINE_IDS, before
  *    anything renders (the page's own check runs behind its loading screen, whose response is already a 200).
  * The Telegram webhook is server-to-server (no Origin, no session): its route checks Telegram's secret header.
  */
@@ -25,6 +29,7 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/login/") ||
     pathname.startsWith("/api/auth/") ||
     pathname === TELEGRAM_WEBHOOK_PATH ||
+    pathname === GATE_PATH ||
     pathname === "/preview" ||
     pathname.startsWith("/preview/")
   );
@@ -87,7 +92,21 @@ export async function proxy(req: NextRequest) {
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
 
-  // 4. Auth gate (covers documents, RSC/flight and prefetch requests alike).
+  // 4. Device gate: the LIFF app in LINE on a phone. Runs before the sign-in gate, so a desktop browser
+  //    never reaches the LINE login. The answer depends on the User-Agent, so it must not be cached across browsers.
+  const gateExempt =
+    pathname === TELEGRAM_WEBHOOK_PATH || pathname === GATE_PATH || pathname === "/preview" || pathname.startsWith("/preview/");
+  if (!gateExempt && !clientAllowed(req.headers.get("user-agent"), gateMode())) {
+    const headers = { "Cache-Control": "no-store", Vary: "User-Agent" };
+    if (pathname.startsWith("/api/")) {
+      return withCsp(NextResponse.json({ error: "open-in-line" }, { status: 403, headers }), csp);
+    }
+    const res = NextResponse.rewrite(new URL(GATE_PATH, req.nextUrl.origin), { request: { headers: requestHeaders } });
+    for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+    return withCsp(res, csp);
+  }
+
+  // 5. Auth gate (covers documents, RSC/flight and prefetch requests alike).
   if (!isPublicPath(pathname)) {
     let sessionCookie: string | null = null;
     try {
@@ -114,7 +133,7 @@ export async function proxy(req: NextRequest) {
       return withCsp(res, csp);
     }
 
-    // 5. Admin gate: a path no route matches, so Next answers its own 404 page with status 404.
+    // 6. Admin gate: a path no route matches, so Next answers its own 404 page with status 404.
     if ((pathname === "/admin" || pathname.startsWith("/admin/")) && !isAdmin(user.sub)) {
       return withCsp(NextResponse.rewrite(new URL("/_admin-not-found", req.nextUrl), { request: { headers: requestHeaders } }), csp);
     }

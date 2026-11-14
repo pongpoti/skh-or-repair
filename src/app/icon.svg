@@ -1,8 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#3f2f24"/>
-  <path d="M-8 150H70L108 188V300L70 338H-8Z" fill="#54402f"/>
-  <path d="M520 174H442L404 212V324L442 362H520Z" fill="#54402f"/>
-  <path d="M176 84H336L400 148V364L336 428H176L112 364V148Z" fill="#f1e7da"/>
-  <path d="M184 101H328L386 159V353L328 411H184L126 353V159Z" fill="none" stroke="#ddbf94" stroke-width="12" stroke-linejoin="round"/>
-  <circle cx="256" cy="256" r="54" fill="#a68966" stroke="#fff" stroke-width="16"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- OR surgeon in scrub cap, surgical mask and scrubs (same drawing as src/components/brand-mark.tsx) -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#54402f"/>
+      <stop offset="1" stop-color="#3f2f24"/>
+    </linearGradient>
+    <clipPath id="clip"><rect width="48" height="48" rx="10.5"/></clipPath>
+  </defs>
+  <g clip-path="url(#clip)">
+    <rect width="48" height="48" fill="url(#tile)"/>
+    <path d="M7 48 C7.5 40.5 14 37 24 37 C34 37 40.5 40.5 41 48 Z" fill="#7fbfb7"/>
+    <path d="M19.5 37.4 L24 43 L28.5 37.4 Z" fill="#3f2f24" opacity="0.55"/>
+    <circle cx="24" cy="24" r="10.6" fill="#f1e7da"/>
+    <path d="M12.9 22.6 C12.2 9.8 35.8 9.8 35.1 22.6 Q24 19.6 12.9 22.6 Z" fill="#7fbfb7"/>
+    <circle cx="20.2" cy="23.6" r="1.25" fill="#241c16"/>
+    <circle cx="27.8" cy="23.6" r="1.25" fill="#241c16"/>
+    <path d="M13.8 26 Q24 24.4 34.2 26 L33.2 30.6 Q24 37.2 14.8 30.6 Z" fill="#eaf4f5"/>
+    <path d="M17 28.3 Q24 27.4 31 28.3 M17.6 30.6 Q24 29.8 30.4 30.6" fill="none" stroke="#a7c9cf" stroke-width="0.8" stroke-linecap="round"/>
+  </g>
 </svg>
