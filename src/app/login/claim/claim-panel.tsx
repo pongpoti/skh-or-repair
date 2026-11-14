@@ -279,10 +279,21 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
         <ul className="mt-4 grid gap-2">
           {USER_TYPES.map((t) => (
             <li key={t}>
-              <button type="button" className="choice" onClick={() => pickType(t)} data-testid={`claim-type-${t}`}>
-                <span className="min-w-0 flex-1 font-semibold">{TYPE_LABELS[t]}</span>
-                <Chevron />
-              </button>
+              {t === "DR" ? (
+                // Doctors prove their name by a code sent to their email instead.
+                <a className="choice" href="/login/doctor" data-testid="claim-type-DR">
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold">{TYPE_LABELS[t]}</span>
+                    <span className="block text-[0.8125rem] leading-5 text-muted">ยืนยันตัวตนด้วยรหัสทางอีเมล</span>
+                  </span>
+                  <Chevron />
+                </a>
+              ) : (
+                <button type="button" className="choice" onClick={() => pickType(t)} data-testid={`claim-type-${t}`}>
+                  <span className="min-w-0 flex-1 font-semibold">{TYPE_LABELS[t]}</span>
+                  <Chevron />
+                </button>
+              )}
             </li>
           ))}
         </ul>

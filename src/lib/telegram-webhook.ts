@@ -1,7 +1,7 @@
 import "server-only";
 import type { Pool } from "pg";
 import { decideRequest, isApproved, type DecideResult, type TelegramRef } from "./access";
-import { noteAuthorized, noteRevoked } from "./authz";
+import { noteAuthorized, noteDoctorRevoked, noteRevoked } from "./authz";
 import { db } from "./db";
 import { ConfigError, sessionSecret, telegramConfig, type TelegramConfig } from "./env";
 import { logEvent } from "./otp";
@@ -200,10 +200,12 @@ async function undoTap(
     return OK;
   }
   const { claim, user } = result;
-  noteRevoked(claim.phone);
+  if (claim.phone) noteRevoked(claim.phone);
+  else noteDoctorRevoked(claim.userId, claim.lineSub);
   await logEvent(pool, { event: "claim_undone", sub: claim.lineSub, phone: claim.phone });
   // The person is signed out only if nothing else authorizes the number; say so when something does.
-  const stillAllowed = isAllowedPhone(claim.phone) || (await isApproved(pool, claim.phone).catch(() => false));
+  const stillAllowed =
+    claim.phone !== null && (isAllowedPhone(claim.phone) || (await isApproved(pool, claim.phone).catch(() => false)));
   const refs = [...claim.tgMessages];
   const tapped = tappedMessage(message);
   if (tapped && !refs.some((x) => x.chat_id === tapped.chat_id && x.message_id === tapped.message_id)) refs.push(tapped);

@@ -189,6 +189,82 @@ export function smsConfig(): SmsConfig {
   };
 }
 
+export type EmailProviderKind = "smtp" | "console" | "file";
+
+export interface EmailConfig {
+  /**
+   * smtp: the code is sent through an SMTP server (e.g. Gmail with an app password). console / file (development and
+   * tests only, never on Vercel): the email is written to the log or to a JSON file in outboxDir.
+   */
+  kind: EmailProviderKind;
+  host: string;
+  port: number;
+  /** Implicit TLS (port 465). Otherwise STARTTLS is required. */
+  secure: boolean;
+  user: string;
+  pass: string;
+  /** The From header, e.g. "ORSKH <orskh.app@gmail.com>"; defaults to SMTP_USER. */
+  from: string;
+  outboxDir: string;
+  /** Hard cap of codes emailed in a rolling 24 h, all doctors together (Gmail allows about 500 a day). */
+  dailyCap: number;
+}
+
+export const EMAIL_DAILY_CAP_DEFAULT = 300;
+
+/** A bare address, or a display name with the address in angle brackets. */
+function isFromHeader(v: string): boolean {
+  return /^[^\r\n<>@\s]+@[^\r\n<>@\s]+\.[^\r\n<>@\s]+$/.test(v) || /^[^\r\n<>]{1,80} <[^\r\n<>@\s]+@[^\r\n<>@\s]+\.[^\r\n<>@\s]+>$/.test(v);
+}
+
+/** Email codes for doctors (lib/email-otp.ts). Throws ConfigError listing every missing or invalid name. */
+export function emailConfig(): EmailConfig {
+  const c = new Collector();
+  // On Vercel only real email is possible: EMAIL_PROVIDER=console|file is ignored there.
+  const requested = onVercel() ? "smtp" : (read("EMAIL_PROVIDER") ?? "smtp");
+  if (!["smtp", "console", "file"].includes(requested)) c.bad.push("EMAIL_PROVIDER");
+  const kind = requested as EmailProviderKind;
+  let host = "";
+  let user = "";
+  let pass = "";
+  let port = 465;
+  let outboxDir = "";
+  let from = "";
+  if (kind === "smtp") {
+    host = read("SMTP_HOST") ?? "smtp.gmail.com";
+    if (!/^[A-Za-z0-9.-]{1,253}$/.test(host)) c.bad.push("SMTP_HOST");
+    const portRaw = read("SMTP_PORT") ?? "465";
+    port = Number(portRaw);
+    if (!/^\d+$/.test(portRaw) || port < 1 || port > 65535) c.bad.push("SMTP_PORT");
+    user = c.need("SMTP_USER");
+    pass = c.need("SMTP_PASS");
+    from = read("EMAIL_FROM") ?? user;
+    if (from && !isFromHeader(from)) c.bad.push("EMAIL_FROM");
+  } else {
+    from = read("EMAIL_FROM") ?? "ORSKH <no-reply@localhost.test>";
+    if (kind === "file") outboxDir = c.need("EMAIL_OUTBOX_DIR");
+  }
+  const capRaw = read("EMAIL_DAILY_CAP") ?? String(EMAIL_DAILY_CAP_DEFAULT);
+  const dailyCap = Number(capRaw);
+  if (!/^\d+$/.test(capRaw) || !Number.isSafeInteger(dailyCap) || dailyCap < 1) c.bad.push("EMAIL_DAILY_CAP");
+  c.done();
+  return { kind, host, port, secure: port === 465, user, pass, from, outboxDir, dailyCap };
+}
+
+/** Everything the email-code endpoints need. Throws ConfigError listing every missing name. */
+export function assertEmailOtpReady(): void {
+  const names: string[] = [];
+  for (const fn of [appUrl, sessionSecret, otpPepper, databaseUrl, emailConfig]) {
+    try {
+      fn();
+    } catch (e) {
+      if (e instanceof ConfigError) names.push(...e.names);
+      else throw e;
+    }
+  }
+  if (names.length) throw new ConfigError([...new Set(names)]);
+}
+
 export interface TelegramConfig {
   token: string;
   chatIds: string[];

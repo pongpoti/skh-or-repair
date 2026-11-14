@@ -17,11 +17,11 @@ const FAILED: CaseResult = { ok: false, error: "บันทึกไม่ส�
 
 /** Server actions can be called by anyone who can reach the site, so each one checks the doctor again. */
 async function signedInDoctor() {
-  // getUser() re-checks the signed session and that the number is still authorized.
+  // getUser() re-checks the signed session and that the number (or the doctor's email sign-in) is still authorized.
   const user = await getUser();
   if (!user) return null;
   const pool = await db();
-  const doctor = await doctorFor(pool, user.phone);
+  const doctor = await doctorFor(pool, user);
   return doctor ? { user, doctor, pool } : null;
 }
 

@@ -13,7 +13,7 @@ describe("added cases (database)", () => {
 
   before(async () => {
     await ensureSchema(pool);
-    await pool.query("TRUNCATE cases, user_claims, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const { rows } = await pool.query<{ id: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype) VALUES
          ('สมชาย', 'ใจดี', 'DR', 'ORTHO'), ('สมหญิง', 'รักงาน', 'RN', 'OR'), ('สมศักดิ์', 'มีสุข', 'DR', 'GENSX')

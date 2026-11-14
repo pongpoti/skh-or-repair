@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     }
     // "own_claim": the number already holds this name (another tab, or a retry): claimUser() bound it, sign in.
     noteAuthorized(grant.phone);
-    const token = await signSession({ sub: grant.sub, phone: grant.phone, name: grant.name, picture: grant.picture }, sessionSecret());
+    const token = await signSession({ sub: grant.sub, phone: grant.phone, userId: null, name: grant.name, picture: grant.picture }, sessionSecret());
     const res = NextResponse.json({ ok: true, redirect: "/" }, { headers: { "Cache-Control": "no-store" } });
     clearCookie(res, "access");
     clearCookie(res, "pending");

@@ -2,7 +2,7 @@ import "server-only";
 import { approvedPhones, isApproved } from "./access";
 import { db } from "./db";
 import { isAllowedPhone, normalizePhone } from "./phone";
-import { activePhones, holdsActiveName } from "./user-list";
+import { activeEmailClaims, activePhones, holdsActiveName, userForEmailClaim } from "./user-list";
 
 /**
  * Who may open the board: a mobile number with a current claim on an active user of the `users` table (a claimed name) OR with an
@@ -18,6 +18,8 @@ import { activePhones, holdsActiveName } from "./user-list";
  *   that reads "not authorized" (e.g. the fresh check after a code) also drops the number from this instance's list;
  * - fail closed: when the list cannot be loaded and the last copy is older than LIST_TTL_MS, only ALLOWED_PHONES
  *   is authorized (claimed names and approved requests are not).
+ * A doctor signed in by email (lib/email-otp.ts) holds no number: the same list holds the current email claims on
+ * active users as emailKey(users.id, LINE account), checked by isAuthorizedDoctor() exactly like a number.
  */
 export const LIST_TTL_MS = 60_000;
 export const RETRY_MS = 5_000;
@@ -40,11 +42,17 @@ const shared = globalThis as typeof globalThis & { [STATE_KEY]?: AuthzState };
 const state: AuthzState = (shared[STATE_KEY] ??= { cache: null, lastAttempt: -Infinity, inflight: null, misses: new Map() });
 const misses = state.misses;
 
-/** Numbers of active claimed names and of approved requests, as one set. */
+/** A doctor's email claim in the cached list (never a valid number, so the two kinds of keys cannot meet). */
+function emailKey(userId: string, sub: string): string {
+  return `email:${userId}:${sub}`;
+}
+
+/** Numbers of active claimed names and of approved requests, and the email claims of doctors, as one set. */
 async function listed(): Promise<Set<string>> {
   const pool = await db();
-  const [claimed, approved] = await Promise.all([activePhones(pool), approvedPhones(pool)]);
+  const [claimed, approved, email] = await Promise.all([activePhones(pool), approvedPhones(pool), activeEmailClaims(pool)]);
   for (const e of approved) claimed.add(e);
+  for (const [userId, sub] of email) claimed.add(emailKey(userId, sub));
   return claimed;
 }
 
@@ -68,16 +76,23 @@ function fresh(now: number): boolean {
   return state.cache !== null && now - state.cache.at < LIST_TTL_MS;
 }
 
+type Check = (pool: Awaited<ReturnType<typeof db>>) => Promise<boolean>;
+
+/** Whether the number holds an active name or an approved request, read now. */
+function phoneCheck(e: string): Check {
+  return async (pool) => (await holdsActiveName(pool, e)) || (await isApproved(pool, e));
+}
+
 /**
- * Asks the database about one number; a hit joins the cached list, and a "no" read from the database leaves it (so a
- * removal seen by a fresh check also applies to this instance's later cached checks). A failed read authorizes nobody.
+ * Asks the database about one key (a number, or a doctor's email claim); a hit joins the cached list, and a "no" read
+ * from the database leaves it (so a removal seen by a fresh check also applies to this instance's later cached
+ * checks). A failed read authorizes nobody.
  */
-async function lookUp(e: string, rememberMiss: boolean): Promise<boolean> {
+async function lookUp(e: string, check: Check, rememberMiss: boolean): Promise<boolean> {
   let ok = false;
   let read = false;
   try {
-    const pool = await db();
-    ok = (await holdsActiveName(pool, e)) || (await isApproved(pool, e));
+    ok = await check(await db());
     read = true;
   } catch (err) {
     console.error("[authz] phone check unavailable:", (err as Error).message);
@@ -103,14 +118,27 @@ export async function isAuthorizedPhone(phone: string, opts: { fresh?: boolean }
   if (isAllowedPhone(phone)) return true;
   const e = normalizePhone(phone);
   if (!e) return false;
-  if (opts.fresh) return lookUp(e, false);
+  return isAuthorizedKey(e, phoneCheck(e), opts);
+}
+
+/**
+ * True when this LINE account holds this doctor's name through an email claim (lib/email-otp.ts) and the doctor is
+ * active: the cached list, like isAuthorizedPhone(). `fresh: true` reads the database now.
+ */
+export async function isAuthorizedDoctor(userId: string, sub: string, opts: { fresh?: boolean } = {}): Promise<boolean> {
+  if (!/^[1-9]\d{0,9}$/.test(userId) || !sub) return false;
+  return isAuthorizedKey(emailKey(userId, sub), async (pool) => (await userForEmailClaim(pool, userId, sub)) !== null, opts);
+}
+
+async function isAuthorizedKey(e: string, check: Check, opts: { fresh?: boolean }): Promise<boolean> {
+  if (opts.fresh) return lookUp(e, check, false);
   // Missing or expired list: load it, or wait for the load that is already running.
   if (!fresh(Date.now()) && (state.inflight || Date.now() - state.lastAttempt >= RETRY_MS)) await load();
   if (!fresh(Date.now())) return false;
   if (state.cache!.set.has(e)) return true;
   const missedAt = misses.get(e);
   if (missedAt !== undefined && Date.now() - missedAt < RETRY_MS) return false;
-  return lookUp(e, true);
+  return lookUp(e, check, true);
 }
 
 /**
@@ -146,6 +174,20 @@ export function noteAuthorized(phone: string): void {
 export function noteRevoked(phone: string): void {
   const e = normalizePhone(phone);
   if (!e) return;
+  misses.delete(e);
+  state.cache?.set.delete(e);
+}
+
+/** noteAuthorized() for a doctor's email claim. */
+export function noteDoctorAuthorized(userId: string, sub: string): void {
+  const e = emailKey(userId, sub);
+  misses.delete(e);
+  state.cache?.set.add(e);
+}
+
+/** noteRevoked() for a doctor's email claim (ended because the name was proven from another LINE account). */
+export function noteDoctorRevoked(userId: string, sub: string): void {
+  const e = emailKey(userId, sub);
   misses.delete(e);
   state.cache?.set.delete(e);
 }

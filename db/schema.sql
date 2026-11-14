@@ -94,6 +94,69 @@ CREATE INDEX IF NOT EXISTS user_claims_phone_idx ON user_claims (phone, created_
 CREATE INDEX IF NOT EXISTS user_claims_sub_idx ON user_claims (line_sub, created_at DESC);
 CREATE INDEX IF NOT EXISTS user_claims_user_idx ON user_claims (user_id, created_at DESC);
 
+-- Doctors (users of type DR) prove who they are with a code sent by email instead of an SMS code (lib/email-otp.ts).
+-- Such a claim is made by the doctor's LINE account and holds no number: via = 'email', phone NULL, and
+-- email_verified_at is when the last email code was checked (a LINE sign-in skips the code for 180 days after it).
+-- 'replaced' ends a claim when the doctor proves the name by email from another LINE account (the code went to their
+-- own address, so the newer proof wins). Applied to existing databases too: claims made before keep via = 'phone'.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'user_claims'::regclass AND attname = 'via' AND NOT attisdropped) THEN
+    ALTER TABLE user_claims ADD COLUMN via text NOT NULL DEFAULT 'phone';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_attribute WHERE attrelid = 'user_claims'::regclass AND attname = 'email_verified_at' AND NOT attisdropped
+  ) THEN
+    ALTER TABLE user_claims ADD COLUMN email_verified_at timestamptz;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'user_claims'::regclass AND attname = 'phone' AND attnotnull) THEN
+    ALTER TABLE user_claims ALTER COLUMN phone DROP NOT NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'user_claims'::regclass AND conname = 'user_claims_via_check') THEN
+    ALTER TABLE user_claims ADD CONSTRAINT user_claims_via_check CHECK (
+      (via = 'phone' AND phone IS NOT NULL) OR (via = 'email' AND phone IS NULL AND email_verified_at IS NOT NULL)
+    );
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'user_claims'::regclass AND conname = 'user_claims_undo_reason_check'
+      AND pg_get_constraintdef(oid) NOT LIKE '%replaced%'
+  ) THEN
+    ALTER TABLE user_claims DROP CONSTRAINT user_claims_undo_reason_check;
+    ALTER TABLE user_claims ADD CONSTRAINT user_claims_undo_reason_check
+      CHECK (undo_reason IN ('admin', 'inactive', 'manual', 'replaced'));
+  END IF;
+END $$;
+
+-- Doctors' email addresses (from the hospital's doctor directory), one row per address: a doctor may have several,
+-- and a code goes to all of them. Lower case and trimmed. Written by hand (see README, Doctors sign in by email); the
+-- sign-in only reads it.
+CREATE TABLE IF NOT EXISTS user_emails (
+  user_id     integer     NOT NULL REFERENCES users (id),
+  email       text        NOT NULL CHECK (email = lower(btrim(email)) AND char_length(email) <= 254 AND email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, email)
+);
+
+-- One row per code sent by email to a doctor (user_id) for one LINE account. Like otp_codes: written as a
+-- reservation (expires_at = created_at) before the email goes out and completed once it was accepted, removed when
+-- sending certainly failed. Only an HMAC of the code is stored (keyed with OTP_PEPPER).
+CREATE TABLE IF NOT EXISTS email_codes (
+  id          bigserial   PRIMARY KEY,
+  user_id     integer     NOT NULL REFERENCES users (id),
+  line_sub    text        NOT NULL,
+  code_hash   text,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  expires_at  timestamptz NOT NULL,
+  attempts    integer     NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  used_at     timestamptz,
+  ip          text
+);
+CREATE INDEX IF NOT EXISTS email_codes_user_sub_idx ON email_codes (user_id, line_sub, created_at DESC);
+CREATE INDEX IF NOT EXISTS email_codes_sub_created_idx ON email_codes (line_sub, created_at);
+CREATE INDEX IF NOT EXISTS email_codes_ip_created_idx ON email_codes (ip, created_at);
+CREATE INDEX IF NOT EXISTS email_codes_created_idx ON email_codes (created_at);
+
 -- Access requests from verified numbers that hold no claimed name (decided in Telegram). position is a user type.
 -- A number is authorized while it has an approved row; revoke with
 -- UPDATE access_requests SET status = 'rejected', decided_at = now() WHERE phone = '0812345678' AND status = 'approved'.

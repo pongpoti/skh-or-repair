@@ -37,6 +37,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         สำหรับเจ้าหน้าที่ห้องผ่าตัดที่ได้รับอนุญาตเท่านั้น
         <br />
         ครั้งแรกต้องยืนยันเบอร์มือถือด้วยรหัสทาง SMS
+        <br />
+        แพทย์ยืนยันด้วยรหัสทางอีเมล
       </p>
       {resume === "request" ? (
         <a className="btn btn-secondary mt-4 w-full" href="/login/request" data-testid="request-status-link">

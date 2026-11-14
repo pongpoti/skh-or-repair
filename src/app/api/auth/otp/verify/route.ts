@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
           await notifyVerified({ user, requester, lineName: pending.name, phone, at, history, verifiedPhones });
         });
       }
-      const token = await signSession({ sub: pending.sub, phone, name: pending.name, picture: pending.picture }, secret);
+      const token = await signSession({ sub: pending.sub, phone, userId: null, name: pending.name, picture: pending.picture }, secret);
       const res = NextResponse.json({ ok: true, redirect: safeNextPath(pending.next) }, { headers: { "Cache-Control": "no-store" } });
       clearCookie(res, "pending");
       clearCookie(res, "access");

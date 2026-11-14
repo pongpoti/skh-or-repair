@@ -15,7 +15,7 @@ import {
 } from "@/lib/tokens";
 import { TEST_SESSION_SECRET as SECRET } from "./_setup";
 
-const user = { sub: "U123", phone: "0900000002", name: "หมอ <b>ทดสอบ</b>", picture: null };
+const user = { sub: "U123", phone: "0900000002", userId: null, name: "หมอ <b>ทดสอบ</b>", picture: null };
 const enc = new TextEncoder();
 
 function b64json(part: string) {
@@ -81,6 +81,30 @@ describe("session JWT", () => {
       assert.equal(await verifySession(await signed(claims), SECRET), null, JSON.stringify(claims));
     }
     assert.equal((await verifySession(await signed({ phone: "0812345678" }), SECRET))?.phone, "0812345678");
+  });
+
+  test("a doctor's email session carries the user id instead of a number, never both", async () => {
+    const doctor = { sub: "U9", phone: null, userId: "42", name: "หมอ", picture: null };
+    const token = await signSession(doctor, SECRET);
+    const payload = b64json(token.split(".")[1]);
+    assert.equal(payload.uid, "42");
+    assert.equal(payload.phone, undefined);
+    assert.deepEqual(await verifySession(token, SECRET), doctor);
+
+    const signed = (claims: Record<string, unknown>) =>
+      new SignJWT(claims)
+        .setProtectedHeader({ alg: "HS256" })
+        .setSubject("U9")
+        .setIssuer("orskh")
+        .setAudience("session")
+        .setIssuedAt()
+        .setExpirationTime("1h")
+        .sign(enc.encode(SECRET));
+    for (const claims of [{ uid: "42", phone: "0812345678" }, { uid: 42 }, { uid: "0" }, { uid: "04" }, { uid: "1".repeat(11) }, { uid: "" }]) {
+      assert.equal(await verifySession(await signed(claims), SECRET), null, JSON.stringify(claims));
+    }
+    await assert.rejects(signSession({ ...doctor, phone: "0812345678" }, SECRET));
+    await assert.rejects(signSession({ ...doctor, userId: null }, SECRET));
   });
 
   test("a token for another audience is not a session", async () => {

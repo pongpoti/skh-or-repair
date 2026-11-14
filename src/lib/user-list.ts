@@ -25,8 +25,11 @@ export const CLAIM_LIMITS = {
 /** After an administrator's undo, that number (and that LINE account) cannot claim again for this long. */
 export const UNDO_BLOCK_MS = 24 * 3600 * 1000;
 
-/** Why a claim ended: the Telegram undo button, closed by a new claim while its user was inactive, or by hand in SQL. */
-export type UndoReason = "admin" | "inactive" | "manual";
+/**
+ * Why a claim ended: the Telegram undo button, closed by a new claim while its user was inactive, by hand in SQL, or
+ * (doctors) because the name was proven again by an email code from another LINE account (lib/email-otp.ts).
+ */
+export type UndoReason = "admin" | "inactive" | "manual" | "replaced";
 
 export interface ListedUser {
   id: string;
@@ -48,7 +51,8 @@ export interface ClaimableName {
 export interface UserClaim {
   id: string;
   userId: string;
-  phone: string;
+  /** The verified number, or null for a doctor's claim made by an email code (via = 'email'). */
+  phone: string | null;
   lineSub: string;
   lineName: string | null;
   createdAt: Date;
@@ -69,7 +73,7 @@ interface UserRow {
 interface ClaimRow {
   id: string;
   user_id: string;
-  phone: string;
+  phone: string | null;
   line_sub: string;
   line_name: string | null;
   created_at: Date;
@@ -157,9 +161,41 @@ export async function holdsActiveName(pool: Q, phone: string): Promise<boolean> 
 /** Every number with a current claim on an active user. */
 export async function activePhones(pool: Q): Promise<Set<string>> {
   const { rows } = await pool.query<{ phone: string }>(
-    "SELECT c.phone FROM user_claims c JOIN users u ON u.id = c.user_id WHERE c.undone_at IS NULL AND u.active",
+    "SELECT c.phone FROM user_claims c JOIN users u ON u.id = c.user_id WHERE c.undone_at IS NULL AND u.active AND c.phone IS NOT NULL",
   );
   return new Set(rows.map((r) => r.phone));
+}
+
+/** Every current email claim (doctors) on an active user, as [users.id, LINE account] pairs. */
+export async function activeEmailClaims(pool: Q): Promise<Array<[string, string]>> {
+  const { rows } = await pool.query<{ user_id: string; line_sub: string }>(
+    `SELECT c.user_id::text AS user_id, c.line_sub FROM user_claims c JOIN users u ON u.id = c.user_id
+     WHERE c.undone_at IS NULL AND u.active AND c.via = 'email'`,
+  );
+  return rows.map((r) => [r.user_id, r.line_sub]);
+}
+
+/** The active user whose current email claim is held by this LINE account (a doctor signed in by email), or null. */
+export async function userForEmailClaim(pool: Q, userId: string, sub: string): Promise<ListedUser | null> {
+  const { rows } = await pool.query<UserRow>(
+    `SELECT ${USER_COLUMNS} FROM user_claims c JOIN users u ON u.id = c.user_id
+     WHERE c.user_id = $1 AND c.line_sub = $2 AND c.via = 'email' AND c.undone_at IS NULL AND u.active`,
+    [userId, sub],
+  );
+  return rows.length ? toUser(rows[0]) : null;
+}
+
+/** Who a session is: an SMS sign-in by its number, a doctor's email sign-in by its claim. */
+export interface SessionIdentity {
+  sub: string;
+  phone: string | null;
+  userId: string | null;
+}
+
+/** The active user a signed-in session holds (see SessionIdentity), or null (no claimed name). */
+export async function userForSession(pool: Q, who: SessionIdentity): Promise<ListedUser | null> {
+  if (who.userId) return userForEmailClaim(pool, who.userId, who.sub);
+  return who.phone ? userForPhone(pool, who.phone) : null;
 }
 
 /**
@@ -219,6 +255,10 @@ const DAY_S = 24 * 3600;
  * A current claim of this number or LINE account on a user that is no longer active (e.g. a name whose spelling was
  * corrected in the CSV) is closed first (undo_reason 'inactive', no 24 h block), so the person can claim the corrected
  * name. A failed attempt leaves it as it was (savepoint).
+ *
+ * Doctors (type DR) are never claimed here: they prove their name by an email code (lib/email-otp.ts), so a doctor's
+ * name reads "unavailable". A number that already holds a doctor's name (claimed before the switch) still gets
+ * "own_claim".
  */
 export async function claimUser(
   pool: Pool,
@@ -276,9 +316,10 @@ export async function claimUser(
            AND EXISTS (SELECT 1 FROM users u WHERE u.id = c.user_id AND NOT u.active)`,
         [r.phone, r.sub],
       );
+      // doctors (DR) prove their name by an email code instead (lib/email-otp.ts): no new claim by number
       const ins = await c.query<ClaimRow>(
         `INSERT INTO user_claims (user_id, phone, line_sub, line_name, ip)
-         SELECT u.id, $2, $3, $4, $5 FROM users u WHERE u.id = $1 AND u.active
+         SELECT u.id, $2, $3, $4, $5 FROM users u WHERE u.id = $1 AND u.active AND u.type <> 'DR'
          RETURNING ${CLAIM_COLUMNS}`,
         [r.userId, r.phone, r.sub, r.lineName.slice(0, 200) || null, r.ip],
       );
@@ -339,7 +380,7 @@ export async function undoClaim(pool: Pool, claimId: string, by: string): Promis
       return current ? { outcome: "already", claim: current } : { outcome: "missing" };
     }
     const claim = toClaim(rows[0]);
-    await c.query("DELETE FROM line_bindings WHERE phone = $1", [claim.phone]);
+    if (claim.phone) await c.query("DELETE FROM line_bindings WHERE phone = $1", [claim.phone]);
     const user = await getListedUser(c, claim.userId);
     return { outcome: "undone", claim, user: user! };
   });
