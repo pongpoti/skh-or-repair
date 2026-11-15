@@ -29,6 +29,7 @@ export function boardNotices({
   failed,
   missingUpload,
   mismatches,
+  today = null,
 }: {
   /** The suite runs no list on the day shown (a weekend or holiday). */
   closed: boolean;
@@ -40,6 +41,8 @@ export function boardNotices({
   missingUpload: string | null;
   /** Case rows that do not match a booking, or bookings HOSxP does not list. */
   mismatches: number;
+  /** Today, YYYY-MM-DD: a missing upload for a day before it (a past day picked on the board) is not "yet" to come. */
+  today?: string | null;
 }): BoardNotice[] {
   const notices: BoardNotice[] = [];
   if (closed) {
@@ -62,7 +65,17 @@ export function boardNotices({
       detail: "อ่านการจองและตาราง HOSxP จากระบบไม่ได้ ห้องจึงยังไม่แสดงรายการ ลองรีเฟรชหน้านี้อีกครั้ง",
     });
   }
-  if (missingUpload) {
+  if (missingUpload && today && missingUpload < today) {
+    notices.push({
+      id: "no-upload",
+      tone: "warning",
+      icon: "database",
+      text: `ไม่มีตาราง HOSxP ของ ${shortThaiDate(missingUpload)}`,
+      short: "ไม่มี HOSxP",
+      detail: "ไม่พบตารางจาก HOSxP ที่อัปโหลดไว้สำหรับวันนี้ ห้องจึงแสดงเฉพาะการจองของแพทย์",
+      testId: "no-upload-alert",
+    });
+  } else if (missingUpload) {
     notices.push({
       id: "no-upload",
       tone: "warning",

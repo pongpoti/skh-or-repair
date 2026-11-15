@@ -146,8 +146,8 @@ export function SuiteBoard({
   const mismatchCount = board?.mismatchCount ?? 0;
   const missingUpload = missingUploadDay(board, casesUnavailable);
   const ownNotices = useMemo(
-    () => boardNotices({ closed: board === null, holiday, failed: casesUnavailable, missingUpload, mismatches: mismatchCount }),
-    [board, holiday, casesUnavailable, missingUpload, mismatchCount],
+    () => boardNotices({ closed: board === null, holiday, failed: casesUnavailable, missingUpload, mismatches: mismatchCount, today }),
+    [board, holiday, casesUnavailable, missingUpload, mismatchCount, today],
   );
   const notices = givenNotices ?? ownNotices;
   // A notice can go while its bubble is open (the 16:00 refresh, an upload): forget it, so its bubble does not open

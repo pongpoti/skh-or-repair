@@ -1,5 +1,5 @@
 import { addDays, bangkokParts, workdayIndex } from "./days.ts";
-import { holidaysBetween, LOOKAHEAD_DAYS, nextWorkdayAfter, nextWorkdayIn, type Holiday, type NextWorkday } from "./holidays.ts";
+import { holidaysBetween, isWorkday, LOOKAHEAD_DAYS, nextWorkdayAfter, nextWorkdayIn, type Holiday, type NextWorkday } from "./holidays.ts";
 
 /**
  * Which day the board shows, and when MX may upload (Bangkok time, UTC+7). The suite's day turns over at 16:00, not at
@@ -39,8 +39,8 @@ export function boardDateOf(cycleDay: string, holidays: readonly Holiday[]): str
   return weekday;
 }
 
-/** How the board's date stands to today, for the top bar's eyebrow. */
-export type BoardDayRelation = "today" | "tomorrow" | "later";
+/** How the board's date stands to today, for the top bar's eyebrow ("earlier" only for a day picked in the past). */
+export type BoardDayRelation = "earlier" | "today" | "tomorrow" | "later";
 
 export type BoardDay = {
   /** The Bangkok date of the moment. */
@@ -61,10 +61,45 @@ export function boardDayAt(at: Date, holidays: readonly Holiday[]): BoardDay {
   return { today, minutes, cycleDay, boardDate, relation };
 }
 
+/** How `date` stands to `today`. */
+export function relationTo(date: string, today: string): BoardDayRelation {
+  if (date === today) return "today";
+  if (date < today) return "earlier";
+  return date === addDays(today, 1) ? "tomorrow" : "later";
+}
+
 /** The top bar's line above the date. */
 export function boardEyebrow(relation: BoardDayRelation): string {
-  // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026).
+  // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026); a day
+  // picked in the past is the list as it was.
+  if (relation === "earlier") return "ตารางผ่าตัดย้อนหลัง";
   return relation === "today" ? "ตารางผ่าตัดวันนี้" : "ตารางผ่าตัดถัดไป";
+}
+
+/**
+ * How far back the board's date can be picked (Pong, 15 Nov 2026: "Allow user to select date on main page"): as long as
+ * HOSxP uploads are kept (lib/workbook-store.ts KEEP_UPLOAD_DAYS), so a past day still has its list.
+ */
+export const PICK_BACK_DAYS = 30;
+/** How far ahead: as far as doctors can book (lib/added-cases.ts BOOK_AHEAD_DAYS). */
+export const PICK_AHEAD_DAYS = 60;
+
+/** The days the board's date can be picked from, YYYY-MM-DD. */
+export function pickRange(today: string): { min: string; max: string } {
+  return { min: addDays(today, -PICK_BACK_DAYS), max: addDays(today, PICK_AHEAD_DAYS) };
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The day picked in the board's address (?date=YYYY-MM-DD), or null when none is given or it cannot be shown: not a
+ * real day, outside pickRange, or a weekend or holiday (the suite runs no list then, and the calendar never offers one).
+ */
+export function pickedDay(value: unknown, today: string, holidays: readonly Holiday[]): string | null {
+  if (typeof value !== "string" || !ISO_DAY.test(value) || addDays(value, 0) !== value) return null;
+  const { min, max } = pickRange(today);
+  if (value < min || value > max) return null;
+  return isWorkday(value, holidays) ? value : null;
 }
 
 /** Inside MX's upload window: Bangkok 15:00:00 ≤ t < 16:00:00, every day. Admins may upload at any time. */

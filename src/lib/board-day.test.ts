@@ -9,7 +9,14 @@ import {
   loadBoardDay,
   loadUploadSlot,
   nextBoardRefresh,
+  PICK_AHEAD_DAYS,
+  PICK_BACK_DAYS,
+  pickedDay,
+  pickRange,
+  relationTo,
 } from "./board-day.ts";
+import { BOOK_AHEAD_DAYS } from "./added-cases.ts";
+import { KEEP_UPLOAD_DAYS } from "./workbook-store.ts";
 import type { Holiday } from "./holidays.ts";
 
 /** A moment given as Bangkok wall time. */
@@ -148,4 +155,34 @@ test("loading the board's day: BOT holidays when they come, weekdays and EXTRA_H
   });
   delete process.env.BOT_API_TOKEN;
   assert.deepEqual((await loadUploadSlot(at("2026-12-04T15:30:00"))).target, { ok: false, reason: "no-token" });
+});
+
+test("a day picked on the board: back as long as uploads are kept, ahead as far as doctors book", () => {
+  assert.equal(PICK_BACK_DAYS, KEEP_UPLOAD_DAYS);
+  assert.equal(PICK_AHEAD_DAYS, BOOK_AHEAD_DAYS);
+  assert.deepEqual(pickRange("2026-11-17"), { min: "2026-10-18", max: "2027-01-16" });
+});
+
+test("the address's picked day: a real workday in range, else none", () => {
+  const holidays = [{ date: "2026-12-07", name: "ชดเชยวันพ่อแห่งชาติ" }];
+  const today = "2026-11-17";
+  assert.equal(pickedDay("2026-11-18", today, holidays), "2026-11-18");
+  assert.equal(pickedDay("2026-11-16", today, holidays), "2026-11-16", "yesterday");
+  assert.equal(pickedDay("2026-10-19", today, holidays), "2026-10-19", "the first workday in range");
+  assert.equal(pickedDay("2026-10-16", today, holidays), null, "before the range");
+  assert.equal(pickedDay("2027-01-18", today, holidays), null, "after the range");
+  assert.equal(pickedDay("2026-11-22", today, holidays), null, "a Sunday");
+  assert.equal(pickedDay("2026-12-07", today, holidays), null, "a holiday");
+  assert.equal(pickedDay("2026-11-31", today, holidays), null, "no such day");
+  assert.equal(pickedDay("2026-11-1", today, holidays), null, "not YYYY-MM-DD");
+  assert.equal(pickedDay(undefined, today, holidays), null);
+  assert.equal(pickedDay(["2026-11-18", "2026-11-19"], today, holidays), null, "given twice");
+});
+
+test("how a picked day stands to today, and its eyebrow", () => {
+  assert.equal(relationTo("2026-11-17", "2026-11-17"), "today");
+  assert.equal(relationTo("2026-11-16", "2026-11-17"), "earlier");
+  assert.equal(relationTo("2026-11-18", "2026-11-17"), "tomorrow");
+  assert.equal(relationTo("2026-11-20", "2026-11-17"), "later");
+  assert.equal(boardEyebrow("earlier"), "ตารางผ่าตัดย้อนหลัง");
 });

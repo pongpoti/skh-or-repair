@@ -250,6 +250,15 @@ export async function casesOf(pool: Q, uploadId: string): Promise<StoredCase[]> 
   return rows.map(toCase);
 }
 
+/**
+ * The workbook of a day picked on the board: the latest upload for that day, whichever cycle made it, with its cases,
+ * or null when there is none (a day further ahead than the coming one, or one MX never uploaded).
+ */
+export async function workbookForDay(pool: Q, targetDate: string): Promise<{ upload: Upload; cases: StoredCase[] } | null> {
+  const upload = await latestUploadForTarget(pool, targetDate);
+  return upload ? { upload, cases: await casesOf(pool, upload.id) } : null;
+}
+
 /** The board's workbook: the latest upload of the cycle with its cases, or null when MX has not uploaded yet. */
 export async function workbookFor(pool: Q, cycleDay: string, targetDate: string): Promise<{ upload: Upload; cases: StoredCase[] } | null> {
   const upload = await latestUpload(pool, cycleDay, targetDate);
