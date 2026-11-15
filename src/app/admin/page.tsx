@@ -10,7 +10,10 @@ import { isAdmin } from "@/lib/admin";
 import { displayNameFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
 import { avatarSrc } from "@/lib/avatar";
-import { DEMO_MIN_CASES } from "@/lib/demo-schedule";
+import { loadBoardDay, pickRange } from "@/lib/board-day";
+import { now } from "@/lib/clock";
+import { DEMO_MIN_CASES, demoDay } from "@/lib/demo-schedule";
+import { holidaysBetween } from "@/lib/holidays";
 import { shortThaiDate } from "@/lib/repair";
 import { listSurgeons } from "@/lib/surgeon-store";
 import { grantMx, removeSurgeon, revokeMx, saveRepair, saveSurgeon } from "./actions";
@@ -31,7 +34,7 @@ export default async function AdminPage() {
   // Admins are listed by LINE user id (the session's sub). Anyone else gets the same page as a mistyped address.
   if (!isAdmin(user.sub)) notFound();
 
-  const [surgeons, name, repair, mx] = await Promise.all([
+  const [surgeons, name, repair, mx, day] = await Promise.all([
     // The surgeon list goes through Neon's HTTP driver (src/db): when it cannot be read, the repair's dates and the MX
     // list above it still open.
     listSurgeons().catch((error: unknown) => {
@@ -41,7 +44,14 @@ export default async function AdminPage() {
     displayNameFor(user, user.name),
     loadRepairView(),
     loadMxData(),
+    loadBoardDay(now()),
   ]);
+  // The day the demo schedule would open on for each half, by the board's own rule (lib/demo-schedule.ts demoDay), so a
+  // half with no day left is shown as such here rather than sending the admin to a day of the other half.
+  const range = pickRange(day.today, repair.periods);
+  const { holidays } = await holidaysBetween(range.min, range.max);
+  const demoOn = (half: 1 | 2) =>
+    demoDay(half, { today: day.today, boardDate: day.boardDate, max: range.max, periods: repair.periods, holidays });
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -87,11 +97,11 @@ export default async function AdminPage() {
                 {([1, 2] as const).map((half) => {
                   const { from, to } = half === 1 ? repair.periods.half1 : repair.periods.half2;
                   const dates = `${shortThaiDate(from)} – ${shortThaiDate(to)}`;
-                  // A half that is over has no day left to show (the board only goes from today on).
-                  return to < repair.today ? (
+                  // A half with no day left to show (the board only goes from today on, on workdays).
+                  return demoOn(half) === null ? (
                     <span key={half} className="btn btn-secondary cursor-not-allowed flex-col gap-0.5 py-2.5 opacity-55" aria-disabled="true" data-testid={`demo-half-${half}`}>
                       <span>{HALF_NAME[half]}</span>
-                      <span className="text-xs font-medium">จบแล้ว</span>
+                      <span className="text-xs font-medium">{to < day.today ? "จบแล้ว" : "ไม่มีวันทำการเหลือ"}</span>
                     </span>
                   ) : (
                     <Link key={half} href={`/?demo=1&half=${half}`} className="btn btn-secondary flex-col gap-0.5 py-2.5" data-testid={`demo-half-${half}`}>

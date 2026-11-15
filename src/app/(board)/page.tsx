@@ -12,7 +12,7 @@ import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
 import { db } from "@/lib/db";
-import { demoDay, demoSchedule } from "@/lib/demo-schedule";
+import { demoBoardRows, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
 import type { RepairPeriods } from "@/lib/repair";
@@ -83,8 +83,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
  * booking form, so a booking can never be made from made-up rows. Its badge comes first in the strip.
  */
 function demoBoard(day: BoardDay, periods: RepairPeriods): { board: BoardView; notices: BoardNotice[] } {
-  const { workbook, bookings } = demoSchedule(day.boardDate, periods);
-  const built = buildBoardRows({ date: day.boardDate, periods, workbook, bookings, viewer: { allHn: true, userId: null } });
+  const built = demoBoardRows(day.boardDate, periods, { allHn: true, userId: null });
   const board: BoardView = {
     date: day.boardDate,
     rows: built.rows,
@@ -126,7 +125,9 @@ export default async function BoardPage({
   // address holds only the day from then on, and the date picker moves between days of the demo as on the board.
   if (params.demo === "1" && admin && (params.half === "1" || params.half === "2")) {
     const shown = demoDay(params.half === "1" ? 1 : 2, { today: day.today, boardDate: day.boardDate, max: range.max, periods, holidays: closed });
-    redirect(shown && shown !== day.boardDate ? `/?demo=1&date=${shown}` : "/?demo=1");
+    // A half with no day left (over, or only a weekend or holidays to go) goes back to /admin, where its button now
+    // says so by the same rule, rather than to a day of the other half.
+    redirect(!shown ? "/admin" : shown !== day.boardDate ? `/?demo=1&date=${shown}` : "/?demo=1");
   }
   const view: BoardDay =
     picked && picked !== day.boardDate ? { ...day, boardDate: picked, relation: relationTo(picked, day.today) } : day;
@@ -138,7 +139,9 @@ export default async function BoardPage({
     : await loadBoard(user, view, periods, view !== day);
   // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
   // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
-  const testNotices = params.notices === "all" && admin ? everyNotice(view.boardDate) : demo?.notices;
+  // The demo's own badge stays first whatever else the strip shows, so made-up cases are never taken for real ones.
+  const allNotices = params.notices === "all" && admin ? everyNotice(view.boardDate) : null;
+  const testNotices = demo ? [demo.notices[0], ...(allNotices ?? demo.notices.slice(1))] : (allNotices ?? undefined);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">

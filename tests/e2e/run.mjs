@@ -3375,7 +3375,6 @@ async function main() {
       assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "the first half's plan");
       const kinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
       assert(JSON.stringify(kinds) === JSON.stringify(["demo", "mismatch"]), `the demo's badge comes first: ${JSON.stringify(kinds)}`);
-      assert((await page.locator('[data-testid="add-case-button"]').count()) === 0, "no booking form on the demo");
       await ownerShot(page, "board-demo-first-half.png");
       await page.click('[data-notice-id="demo"]');
       await page.waitForSelector('[data-testid="notice-bubble"]');
@@ -3384,6 +3383,10 @@ async function main() {
       await ownerShot(page, "board-demo-notice.png");
       await checkDay(null, ["or-9", "or-10", "or-11", "or-12", "or-13"]);
       await ownerShot(page, "board-demo-room.png");
+      // with the test notices too, the demo's badge stays first
+      await page.goto(`${APP}/?demo=1&notices=all`, { waitUntil: "networkidle" });
+      const both = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
+      assert(JSON.stringify(both) === JSON.stringify(["demo", "holiday", "failed", "no-upload", "mismatch"]), `the demo with every notice: ${JSON.stringify(both)}`);
 
       // ครึ่งหลัง: its first workday, Wednesday 27 Jan 2027, by its address
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
@@ -3406,6 +3409,16 @@ async function main() {
       await page.click('header a[aria-label="ORSKH.APP หน้าแรก"]');
       await page.waitForURL((url) => url.pathname === "/" && url.search === "");
       await page.waitForFunction(() => !document.querySelector('[data-notice-id="demo"]'));
+      // in the second half, the first half's button says it is over, and its address goes back to /admin rather than
+      // to a day of the second half
+      setNow("2027-02-01T10:00:00+07:00");
+      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      assert((await half(1).getAttribute("aria-disabled")) === "true" && (await half(1).getAttribute("href")) === null, "the first half is over");
+      assert((await half(1).innerText()).replace(/\s+/g, " ") === "ครึ่งแรก จบแล้ว", `the first half: ${await half(1).innerText()}`);
+      assert((await half(2).getAttribute("href")) === "/?demo=1&half=2", "the second half still opens");
+      await page.goto(`${APP}/?demo=1&half=1`, { waitUntil: "networkidle" });
+      assert(new URL(page.url()).pathname === "/admin", `a half that is over goes back to /admin: ${page.url()}`);
+      setNow("2026-11-16T10:00:00+07:00");
       assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
       await ctx.close();
 

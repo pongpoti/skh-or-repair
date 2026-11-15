@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { allocationFor } from "./allocation.ts";
 import { buildBoardRows } from "./board-rows.ts";
 import { addDays } from "./days.ts";
-import { DEMO_MIN_CASES, demoDay, demoSchedule } from "./demo-schedule.ts";
+import { DEMO_MIN_CASES, demoBoardRows, demoDay, demoSchedule } from "./demo-schedule.ts";
 import { isDressingOperation } from "./dressing.ts";
 import { isWorkday } from "./holidays.ts";
-import { DEFAULT_REPAIR_PERIODS, REPAIR_LAYOUTS, type RepairPeriods } from "./repair.ts";
+import { DEFAULT_REPAIR_PERIODS, REPAIR_LAYOUTS, repairOn, type RepairPeriods } from "./repair.ts";
 import { openRooms, roomUse } from "./rooms.ts";
 
 const MX = { allHn: true, userId: null };
@@ -44,6 +45,39 @@ test("the demo puts 10 to 12 cases in every open room, on every weekday of both 
         assert.equal(Object.keys(built.countByRoom).length, open.length, `${date}: rooms with cases`);
       }
     }
+  }
+});
+
+test("on any weekday, in the repair or outside it (a gap between the halves, the weekly schedule), every open room has 10", () => {
+  // Dates an admin may save with a gap: the weekly schedule runs from 5 Dec 2026 to 3 Jan 2027, and before and after.
+  const GAP: RepairPeriods = { half1: { from: "2026-11-14", to: "2026-12-04" }, half2: { from: "2027-01-04", to: "2027-03-17" } };
+  const nobody = { allHn: false, userId: null };
+  for (const periods of [DEFAULT_REPAIR_PERIODS, MOVED, GAP]) {
+    let outside = 0;
+    for (const date of weekdays("2026-11-02", "2027-04-30")) {
+      const built = demoBoardRows(date, periods, MX);
+      const rooms = openRooms(date, periods).filter((room) => allocationFor(room.id, date, periods) !== null);
+      for (const room of rooms) {
+        const count = built.countByRoom[room.id] ?? 0;
+        assert.ok(count >= DEMO_MIN_CASES, `${date} ${room.id}: ${count} cases`);
+        const rows = built.rows.filter((row) => row.roomId === room.id);
+        assert.deepEqual(rows.map((row) => row.order), rows.map((_, i) => i + 1), `${date} ${room.id}: numbered 1 to ${count}`);
+        // Dressing names only in the dressing room, so the board's own rule would agree with where they are.
+        const dressing = allocationFor(room.id, date, periods)?.am?.code === "INFECT";
+        assert.ok(rows.every((row) => isDressingOperation(row.procedure) === dressing), `${date} ${room.id}: dressing names`);
+      }
+      assert.equal(new Set(built.rows.map((row) => row.id)).size, built.rows.length, `${date}: unique row ids`);
+      if (repairOn(date, periods)) {
+        // In the repair the board's own rules alone give every room its cases: nothing is added straight in a room.
+        assert.ok(!built.rows.some((row) => row.id.includes("-extra-")), `${date}: no added rows in the repair`);
+      } else {
+        outside += 1;
+        // Outside it, an added row shows its HN only to whoever may see every HN.
+        const plain = demoBoardRows(date, periods, nobody);
+        assert.ok(plain.rows.every((row) => row.hn === undefined), `${date}: no HN for an ordinary viewer`);
+      }
+    }
+    assert.ok(outside > 20, `days outside the repair: ${outside}`);
   }
 });
 
