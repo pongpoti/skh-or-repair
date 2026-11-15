@@ -1,6 +1,6 @@
 import type { DeptCode } from "./allocation.ts";
 import { addDays, thaiDate, workdayIndex } from "./days.ts";
-import { isDressingBooking } from "./dressing.ts";
+import { isDressingOperation } from "./dressing.ts";
 import { checkHn } from "./hn.ts";
 import { holidayIn, nextWorkdayIn, type Holiday } from "./holidays.ts";
 import { placeCase, roomsHeldBy } from "./placement.ts";
@@ -136,16 +136,16 @@ function bookingDept(subtype: string | null | undefined): DeptCode | null {
  * The room a booking goes to on `date`: the doctor's department's room that day, as the HOSxP workbook's elective
  * cases are placed (lib/placement.ts placeCase; during the repair a department without a room of its own uses the
  * mixed-department room, and obstetrics-gynaecology operates in its own building), and the dressing room for a
- * dressing case. A dressing case here is any operation whose name holds one of Pong's dressing words, typos forgiven
- * (lib/dressing.ts). The workbook keeps the hospital's own dressing rule, which leaves out debridement and grafts, so
- * the two can differ; lib/board-rows.ts says which room a matched pair then shows in.
+ * dressing case. A dressing case is any operation whose name holds one of Pong's dressing words, typos forgiven, and no
+ * graft (lib/dressing.ts), the rule the workbook's cases use too; lib/board-rows.ts says which room a matched pair
+ * shows in when the booking's name and HOSxP's differ.
  */
 export function bookingRoom(subtype: string | null | undefined, operation: string, date: string, periods: RepairPeriods): BookingRoom {
   const dept = bookingDept(subtype);
   const dressingRooms = roomsHeldBy("INFECT", date, periods);
   // Obstetrics-gynaecology during the repair is refused before anything else, as placeCase does.
   const obgynAway = dept === "OBGYN" && repairOn(date, periods) !== null;
-  if (!obgynAway && isDressingBooking(operation) && dressingRooms.length > 0) return { ok: true, roomId: dressingRooms[0], dressing: true };
+  if (!obgynAway && isDressingOperation(operation) && dressingRooms.length > 0) return { ok: true, roomId: dressingRooms[0], dressing: true };
   const placed = placeCase({ procedure: operation, dept, emergency: false, team: dept }, date, periods, new Map());
   if (!placed.ok) return { ok: false, error: NO_ROOM_TEXT[placed.reason] };
   return { ok: true, roomId: placed.roomId, dressing: dressingRooms.includes(placed.roomId) };

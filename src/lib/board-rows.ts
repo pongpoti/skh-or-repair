@@ -101,8 +101,8 @@ function departmentName(dept: DeptCode | null): string | null {
  * order each take the earliest booking with their HN that is still free. A matched pair is shown once, with the
  * workbook's operation name and status, in the room placement gave the workbook case: MX's list is the day's schedule,
  * and it spreads a department's cases over its rooms, which a booking alone cannot. The one exception is a booking the
- * form sent to the dressing room by its name (Pong's dressing words, not all of which the workbook's rule shares): it
- * stays there, as the doctor was told. A workbook case left over shows in its placed room, flagged "unbooked". A
+ * form sent to the dressing room by its name when HOSxP names the case otherwise: it stays there, as the doctor was
+ * told. A workbook case left over shows in its placed room, flagged "unbooked". A
  * booking left over shows in its room, flagged "not-in-hosxp" only when a workbook was uploaded (without one there is
  * nothing to compare with). A row whose room is not open that day (closed, a recovery or instrument room, or a
  * workbook case not placed) is left off the board.

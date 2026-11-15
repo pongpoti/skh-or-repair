@@ -80,10 +80,10 @@ test("a dressing case goes to the dressing room, whatever the department", () =>
   const room = (subtype: string | null, operation: string, date: string) => bookingRoom(subtype, operation, date, REPAIR);
   assert.deepEqual(room("GENSX", "D/S + VAC", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true });
   assert.deepEqual(room("ORTHO", "dresing leg", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "a typo");
-  assert.deepEqual(room("PLASTIC", "Debridement + VAC", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "Pong's words win over the workbook's exclusions");
+  assert.deepEqual(room("PLASTIC", "Debridement + VAC", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "debridement is a dressing case (Pong, 15 Nov 2026)");
   assert.deepEqual(room("GENSX", "D/S", "2027-01-27"), { ok: true, roomId: "or-1", dressing: true });
   assert.deepEqual(room("GENSX", "dressing", "2026-11-11"), { ok: true, roomId: "or-1", dressing: true }, "before the repair, OR 1");
-  // a name only the workbook's rule calls a dressing lands there too, and says so
+  // VAC on its own is a dressing, and the form says so
   assert.deepEqual(room("GENSX", "change vac", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true });
 });
 

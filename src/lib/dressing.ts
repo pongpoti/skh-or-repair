@@ -1,17 +1,23 @@
 /**
- * Whether a doctor's booking is a dressing case, from the operation's name (Pong, 15 Nov 2026): a name holding any of
- * dress, dressing, ds, d/s, dw, d/w, vac or vacuum, in any case and in any combination ("D/S + VAC", "vacdressing"),
- * goes to the dressing room. Typos in the longer words still count ("dresing", "vaccum", "vacume"), by a small edit
- * distance on whole words that start with the same letter; the short words must be exact, since a typo there would
- * catch other names ("DJ stent" is one letter from "ds"). Also read as these words: the usual shorthand dsg and drsg,
- * "D-S", "D. S." and "V.A.C.", a count or re- around a word ("VACx2", "revac"), and words glued by a dot ("Rt.VAC").
- * Thai ทำแผล, ล้างแผล and เปลี่ยนแผล count too, as in the workbook's rule (lib/placement.ts isDressingCase), however
- * the vowels and tone marks are typed. A vacuum used for something else (aspiration, curettage, extraction, a biopsy)
- * is not a dressing. Isomorphic: the form shows the room the server will pick.
+ * Whether an operation is a dressing case, from its name: the one rule for doctors' bookings and for the HOSxP
+ * workbook's cases (lib/placement.ts isDressingCase), so both go to the dressing room alike.
+ *
+ * Pong, 15 Nov 2026: a name holding any of dress, dressing, ds, d/s, dw, d/w, vac or vacuum, in any case and in any
+ * combination ("D/S + VAC", "vacdressing"), goes to the dressing room; so does debride, debridement or db; a graft
+ * does not, whatever else the name holds. Typos in the longer words still count ("dresing", "vaccum", "vacume",
+ * "debridment"), by a small edit distance on whole words that start with the same letter; the short words must be
+ * exact, since a typo there would catch other names ("DJ stent" is one letter from "ds"). Also read as these words:
+ * the usual shorthand dsg and drsg, "D-S", "D. S.", "D.B." and "V.A.C.", a count or re- around a word ("VACx2",
+ * "revac"), and words glued by a dot ("Rt.VAC"). From the hospital's own rule: Thai ทำแผล, ล้างแผล and เปลี่ยนแผล
+ * (however the vowels and tone marks are typed), "vacc" and "vacd", and STSG and SSKG as grafts; Claude added FTSG,
+ * SSG, typos of graft and Thai ปลูก(ถ่าย)ผิวหนัง. The D of I&D never joins the next word ("I&D B/L" is no D/B), and a
+ * DB colostomy is a double-barrelled one, not a debridement. A vacuum used for
+ * something else (aspiration, curettage, extraction, a biopsy) is not a dressing. Isomorphic: the form shows the room
+ * the server will pick.
  */
 
 /** Words that mark a dressing case when they stand alone or join with each other. */
-const WORDS = ["dress", "dressing", "ds", "d/s", "dw", "d/w", "dsg", "drsg", "vac", "vacuum"] as const;
+const WORDS = ["dress", "dressing", "ds", "d/s", "dw", "d/w", "dsg", "drsg", "vac", "vacc", "vacd", "vaccd", "vacuum", "db", "d/b", "debride", "debridement"] as const;
 const EXACT: ReadonlySet<string> = new Set(WORDS);
 /** The words long enough to forgive a typo, with how many edits each forgives. */
 const FUZZY: readonly (readonly [string, number])[] = [
@@ -19,9 +25,18 @@ const FUZZY: readonly (readonly [string, number])[] = [
   ["dressing", 2],
   // Two, for "vacume" and "vaccume"; nothing that starts with v and is an operation is that close.
   ["vacuum", 2],
+  ["debride", 1],
+  ["debridement", 2],
 ];
-/** A word that holds one of these is a dressing word whatever surrounds it ("redressing", "vacuumassisted"). */
-const INSIDE = ["dress", "vacuum"] as const;
+/** A word that holds one of these is a dressing word whatever surrounds it ("redressing", "vacuumassisted", "debrided"). */
+const INSIDE = ["dress", "vacuum", "debrid"] as const;
+/** A graft keeps a case out of the dressing room (Pong, 15 Nov 2026): a word holding "graft", or STSG, FTSG, SSKG. */
+const isGraftWord = (word: string) =>
+  word.includes("graf") ||
+  (word[0] === "g" && Math.abs(word.length - 5) <= 1 && editDistance(word, "graft") <= 1) ||
+  ["stsg", "ftsg", "sskg", "ssg"].includes(bareWord(word).replace(/s$/, ""));
+/** Thai skin graft: ปลูกถ่ายผิวหนัง, ปลูกผิวหนัง. */
+const THAI_GRAFT = ["ปลูกถ่ายผิว", "ปลูกผิว"].map(thaiForm);
 /**
  * The Thai text as it is compared: NFKC (which splits the vowel ำ in two), sara e typed twice read as sara ae (เเ looks
  * like แ), no tone marks (เปลียนแผล is a common slip), and no spaces between Thai letters ("ทำ แผล").
@@ -96,9 +111,13 @@ function dressingWord(word: string): boolean {
  */
 export function operationWords(operation: string): string[] {
   let text = operation
-    .normalize("NFKC")
+    .normalize("NFKD")
+    // Accents off ("Débridement"); Thai is not read here (isDressingOperation reads it whole).
+    .replace(/\p{M}/gu, "")
     .toLowerCase()
-    .replace(/(?<![a-z0-9])d\s*[-\\./]?\s*([sw])(?![a-z0-9])/g, "d/$1");
+    // Not the D of I&D (I & D, I/D, I+D, I and D), and not before a letter that starts another slash word: "I&D B/L",
+    // "I&D w/ drain" and "D S/P" are no D/B, D/W or D/S.
+    .replace(/(?<!(?<![a-z])i\s*(?:[&/+]|and)\s*)(?<![a-z0-9])d\s*[-\\./]?\s*([sbw])(?![a-z0-9]|\s*\/\s*[a-z])/g, "d/$1");
   // Join single letters each followed by a dot, until none is left.
   for (let before = ""; before !== text; ) {
     before = text;
@@ -110,21 +129,28 @@ export function operationWords(operation: string): string[] {
     if (!token) continue;
     words.push(token);
     // "dressing/vac" is two words, "wound/d/w" is wound and d/w; "d/s" and "d/w" stay whole.
-    if (token.includes("/") && !EXACT.has(token)) words.push(...(token.match(/(?<![a-z0-9])d\/[sw](?![a-z0-9])|[^/]+/g) ?? []));
+    if (token.includes("/") && !EXACT.has(token)) words.push(...(token.match(/(?<![a-z0-9])d\/[sbw](?![a-z0-9])|[^/]+/g) ?? []));
   }
   return words;
 }
 
 /**
- * "Vacuum" (or a typo of it) and no other dressing word. Every other dressing word has a d (dress, ds, dw, dsg, drsg);
- * VAC itself is the vacuum dressing, so "I&D, aspiration, VAC" is still one.
+ * "Vacuum" (or a typo of it) and no other dressing word. Every other dressing word has a d (dress, ds, dw, dsg, drsg,
+ * db, debride); VAC itself is the vacuum dressing, so "I&D, aspiration, VAC" is still one.
  */
-const vacuumOnly = (word: string) => !word.includes("d") && bareWord(word) !== "vac";
+const vacuumOnly = (word: string) => !word.includes("d") && !["vac", "vacc"].includes(bareWord(word));
 
-export function isDressingBooking(operation: string): boolean {
-  if (THAI.some((word) => thaiForm(operation).includes(word))) return true;
-  const hits = operationWords(operation).filter(dressingWord);
+export function isDressingOperation(operation: string): boolean {
+  const words = operationWords(operation);
+  const thai = thaiForm(operation);
+  if (words.some(isGraftWord) || THAI_GRAFT.some((word) => thai.includes(word))) return false;
+  if (THAI.some((word) => thai.includes(word))) return true;
+  const hits = words.filter(dressingWord);
   if (hits.length === 0) return false;
+  const lower = operation.normalize("NFKC").toLowerCase();
   // "Vacuum aspiration", "vacuum-assisted breast biopsy": a vacuum, but no dressing.
-  return !(hits.every(vacuumOnly) && VACUUM_OTHER.test(operation.normalize("NFKC").toLowerCase()));
+  if (hits.every(vacuumOnly) && VACUUM_OTHER.test(lower)) return false;
+  // "DB colostomy" is a double-barrelled stoma.
+  if (hits.every((word) => ["db", "d/b"].includes(bareWord(word))) && /colost|ileost|stoma/.test(lower)) return false;
+  return true;
 }

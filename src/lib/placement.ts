@@ -1,4 +1,5 @@
 import { allocationFor, type DeptCode } from "./allocation.ts";
+import { isDressingOperation } from "./dressing.ts";
 import { repairOn, type RepairPeriods } from "./repair.ts";
 import { isOpenRoom } from "./rooms.ts";
 
@@ -8,23 +9,13 @@ import { isOpenRoom } from "./rooms.ts";
  * pure: the caller keeps the count of cases per room (`load`) and adds each placed case to it.
  */
 
-/** Words that mark a dressing case (wound dressing, done in the dressing room), matched on the lower-cased operation name. */
-const DRESSING_INCLUDE =
-  /dressing|(?<![a-z])d\s*\/\s*s(?![a-z])|(?<![a-z])ds(?![a-z])|(?<![a-z])dw(?![a-z])|ทำแผล|ล้างแผล|เปลี่ยนแผล|change\s+vac|vac+\s*d/;
-/** ...unless the name also holds another procedure: debridement, scrub, graft, closure and so on. */
-const DRESSING_EXCLUDE = [
-  /debri|(?<![a-z])d\.?b\.?(?![a-z])/,
-  /scrub/,
-  /graft|stsg|sskg|suture|closure|escharotomy|fasciotomy|excision|excise|incision|amputat/,
-];
-
 /**
- * A dressing case, from any sub-specialty. The export has no operation-items column, so the "every item must
- * be a dressing" step of the hospital's algorithm is skipped and the result is the broader definition.
+ * A dressing case, from any sub-specialty: the same rule as for doctors' bookings (lib/dressing.ts), so a booking and
+ * its HOSxP case go to the dressing room alike (Pong, 15 Nov 2026). It replaced the hospital's own keyword rule, which
+ * left out debridement and several other procedures; a graft still keeps a case out.
  */
 export function isDressingCase(procedure: string): boolean {
-  const text = procedure.toLowerCase();
-  return DRESSING_INCLUDE.test(text) && !DRESSING_EXCLUDE.some((pattern) => pattern.test(text));
+  return isDressingOperation(procedure);
 }
 
 /** Operation names that belong in the SCOPE room (matched case-insensitively). */

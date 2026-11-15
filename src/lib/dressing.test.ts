@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { editDistance, isDressingBooking, operationWords } from "./dressing.ts";
+import { editDistance, isDressingOperation, operationWords } from "./dressing.ts";
 
 test("the edit distance counts insertions, deletions, substitutions and swapped neighbours as one each", () => {
   assert.equal(editDistance("vacuum", "vacuum"), 0);
@@ -46,6 +46,23 @@ test("each of Pong's words marks a dressing case, in any case and any combinatio
     "dressings",
     "Debridement + VAC",
     "Wound debridement and dressing",
+    // debride, debridement and db count on their own (Pong, 15 Nov 2026), typos and D.B. too
+    "Debridement",
+    "Debride Lt foot",
+    "Debrided wound",
+    "Redebridement",
+    "Debridment",
+    "DB",
+    "D.B. + VAC",
+    "D/B",
+    "DBx2",
+    "Débridement",
+    "Debridement B/L feet + VAC",
+    "D/S B/L legs",
+    "I&D w/ VAC",
+    "VACD",
+    "vaccd",
+    "Amputation + dressing",
     "ทำแผล",
     "ล้างแผลที่ขา",
     // the usual shorthand, and ways of writing the words that a phone or a habit gives
@@ -59,7 +76,6 @@ test("each of Pong's words marks a dressing case, in any case and any combinatio
     "Lt.D/W",
     "S/P amputation.VAC",
     "Wound/D/W",
-    "STSG/D/S",
     "VACx2",
     "VAC2",
     "DSx2",
@@ -75,13 +91,13 @@ test("each of Pong's words marks a dressing case, in any case and any combinatio
     "เปลียนแผล",
     "ทำ แผล",
   ]) {
-    assert.equal(isDressingBooking(name), true, name);
+    assert.equal(isDressingOperation(name), true, name);
   }
 });
 
 test("typos in the longer words still count", () => {
   for (const name of ["Dresing", "dressinng", "drsesing", "Dresign", "dres", "drress", "vaccum", "vacum", "Vacuun", "Vacume", "Vaccume", "VAC dressnig"]) {
-    assert.equal(isDressingBooking(name), true, name);
+    assert.equal(isDressingOperation(name), true, name);
   }
 });
 
@@ -93,7 +109,6 @@ test("other operations do not, the short words must be exact, and an address is 
     "D&C",
     "I&D abscess",
     "TURP",
-    "Debridement",
     "Vasectomy",
     "Vaccine",
     "Drape",
@@ -101,6 +116,31 @@ test("other operations do not, the short words must be exact, and an address is 
     "DSD",
     "Address",
     "Thyroidectomy",
+    // a graft keeps a case out whatever else the name holds (Pong, 15 Nov 2026)
+    "STSG/D/S",
+    "Skin graft + dressing",
+    "Debridement + STSG",
+    "FTSG + VAC",
+    "Split-thickness skin grafting, D/S",
+    "Debridement + skin graf",
+    "Debridement + garft",
+    "Debridement + SSG",
+    "DB + STSGs",
+    "Debridement + ปลูกถ่ายผิวหนัง",
+    "ล้างแผล ปลูกผิวหนัง",
+    // the D of I&D is not D/B, D/W or D/S; debris is not debridement; a DB colostomy is a stoma
+    "I&D B/L buttock abscess",
+    "I & D B/L",
+    "I/D B/L",
+    "I and D B/L",
+    "I&D w/ drain",
+    "I&D w/ packing",
+    "I&D S/P fall",
+    "Removal of ear debris",
+    "Arthroscopic debris removal",
+    "DB colostomy",
+    // short words glued to others are not the words
+    "DBS insertion",
     // a vacuum for something else is not a dressing
     "Vacuum-assisted breast biopsy",
     "VABB (vacuum assisted breast biopsy)",
@@ -116,6 +156,6 @@ test("other operations do not, the short words must be exact, and an address is 
     "",
     "   ",
   ]) {
-    assert.equal(isDressingBooking(name), false, name);
+    assert.equal(isDressingOperation(name), false, name);
   }
 });

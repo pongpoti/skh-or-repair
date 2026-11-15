@@ -83,10 +83,10 @@ test("a matched pair shows once, in the workbook case's room, with the workbook'
 });
 
 test("a booking the form sent to the dressing room by its name stays there when matched", () => {
-  // The workbook's rule leaves debridement out of the dressing room; Pong's dressing words for bookings count VAC.
-  const item = wb({ hn: "222", operation: "Debridement + VAC Lt foot", dept: "ORTHO" });
-  const mine = booking({ hn: "222", subtype: "ORTHO", operation: "Debridement + VAC" });
-  const plain = wb({ hn: "223", operation: "Debridement + VAC Rt foot", dept: "ORTHO" });
+  // Both use the same rule, but the names can differ: the doctor booked a dressing, HOSxP lists the ankle's ORIF.
+  const item = wb({ hn: "222", operation: "ORIF Lt ankle", dept: "ORTHO" });
+  const mine = booking({ hn: "222", subtype: "ORTHO", operation: "Wound dressing Lt ankle" });
+  const plain = wb({ hn: "223", operation: "ORIF Rt ankle", dept: "ORTHO" });
   const result = build([item, plain], [mine]);
   assert.deepEqual(
     result.rows.map((row) => [row.id, row.roomId, row.source]),
