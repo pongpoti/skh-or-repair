@@ -141,7 +141,10 @@ export function closedDayNote(iso: string, holidays: readonly Holiday[]): string
   return holidayIn(holidays, iso)?.name ?? null;
 }
 
-export type BookingRoom = { ok: true; roomId: string; dressing: boolean } | { ok: false; error: string };
+/** Why a booking has no room: the keys of NO_ROOM_TEXT. */
+export type NoRoomReason = keyof typeof NO_ROOM_TEXT;
+
+export type BookingRoom = { ok: true; roomId: string; dressing: boolean } | { ok: false; reason: NoRoomReason; error: string };
 
 const NO_ROOM_TEXT = {
   "obgyn-building": "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้",
@@ -149,6 +152,16 @@ const NO_ROOM_TEXT = {
   "no-room": "สาขาของคุณไม่มีห้องผ่าตัดในวันที่เลือก เลือกวันอื่น",
   "no-dressing-room": "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น",
 } as const;
+
+/** What a room card the doctor cannot pick says under its name, by the reason (the full reason is under the cards). */
+export const NO_ROOM_NOTE: Readonly<Record<NoRoomReason, string>> = {
+  "obgyn-building": "ผ่าตัดที่อาคารแม่",
+  "no-department": "ไม่ทราบสาขา",
+  "no-room": "ไม่มีในวันที่เลือก",
+  "no-dressing-room": "ไม่มีในวันที่เลือก",
+};
+
+const noRoom = (reason: NoRoomReason): BookingRoom => ({ ok: false, reason, error: NO_ROOM_TEXT[reason] });
 
 /**
  * The department a doctor's bookings go to: their specialty (the codes the admin list gives doctors), or SCOPE, which
@@ -170,13 +183,13 @@ function bookingDept(subtype: string | null | undefined): DeptCode | null {
  */
 export function bookingRoom(subtype: string | null | undefined, operation: string, date: string, periods: RepairPeriods, choice: RoomChoice): BookingRoom {
   const dept = bookingDept(subtype);
-  if (dept === "OBGYN" && repairOn(date, periods) !== null) return { ok: false, error: NO_ROOM_TEXT["obgyn-building"] };
+  if (dept === "OBGYN" && repairOn(date, periods) !== null) return noRoom("obgyn-building");
   if (choice === "dressing") {
     const rooms = roomsHeldBy("INFECT", date, periods);
-    return rooms.length > 0 ? { ok: true, roomId: rooms[0], dressing: true } : { ok: false, error: NO_ROOM_TEXT["no-dressing-room"] };
+    return rooms.length > 0 ? { ok: true, roomId: rooms[0], dressing: true } : noRoom("no-dressing-room");
   }
   const placed = placeCase({ procedure: operation, dept, emergency: false, team: dept, choice: "dept" }, date, periods, new Map());
-  if (!placed.ok) return { ok: false, error: NO_ROOM_TEXT[placed.reason] };
+  if (!placed.ok) return noRoom(placed.reason);
   return { ok: true, roomId: placed.roomId, dressing: false };
 }
 
@@ -281,7 +294,7 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   }
   const room = bookingRoom(subtype, operation, date, periods, choice);
   // No room that day: another day may have one.
-  if (!room.ok) return refuse(room.error === NO_ROOM_TEXT["no-room"] || room.error === NO_ROOM_TEXT["no-dressing-room"] ? "date" : undefined, room.error);
+  if (!room.ok) return refuse(room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
   return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes } };
 }
 

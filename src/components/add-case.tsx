@@ -18,6 +18,7 @@ import {
   earliestText,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
+  NO_ROOM_NOTE,
   SCRUB_NO,
   SCRUB_QUESTION,
   SCRUB_YES,
@@ -218,7 +219,8 @@ export function AddCase({
   function answerScrub(answer: boolean) {
     setScrubDoes(answer);
     setChoice("dressing");
-    edited("room");
+    // A message about another field stays: one about the day may have come while the dialog hid it (15:00 passed).
+    if (invalid === null || invalid === "room") edited("room");
     scrubRef.current?.close();
   }
 
@@ -490,7 +492,7 @@ export function AddCase({
                   ) : allocation ? (
                     <DeptTag dept={allocation.am} />
                   ) : (
-                    <span className="text-xs">ไม่มีในวันที่เลือก</span>
+                    <span className="text-xs">{deptRoom.ok ? "" : NO_ROOM_NOTE[deptRoom.reason]}</span>
                   )}
                 </span>
               </label>
@@ -508,7 +510,7 @@ export function AddCase({
                   data-testid="case-room-dressing"
                 />
                 <span className="text-[0.9375rem] font-bold">{DRESSING_ROOM_NAME}</span>
-                <span className="text-xs text-ink-3">{dressingRoom.ok ? label(dressingRoom.roomId) : "ไม่มีในวันที่เลือก"}</span>
+                <span className="text-xs text-ink-3">{dressingRoom.ok ? label(dressingRoom.roomId) : NO_ROOM_NOTE[dressingRoom.reason]}</span>
               </label>
             </div>
             <div id="case-room-why" className="mt-1.5 flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1" aria-live="polite">

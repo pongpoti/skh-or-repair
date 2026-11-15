@@ -160,6 +160,15 @@ test("each of Pong's words marks a dressing case, in any case and any combinatio
     "Scrub/ตัดไหม",
     // a vacuum dressing beside something else
     "Vacuum/dressing",
+    // a graft opened again, or written as opened
+    "Reopen graft",
+    "Opened graft",
+    "Re-open graft",
+    "Re open STSG",
+    "Wound dressing + open graft",
+    "Debridement, open skin graft",
+    // Thai pasted with zero-width spaces
+    "ทำ\u200Bแผล",
   ]) {
     assert.equal(isDressingOperation(name), true, name);
   }
@@ -213,6 +222,17 @@ test("other operations do not, the short words must be exact, and an address is 
     "แผลเปิด STSG",
     "Debridement + แผลเปิด STSG",
     "กระดูกหักแบบเปิด STSG",
+    // "open" that ends a procedure opens nothing after it
+    "Fasciotomy (open) + STSG",
+    "Debridement, open + FTSG",
+    "Leave wound open + STSG",
+    "Wound debridement, leave open + STSG",
+    "Debridement leave open, skin graft",
+    "Open: STSG",
+    "Open + STSG",
+    "Open; STSG",
+    // a zero-width space is no space: แผลเปิด is still an open wound
+    "แผล\u200Bเปิด STSG",
     // a graft joined to Thai by a slash still keeps the case out
     "STSG/ตัดไหม + Debridement",
     "Debridement, STSG/ตัดไหม",
@@ -236,6 +256,12 @@ test("other operations do not, the short words must be exact, and an address is 
     "Aspiration/vacuum",
     "Mammotome/vacuum biopsy",
     "US/vacuum assisted biopsy",
+    // a vacuum word glued to another word is still a vacuum
+    "Manualvacuum aspiration",
+    "MVA(manualvacuum aspiration)",
+    "Suctionvacuum curettage",
+    "Minivacuum aspiration",
+    "USvacuum assisted biopsy",
     // short words around a dot or with letters glued on stay themselves
     "Evac hematoma",
     "DSA",

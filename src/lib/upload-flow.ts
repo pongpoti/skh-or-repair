@@ -1,7 +1,7 @@
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
 import { allocationFor } from "./allocation.ts";
 import { UPLOAD_CLOSES_MINUTES, UPLOAD_OPENS_MINUTES } from "./board-day.ts";
-import { buildBoardRows, type WorkbookCase } from "./board-rows.ts";
+import { buildBoardRows, withBookedChoices, type WorkbookCase } from "./board-rows.ts";
 import { bangkokParts } from "./days.ts";
 import { placeAll, UNPLACED_TEXT, type UnplacedReason } from "./placement.ts";
 import { repairOn, type RepairPeriods } from "./repair.ts";
@@ -110,12 +110,18 @@ function roomDept(roomId: string, date: string, periods: RepairPeriods): string 
 export type Placed<T extends PlacedCase = PlacedCase> = { cases: T[]; rooms: RoomCount[]; unplaced: UnplacedCount[]; placed: number };
 
 /**
- * Places each case on `date` in file order (lib/placement.ts placeAll, as the board does when it is read) and counts
- * where they went. Every case is kept, placed or not (roomId null): the board leaves an unplaced case off, but the
+ * Places each case on `date` in file order (lib/placement.ts placeAll, as the board does when it is read, a case a
+ * doctor booked by the doctor's choice of room) and counts where they went. Every case is kept, placed or not (roomId null): the board leaves an unplaced case off, but the
  * stored list still says what HOSxP holds.
  */
-export function placeCases<T extends PlacedCase>(items: readonly T[], date: string, periods: RepairPeriods): Placed<T> {
-  const placements = placeAll(items, date, periods);
+export function placeCases<T extends PlacedCase>(
+  items: readonly T[],
+  date: string,
+  periods: RepairPeriods,
+  bookings: readonly AddedCase[] = [],
+): Placed<T> {
+  // A case a doctor booked goes by the doctor's choice of room, as on the board.
+  const placements = placeAll(withBookedChoices(items, bookings, date, periods), date, periods);
   const load = new Map<string, number>();
   const missed = new Map<UnplacedReason, number>();
   const cases = items.map((item, index) => {
@@ -140,17 +146,29 @@ export function placeCases<T extends PlacedCase>(items: readonly T[], date: stri
  * The file's kept rows as they are stored, placed on `date`. The rows are placed as stored (operation names capped),
  * so the board, placing the stored cases again, finds the same rooms.
  */
-export function placeRows(rows: readonly WorkbookRow[], date: string, periods: RepairPeriods): Placed {
-  return placeCases(rows.map((row, index) => placedCase(row, null, index + 1)), date, periods);
+export function placeRows(rows: readonly WorkbookRow[], date: string, periods: RepairPeriods, bookings: readonly AddedCase[] = []): Placed {
+  return placeCases(
+    rows.map((row, index) => placedCase(row, null, index + 1)),
+    date,
+    periods,
+    bookings,
+  );
 }
 
 /**
  * A stored upload's summary with its placement (placed, per room, not placed, the repair's half) worked out again from
  * its stored cases under the dates in force now, as the board places them: an admin may have moved the repair's dates
- * since the upload. The counts of the rules (rows read, dropped, cut) stay as stored.
+ * since the upload, and a booking made since moves its case to the room the doctor chose. The counts of the rules (rows
+ * read, dropped, cut) stay as stored.
  */
-export function placedSummary(summary: FlowSummary, cases: readonly PlacedCase[], date: string, periods: RepairPeriods): FlowSummary {
-  const placed = placeCases(cases, date, periods);
+export function placedSummary(
+  summary: FlowSummary,
+  cases: readonly PlacedCase[],
+  date: string,
+  periods: RepairPeriods,
+  bookings: readonly AddedCase[] = [],
+): FlowSummary {
+  const placed = placeCases(cases, date, periods, bookings);
   return {
     ...summary,
     placed: placed.placed,
@@ -172,16 +190,20 @@ export type ProcessedUpload = {
 
 export type FlowOptions = Omit<ParseOptions, "date1904">;
 
-/** The pipeline from sheet rows (lib/xlsx.ts readXlsx) for the target day under `periods`. */
+/**
+ * The pipeline from sheet rows (lib/xlsx.ts readXlsx) for the target day under `periods`; a case one of `bookings`
+ * matches goes by the doctor's choice of room, as on the board.
+ */
 export function processSheet(
   sheet: { rows: readonly (readonly XlsxCell[])[]; date1904: boolean },
   target: string,
   periods: RepairPeriods,
   options: FlowOptions = {},
+  bookings: readonly AddedCase[] = [],
 ): FlowRefusal | ProcessedUpload {
   const prepared = prepareUpload(sheet, target, options);
   if (!prepared.ok) return { ok: false, error: prepared.error, message: prepared.message };
-  const placed = placeRows(prepared.cuts.kept, target, periods);
+  const placed = placeRows(prepared.cuts.kept, target, periods, bookings);
   return {
     ok: true,
     cases: placed.cases,
@@ -201,10 +223,11 @@ export function processWorkbook(
   target: string,
   periods: RepairPeriods,
   options: FlowOptions = {},
+  bookings: readonly AddedCase[] = [],
 ): FlowRefusal | ProcessedUpload {
   const book = readXlsx(data);
   if (!book.ok) return { ok: false, error: "file", message: book.message };
-  return processSheet(book, target, periods, options);
+  return processSheet(book, target, periods, options, bookings);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -292,7 +315,7 @@ export type UploadFlowResult = FlowRefusal | (ProcessedUpload & { matching: Matc
 
 /** From the file's bytes to the cases to store, the summary and the matching with the bookings. */
 export function runUploadFlow(input: UploadFlowInput): UploadFlowResult {
-  const processed = processWorkbook(input.data, input.target, input.periods, input.options);
+  const processed = processWorkbook(input.data, input.target, input.periods, input.options, input.bookings);
   if (!processed.ok) return processed;
   const matching = matchBookings({ date: input.target, periods: input.periods, cases: processed.cases, bookings: input.bookings });
   return { ...processed, matching };

@@ -128,6 +128,22 @@ test("a matched case booked in the department's room keeps the workbook's other 
   );
 });
 
+test("a patient booked twice on one day: each booking pairs with the HOSxP case its room fits", () => {
+  // The doctor booked the dressing room for the dressing and ORTHO's room for the ORIF; HOSxP lists the ORIF first.
+  const dressing = booking({ hn: "555", subtype: "ORTHO", operation: "Wound dressing Lt leg", dressing: true, scrubDoes: true });
+  const orif = booking({ hn: "555", subtype: "ORTHO", operation: "ORIF Lt tibia" });
+  const first = wb({ hn: "555", operation: "ORIF Lt tibia", dept: "ORTHO" });
+  const second = wb({ hn: "555", operation: "Wound dressing Lt leg", dept: "ORTHO" });
+  const result = build([first, second], [dressing, orif]);
+  assert.deepEqual(
+    result.rows.map((row) => [row.id, row.roomId, row.procedure, row.scrubDoes]),
+    [
+      [`mt-${orif.id}`, "or-13", "ORIF Lt tibia", undefined],
+      [`mt-${dressing.id}`, "or-10", "Wound dressing Lt leg", true],
+    ],
+  );
+});
+
 test("a case the workbook cannot place shows in its booking's room, but a department's booking never in the dressing room", () => {
   // No department in HOSxP: the booking's own room. A booking of no subtype keeps its saved room, unless that is the
   // dressing room and the doctor did not choose it.

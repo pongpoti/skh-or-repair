@@ -63,6 +63,8 @@ const isGraftWord = (word: string) =>
   word.includes("graf") ||
   (word[0] === "g" && Math.abs(word.length - 5) <= 1 && editDistance(word, "graft") <= 1) ||
   ["stsg", "ftsg", "sskg", "ssg"].includes(bareWord(word).replace(/s$/, ""));
+/** Zero-width spaces and joiners, which text pasted from other apps carries between Thai words. */
+const ZERO_WIDTH = /[\u200B-\u200D\u2060\uFEFF]/g;
 /** Thai skin graft: ปลูกถ่ายผิวหนัง, ปลูกผิวหนัง. */
 const THAI_GRAFT = ["ปลูกถ่ายผิว", "ปลูกผิว"].map(thaiForm);
 /**
@@ -71,6 +73,7 @@ const THAI_GRAFT = ["ปลูกถ่ายผิว", "ปลูกผิว"
  */
 function thaiForm(text: string): string {
   return text
+    .replace(ZERO_WIDTH, "")
     .normalize("NFKC")
     .replace(/\u0E40\u0E40/g, "\u0E41")
     .replace(/[\u0E48-\u0E4B]/g, "")
@@ -150,6 +153,9 @@ function dressingWord(word: string): boolean {
  */
 type Word = { word: string; opened: boolean; whole?: true };
 
+/** Open, as it stands before a graft it opens: open, reopen, opened, reopening ("re-open" is re and open). */
+const isOpen = (word: string) => /^(?:re)?open(?:ed|ing)?$/.test(word);
+
 /** The parts of a slash word: "dressing/vac" is dressing and vac, "wound/d/w" is wound and d/w (d/s and d/w stay whole). */
 const slashParts = (token: string) => token.match(/(?<![a-z0-9])d\/[sbw](?![a-z0-9])|[^/]+/g) ?? [];
 
@@ -158,12 +164,15 @@ const slashParts = (token: string) => token.match(/(?<![a-z0-9])d\/[sbw](?![a-z0
  * same for d/w); letters each followed by a dot are one word ("D.S." is d/s, "V.A.C." is vac); any other dot breaks
  * words ("Rt.VAC" is rt and vac). Thai เปิด (open) standing alone just before a word in Latin letters is read as
  * "open", so "เปิด graft" is an opened graft; any other Thai stands between words, so "เปิดแผล STSG" (open the wound,
- * then a graft) and "แผลเปิด STSG" (an open wound) open no graft.
+ * then a graft) and "แผลเปิด STSG" (an open wound) open no graft. A plus, comma, semicolon, colon, ampersand or
+ * bracket ends a procedure, so "open" before it opens nothing after it ("Fasciotomy (open) + STSG").
  */
 function words(operation: string): Word[] {
   let text = operation
-    // A typed ~ is a space: the character marks where Thai stood (below).
+    // A typed ~ is a space: the character marks where Thai stood (below). Zero-width spaces are nothing ("แผล\u200Bเปิด"
+    // is แผลเปิด).
     .replace(/~/g, " ")
+    .replace(ZERO_WIDTH, "")
     // Before the marks go: they would leave เปด.
     .replace(/(?<![\u0E00-\u0E7F])\u0E40\u0E1B\u0E34\u0E14(?=\s*[A-Za-z])/g, " open ")
     .replace(/[\u0E00-\u0E7F]+/g, " ~ ")
@@ -181,10 +190,12 @@ function words(operation: string): Word[] {
   }
   text = text
     .replace(/\./g, " ")
+    // Where one procedure ends and the next starts: marked as Thai is (below), so "open" does not reach past it.
+    .replace(/[+,;:()[\]{}&]/g, " ~ ")
     .replace(/\s*\/\s*/g, "/")
     // Thai joined by a slash ("VAC/ตัดไหม") stands apart, as Thai between spaces does.
     .replace(/\/*~\/*/g, " ~ ");
-  // "~" marks where Thai stood: no word of its own, but it parts "open" from what follows.
+  // "~" marks where Thai or a procedure's end stood: no word of its own, but it parts "open" from what follows.
   const tokens = text.split(/[^a-z0-9/~]+/).filter(Boolean);
   const found: Word[] = [];
   tokens.forEach((token, index) => {
@@ -193,7 +204,7 @@ function words(operation: string): Word[] {
     // may be a slash word that ends in open ("dressing/open graft").
     let back = index - 1;
     while (back >= 0 && GRAFT_FILLER.has(tokens[back])) back -= 1;
-    const opened = back >= 0 && tokens[back].split("/").at(-1) === "open";
+    const opened = back >= 0 && isOpen(tokens[back].split("/").at(-1) ?? "");
     if (!token.includes("/") || EXACT.has(token)) {
       found.push({ word: token, opened });
       return;
@@ -205,7 +216,7 @@ function words(operation: string): Word[] {
     parts.forEach((part, at) => {
       let before = at - 1;
       while (before >= 0 && GRAFT_FILLER.has(parts[before])) before -= 1;
-      found.push({ word: part, opened: before >= 0 ? parts[before] === "open" : opened });
+      found.push({ word: part, opened: before >= 0 ? isOpen(parts[before]) : opened });
     });
   });
   return found;
@@ -217,8 +228,8 @@ export function operationWords(operation: string): string[] {
 }
 
 /**
- * "Vacuum" (or a typo of it), as opposed to the other dressing words, which start with d or s or hold a d (dress, ds, dw,
- * dsg, drsg, db, debride, scrub, vacd); VAC itself is the vacuum dressing, so "Aspiration + VAC" is still one. A slash
+ * "Vacuum" (or a typo of it, or glued to another word: "manualvacuum"), as opposed to the other dressing words, which
+ * start with d or s or hold a d (dress, ds, dw, dsg, drsg, db, debride, scrub, vacd); VAC itself is the vacuum dressing, so "Aspiration + VAC" is still one. A slash
  * word is judged by its dressing parts ("manual/vacuum" is a vacuum; "vacuum/dressing" is not only one).
  */
 const vacuumOnly = (word: string): boolean => {
@@ -227,7 +238,8 @@ const vacuumOnly = (word: string): boolean => {
     return parts.length > 0 && parts.every(vacuumOnly);
   }
   const bare = bareWord(word);
-  return bare.startsWith("v") && !bare.includes("d") && !["vac", "vacc"].includes(bare);
+  const vacuum = bare.startsWith("v") || bare.includes("vacuum");
+  return vacuum && !bare.includes("d") && !bare.includes("scrub") && !["vac", "vacc"].includes(bare);
 };
 
 export function isDressingOperation(operation: string): boolean {

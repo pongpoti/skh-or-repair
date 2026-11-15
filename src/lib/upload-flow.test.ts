@@ -374,6 +374,22 @@ test("matching: a booking with the case's HN pairs with it; the rest are unbooke
   );
 });
 
+test("the upload's own rooms are the board's: a case a doctor booked goes by the doctor's choice of room", () => {
+  // 900003, "I&D abscess Rt thigh", goes to the dressing room (OR 1) by its name; its doctor booked GENSX's room.
+  const mine = booking({ hn: "99000003", operation: "I&D abscess Rt thigh" });
+  const result = runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: WEEKLY, bookings: [mine] });
+  assert.ok(result.ok);
+  assert.equal(result.cases.find((item) => item.caseId === "900003")?.roomId, "or-5", "GENSX's emptier room that Thursday");
+  const board = buildBoardRows({ date: THURSDAY, periods: WEEKLY, workbook: result.cases, bookings: [mine], viewer: { allHn: true, userId: null } });
+  const counted = Object.fromEntries(result.summary.rooms.map((room) => [room.roomId, room.count]));
+  assert.deepEqual(counted, board.countByRoom);
+  assert.deepEqual(counted, { "or-1": 1, "or-2": 2, "or-3": 1, "or-4": 1, "or-5": 1, "or-11": 1 });
+  // Read again on the upload page with the same bookings: the same; without them, the name places it again.
+  assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, WEEKLY, [mine]), result.summary);
+  const alone = placedSummary(result.summary, result.cases, THURSDAY, WEEKLY);
+  assert.equal(alone.rooms.find((room) => room.roomId === "or-1")?.count, 2);
+});
+
 test("matching: a booking with no operation name and no HN reads as such; no bookings flags every case", () => {
   const cases = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY)).cases;
   const none = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [] });

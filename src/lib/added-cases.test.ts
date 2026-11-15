@@ -13,6 +13,7 @@ import {
   earliestText,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
+  NO_ROOM_NOTE,
   withAddedCases,
   type AddedCase,
   type BookingContext,
@@ -91,7 +92,7 @@ test("ห้องทำแผล: the dressing room that day, whatever the depa
   assert.deepEqual(room("GENSX", "D/S", "2027-01-27"), { ok: true, roomId: "or-1", dressing: true }, "the second half");
   assert.deepEqual(room("GENSX", "dressing", "2026-11-11"), { ok: true, roomId: "or-1", dressing: true }, "before the repair, OR 1");
   assert.deepEqual(room(null, "Dressing", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "no department needed");
-  assert.deepEqual(room("GENSX", "D/S", "2026-11-21"), { ok: false, error: "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น" }, "a Saturday");
+  assert.deepEqual(room("GENSX", "D/S", "2026-11-21"), { ok: false, reason: "no-dressing-room", error: "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น" }, "a Saturday");
 });
 
 test("no room: obstetrics-gynaecology during the repair, an unknown department, a day without the department's room", () => {
@@ -101,7 +102,18 @@ test("no room: obstetrics-gynaecology during the repair, an unknown department, 
   };
   assert.equal(refused("OBGYN", "TAH", "2026-11-16"), "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้");
   const obgynDressing = bookingRoom("OBGYN", "Dressing", "2026-11-16", REPAIR, "dressing");
-  assert.deepEqual(obgynDressing, { ok: false, error: "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้" }, "the dressing room too");
+  assert.deepEqual(
+    obgynDressing,
+    { ok: false, reason: "obgyn-building", error: "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้" },
+    "the dressing room too",
+  );
+  // The card the doctor cannot pick says the reason in short: only a missing room is about the day.
+  assert.deepEqual(NO_ROOM_NOTE, {
+    "obgyn-building": "ผ่าตัดที่อาคารแม่",
+    "no-department": "ไม่ทราบสาขา",
+    "no-room": "ไม่มีในวันที่เลือก",
+    "no-dressing-room": "ไม่มีในวันที่เลือก",
+  });
   assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "or-6", "after the repair, its own room again");
   assert.equal(refused(null, "Lap chole", "2026-11-16"), "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ");
   assert.equal(refused("", "Lap chole", "2026-11-16"), "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ");
