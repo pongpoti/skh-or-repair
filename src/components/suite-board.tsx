@@ -118,7 +118,7 @@ export function SuiteBoard({
   adding?: CaseAdding | null;
   /** The bookings and the HOSxP cases could not be loaded, so the rooms show none. */
   casesUnavailable?: boolean;
-  /** The notices above the plan, when the page sets them itself (the preview's ?notices=all); else the board's own. */
+  /** The notices above the plan, when the page sets them itself (an admin's /?notices=all, or the preview's); else the board's own. */
   notices?: readonly BoardNotice[];
 }) {
   const router = useRouter();

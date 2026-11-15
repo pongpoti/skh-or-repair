@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type Ref, type SyntheticEvent } from "react";
-import { InlineStatus } from "@/components/inline-status";
 
 /** Hospital numbers here are exactly seven digits. */
 export const HN_DIGITS = 7;
@@ -41,9 +40,6 @@ const TONE: Record<"ok" | "bad", Record<BoxState, string>> = {
   },
 };
 
-/** A number longer than seven digits that the field turned away, while the HN is still the one it kept. */
-type Refused = { at: string; keystroke: boolean; count: number };
-
 /**
  * The patient's HN as seven digits in a row of boxes, on a card that floats above the booking form (Pong, 15 Nov 2026:
  * "for HN input: redesign to be 7 digits OTP-like floating card").
@@ -51,9 +47,10 @@ type Refused = { at: string; keystroke: boolean; count: number };
  * One real input lies, transparent, over the boxes, so a tap anywhere on them opens the number pad, and paste,
  * backspace, select all and screen readers work as in any text box; the boxes only draw its digits. The caret always
  * waits after the last digit, because the boxes do not line up with the text under them and a tap would otherwise put
- * it somewhere the boxes cannot show. The field keeps no list of HNs (autocomplete off) and has no maxLength: a longer
- * number is turned away with a line under the boxes, never cut short, since a number cut short could be another
- * patient's.
+ * it somewhere the boxes cannot show. The field keeps no list of HNs (autocomplete off) and has no maxLength: a digit
+ * past the seventh is quietly ignored, with no warning (Pong, 15 Nov 2026: "subtlety prevent input more than 7 digits
+ * without display warning"), and a pasted longer number changes nothing, never cut short, since a number cut short
+ * could be another patient's.
  */
 export function HnField({
   id,
@@ -79,27 +76,18 @@ export function HnField({
   const [focused, setFocused] = useState(false);
   // A selected run of digits (select all, a long press), drawn as tinted boxes; null while the caret is after the last.
   const [picked, setPicked] = useState<readonly [number, number] | null>(null);
-  const [refused, setRefused] = useState<Refused | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // The booking dialog stays mounted between openings and starts each one with an empty HN, the same value a long
-  // number pasted into an empty field left behind; without this, that refusal would still show, red, on the next
-  // opening.
+  // The booking dialog stays mounted between openings: a selection drawn when it closed must not come back.
   useEffect(() => {
     const dialog = cardRef.current?.closest("dialog");
     if (!dialog) return;
-    const reset = () => {
-      setRefused(null);
-      setPicked(null);
-    };
+    const reset = () => setPicked(null);
     dialog.addEventListener("close", reset);
     return () => dialog.removeEventListener("close", reset);
   }, []);
 
-  // The line lasts while the HN is the one kept when the long number came in; any change to the HN ends it.
-  const tooLong = refused !== null && refused.at === value;
-  const bad = invalid || tooLong;
-  const noteId = `${id}-too-long`;
+  const bad = invalid;
   const full = value.length >= HN_DIGITS;
   const next = Math.min(value.length, HN_DIGITS - 1);
   const from = picked && focused ? Math.min(picked[0], value.length) : 0;
@@ -129,26 +117,13 @@ export function HnField({
       // on a phone that loses the selection) is the HN meant: it replaces the one in the boxes. Anything else that
       // would make the row longer is kept as it was (React puts the input back to `value`).
       const inserted = typeof native.data === "string" ? hnDigits(native.data) : "";
-      if (inserted.length === HN_DIGITS) {
-        setRefused(null);
-        onChange(inserted);
-        return;
-      }
-      // One character typed onto a full row is a typed digit; a paste, a drop, or several characters at once is a
-      // pasted number. Without an InputEvent, one character more than before counts as typed.
-      const kind = native.inputType ?? "";
-      const keystroke = kind.startsWith("insertFrom")
-        ? false
-        : typeof native.data === "string"
-          ? [...native.data].length === 1
-          : raw.length === value.length + 1;
-      setRefused((prev) => ({ at: value, keystroke, count: (prev?.count ?? 0) + 1 }));
+      if (inserted.length === HN_DIGITS) onChange(inserted);
+      // An eighth digit typed, or a longer number pasted, is quietly left out: nothing is said.
       return;
     }
     // A key that is not a digit (a dash or dot on some number pads, a space) changes nothing: React puts the input
-    // back, and the form's own message about this HN and any refusal line under the boxes stay, since the HN is the same.
+    // back, and the form's own message about this HN stays, since the HN is the same.
     if (digits === value) return;
-    setRefused(null);
     onChange(digits);
   }
 
@@ -159,11 +134,8 @@ export function HnField({
     if (pasted.length !== HN_DIGITS) return;
     event.preventDefault();
     setPicked(null);
-    setRefused(null);
     if (pasted !== value) onChange(pasted);
   }
-
-  const described = [describedBy, tooLong ? noteId : null].filter(Boolean).join(" ") || undefined;
 
   return (
     <div ref={cardRef} className="rounded-2xl bg-white p-3 shadow-[0_18px_40px_-18px_rgb(41_29_20/0.35),0_4px_12px_-6px_rgb(41_29_20/0.16)] ring-1 ring-line min-[360px]:p-4">
@@ -227,20 +199,11 @@ export function HnField({
             setPicked(null);
           }}
           aria-invalid={bad || undefined}
-          aria-describedby={described}
+          aria-describedby={describedBy}
           className="absolute inset-0 z-10 size-full cursor-text appearance-none rounded-xl border-0 bg-transparent p-0 text-base text-transparent caret-transparent outline-none! selection:bg-transparent selection:text-transparent"
           data-testid={testId}
         />
       </div>
-
-      {tooLong ? (
-        // Keyed by the try, so a second long number is announced again even though the words are the same.
-        <div key={refused.count} id={noteId} className="mt-2">
-          <InlineStatus tone="warning" role="alert" testId={testId ? `${testId}-too-long` : undefined}>
-            {refused.keystroke ? `HN มี ${HN_DIGITS} หลัก ตรวจเลขอีกครั้ง` : `HN มี ${HN_DIGITS} หลัก ตรวจเลขที่วางอีกครั้ง`}
-          </InlineStatus>
-        </div>
-      ) : null}
     </div>
   );
 }

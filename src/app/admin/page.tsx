@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminBar } from "@/components/admin-bar";
 import { Notice } from "@/components/auth-shell";
@@ -64,6 +65,20 @@ export default async function AdminPage() {
               </div>
             </section>
           )}
+          {/* Test mode (Pong, 15 Nov 2026): every kind of notice in the board's strip at once, seen by admins only. */}
+          <section className="card overflow-hidden" aria-labelledby="test-mode-title">
+            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div className="min-w-0">
+                <h2 id="test-mode-title" className="text-base font-bold text-ink sm:text-lg">
+                  โหมดทดสอบ
+                </h2>
+                <p className="mt-1 text-sm text-ink-2">แสดงการแจ้งเตือนทุกแบบพร้อมกันในแถบเหนือแผนผัง เห็นเฉพาะผู้ดูแลระบบ</p>
+              </div>
+              <Link href="/?notices=all" className="btn btn-secondary shrink-0" data-testid="test-notices-link">
+                ดูการแจ้งเตือนทุกแบบ
+              </Link>
+            </div>
+          </section>
         </div>
       </main>
     </div>

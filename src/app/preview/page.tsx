@@ -4,7 +4,7 @@ import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-
 import { BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
 import { TopBar } from "@/components/top-bar";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, type BoardDay } from "@/lib/board-day";
-import { boardNotices } from "@/lib/board-notices";
+import { everyNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { addDays, parseDay, todayIso, weekDates } from "@/lib/days";
 import { holidaysBetween } from "@/lib/holidays";
@@ -126,11 +126,7 @@ export default async function PreviewPage({
         pathname="/preview"
         casesUnavailable={Boolean(params.failed)}
         adding={adding}
-        notices={
-          params.notices === "all"
-            ? boardNotices({ closed: true, holiday: holiday ?? "วันปิยมหาราช", failed: true, missingUpload: day.boardDate, mismatches: 3 })
-            : undefined
-        }
+        notices={params.notices === "all" ? everyNotice(day.boardDate, holiday ?? undefined) : undefined}
       />
     </div>
   );
