@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   addDays,
+  bookedAtText,
   bookedChoice,
   bookedMessage,
   bookedRoom,
@@ -299,4 +300,12 @@ test("added cases join the board after its own, numbered per room", () => {
   assert.equal(ops[4].procedure, NO_OPERATION_LABEL);
   assert.equal(board.operations.length, 1, "the board itself is not changed");
   assert.ok(ops.every((item) => !("hn" in item)), "no HN on the board's operations");
+});
+
+test("when a booking was made reads in Bangkok time, the Thai short month and year: 15 พ.ย. 69, 23:43", () => {
+  // 16:43 UTC is 23:43 in Bangkok; 17:05 UTC is already the next day there.
+  assert.equal(bookedAtText("2026-11-15T16:43:00.000Z"), "15 พ.ย. 69, 23:43");
+  assert.equal(bookedAtText("2026-11-15T17:05:09.000Z"), "16 พ.ย. 69, 00:05");
+  assert.equal(bookedAtText("2027-01-02T01:07:00.000Z"), "2 ม.ค. 70, 08:07");
+  assert.equal(bookedAtText("not a time"), "", "nothing to show");
 });

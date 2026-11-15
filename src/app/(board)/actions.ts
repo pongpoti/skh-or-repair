@@ -43,8 +43,9 @@ function logFailure(what: string, error: unknown) {
  * Books a room for one patient (by HN) on a workday, in the room of the doctor's choice (lib/added-cases.ts
  * bookingRoom: their department's room that day, or the dressing room with their answer to the scrub question). The day is checked against the
  * earliest day by the app's clock (before 15:00 the next workday, from 15:00 the one after) and the holidays
- * (EXTRA_HOLIDAYS and the Bank of Thailand's feed). When the feed cannot be read, a weekday that is not in
- * EXTRA_HOLIDAYS is taken, as on the board: only the workbook upload needs the feed to be sure.
+ * (HOSPITAL_HOLIDAYS, EXTRA_HOLIDAYS and the Bank of Thailand's feed). When the feed cannot be read, a weekday that is
+ * not in HOSPITAL_HOLIDAYS or EXTRA_HOLIDAYS is taken, as on the board: only the workbook upload needs the feed to be
+ * sure.
  */
 export async function addCase(input: unknown): Promise<CaseResult> {
   try {

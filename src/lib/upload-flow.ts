@@ -259,8 +259,9 @@ export type MatchReport = {
 
 /**
  * The upload's cases against the doctors' bookings on `date`, the board's way (lib/board-rows.ts buildBoardRows, as
- * MX sees it): the counts are exactly the board's mismatch alert. Rows the board leaves off (a case not placed, a
- * booking in a room that does not operate that day) are not listed here either.
+ * MX sees it): the unbooked cases are exactly the board's mismatch alert, and the bookings HOSxP does not list are the
+ * ones the board leaves off since it has the upload (BoardRows.unmatched). Rows the board would leave off anyway (a case
+ * not placed, a booking in a room that does not operate that day) are not listed here either.
  */
 export function matchBookings(input: {
   date: string;
@@ -275,8 +276,9 @@ export function matchBookings(input: {
     bookings: input.bookings,
     viewer: { allHn: true, userId: null },
   });
+  // The board's own mismatches, and the bookings it leaves off because HOSxP does not list them (Pong, 15 Nov 2026).
   const listed = (flag: "unbooked" | "not-in-hosxp"): MatchRow[] =>
-    board.rows
+    (flag === "unbooked" ? board.rows : board.unmatched)
       .filter((row) => row.flag === flag)
       .map((row) => {
         const room = getRoom(row.roomId);

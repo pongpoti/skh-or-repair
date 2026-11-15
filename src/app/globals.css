@@ -197,9 +197,6 @@ body {
   .badge-muted { color: var(--ink-3); background: #fff; border-color: var(--line-strong); }
   .badge-stop { color: var(--stop); background: rgb(253 236 234); border-color: rgb(192 57 43 / 0.22); }
   /* A case row's source (components/case-source.tsx): an icon and a word in place of the status dot. */
-  .badge-source { gap: 4px; color: var(--ink-2); background: #fff; border-color: var(--line-strong); }
-  .badge-source::before { content: none; }
-  .badge-matched { color: var(--live); background: var(--live-tint); border-color: rgb(21 127 61 / 0.25); }
 
   /* Department chip, coloured by --chip (the department's own colour). */
   .chip {
@@ -347,7 +344,7 @@ body {
 
   .case-row {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr) auto;
     column-gap: 0.875rem;
     align-items: start;
     border-left: 4px solid transparent;
@@ -374,6 +371,24 @@ body {
     text-align: center;
     font-variant-numeric: tabular-nums;
   }
+
+  /* The HN and the surgeon, one size (Pong, 15 Nov 2026: "increase txt size of surgeon same as HN"). */
+  .case-line { margin-top: 0.125rem; font-size: 0.9375rem; line-height: 1.375rem; }
+
+  /* The row's icon at its right end, centred on the row's height, in a round tile; no text (Pong, 15 Nov 2026). */
+  .case-icon {
+    align-self: center;
+    display: inline-flex;
+    width: 2.5rem;
+    height: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: #fff;
+    color: var(--ink-2);
+  }
+  .case-icon-matched { color: var(--live); background: var(--live-tint); border-color: rgb(21 127 61 / 0.25); }
 
   /* Floating control over the plan: frosted, 44px tall. */
   .pill {
@@ -763,6 +778,18 @@ body {
   100% { transform: translateX(220%) skewX(-20deg); }
 }
 
+/* A calendar's new month slides in from the side it came from (a swipe or the arrows), a little and quickly. */
+.calendar-from-next { animation: calendar-from-next 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+.calendar-from-prev { animation: calendar-from-prev 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes calendar-from-next {
+  from { opacity: 0.25; transform: translateX(0.75rem); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes calendar-from-prev {
+  from { opacity: 0.25; transform: translateX(-0.75rem); }
+  to { opacity: 1; transform: none; }
+}
+
 @keyframes inline-status-in {
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: none; }
@@ -981,7 +1008,9 @@ dialog[open]::backdrop {
   dialog[open]::backdrop,
   .waiting::before,
   .inline-status,
-  .notice-bubble {
+  .notice-bubble,
+  .calendar-from-next,
+  .calendar-from-prev {
     animation: none;
   }
   .notice-badge-chevron { transition: none; }

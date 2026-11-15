@@ -60,6 +60,10 @@ describe("added cases (database)", () => {
     );
     assert.deepEqual((await listCasesBy(pool, doctor, "2026-11-04")).map((item) => item.operation), ["ORIF", "TKA"]);
     assert.deepEqual((await listCasesBy(pool, doctor, "2026-11-05")).map((item) => item.operation), ["TKA"]);
+    // When each was booked (the board's "วันเวลาที่จองคิว"): the row's created_at, oldest first.
+    const created = await pool.query<{ at: Date }>("SELECT created_at AS at FROM cases WHERE id = ANY($1::bigint[]) ORDER BY id", [[a, b]]);
+    assert.deepEqual(day.map((item) => item.bookedAt), created.rows.map((row) => row.at.toISOString()));
+    assert.ok((day[0].bookedAt ?? "") <= (day[1].bookedAt ?? ""), "oldest first");
 
     assert.equal(await removeCase(pool, b, doctor), false, "not the surgeon");
     assert.equal(await removeCase(pool, a, doctor), true);

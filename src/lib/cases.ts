@@ -29,11 +29,12 @@ interface CaseRow {
   first_name: string;
   last_name: string;
   subtype: string | null;
+  booked_at: Date;
 }
 
 const COLUMNS =
   "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.operation, c.shift, c.dressing, c.scrub_does, " +
-  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype";
+  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.created_at AS booked_at";
 
 function toCase(r: CaseRow): AddedCase {
   return {
@@ -50,6 +51,7 @@ function toCase(r: CaseRow): AddedCase {
     surgeonId: r.surgeon_id,
     surgeon: fullName({ firstName: r.first_name, lastName: r.last_name }),
     subtype: r.subtype,
+    bookedAt: r.booked_at.toISOString(),
   };
 }
 

@@ -32,7 +32,7 @@ function fixedDay(date: string, time: string | undefined): BoardDay {
  * - ?date=2026-12-14 shows the board as on that date (e.g. the repair's second half); ?day=tue the Tuesday of this week.
  * - ?at=2026-11-16T16:30+07:00 shows the board's day at that moment (after 16:00: the next workday).
  * - ?holiday=วันปิยมหาราช shows the closed day.
- * - ?sample=1 adds made-up HOSxP cases and bookings (preview/sample.ts) to see the source chips, flags and room marks;
+ * - ?sample=1 adds made-up HOSxP cases and bookings (preview/sample.ts) to see the row icons, flags and room marks;
  *   with ?upload=0 the bookings alone, as before MX uploads.
  * - ?mx=1 shows the board as MX sees it (every HN, the upload button); otherwise as the sample's doctor, who sees the
  *   HN of their own bookings. ?admin=1 adds the admin button.

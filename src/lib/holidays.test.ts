@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  HOSPITAL_HOLIDAYS,
   botHolidayFeed,
   holidayIn,
+  holidayOn,
   holidaysBetween,
   isWorkday,
   nextWorkdayAfter,
@@ -103,6 +105,38 @@ test("the feed says why there are no holidays: no token, a refused token, or no 
   assert.ok(!(warned.at(-1) ?? "").includes("abc\ndef") && (warned.at(-1) ?? "").includes('"***"'), warned.at(-1));
 });
 
+test("16 Dec 2026 is the hospital's special holiday, without the BOT or EXTRA_HOLIDAYS; a date both name is listed once", async (t) => {
+  const saved = { token: process.env.BOT_API_TOKEN, extra: process.env.EXTRA_HOLIDAYS, url: process.env.BOT_HOLIDAYS_URL };
+  t.after(() => {
+    for (const [name, value] of Object.entries({ BOT_API_TOKEN: saved.token, EXTRA_HOLIDAYS: saved.extra, BOT_HOLIDAYS_URL: saved.url })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+  t.mock.method(console, "warn", () => {});
+  assert.deepEqual(HOSPITAL_HOLIDAYS, [{ date: "2026-12-16", name: "วันหยุดกรณีพิเศษ" }]);
+  delete process.env.EXTRA_HOLIDAYS;
+  delete process.env.BOT_HOLIDAYS_URL;
+
+  // No token: the hospital's holiday still counts.
+  process.env.BOT_API_TOKEN = "";
+  assert.deepEqual(await holidayOn("2026-12-16"), { date: "2026-12-16", name: "วันหยุดกรณีพิเศษ" });
+  assert.equal(isWorkday("2026-12-16", HOSPITAL_HOLIDAYS), false, "a Wednesday");
+  assert.equal(nextWorkdayIn("2026-12-15", HOSPITAL_HOLIDAYS), "2026-12-17");
+
+  // The BOT names the same day (a special holiday announced later): one entry, the hospital's name.
+  process.env.BOT_API_TOKEN = "token";
+  t.mock.method(globalThis, "fetch", async () =>
+    new Response(JSON.stringify({ result: { data: [{ Date: "2026-12-16", HolidayDescriptionThai: "วันหยุดพิเศษ" }, { Date: "2026-12-10", HolidayDescriptionThai: "วันรัฐธรรมนูญ" }] } })),
+  );
+  const list = await holidaysBetween("2026-12-01", "2026-12-31");
+  assert.deepEqual(list.holidays, [
+    { date: "2026-12-16", name: "วันหยุดกรณีพิเศษ" },
+    { date: "2026-12-10", name: "วันรัฐธรรมนูญ" },
+  ]);
+  assert.deepEqual(await nextWorkdayAfter("2026-12-15"), { ok: true, date: "2026-12-17" });
+});
+
 test("a workday is a weekday that is not a holiday; the next one is found within two weeks", () => {
   const holidays = [{ date: "2026-12-07", name: "ชดเชยวันพ่อแห่งชาติ" }];
   assert.equal(isWorkday("2026-12-04", holidays), true, "Friday");
@@ -142,8 +176,16 @@ test("the holidays between two days, and the next workday after one, say why whe
   const none = await holidaysBetween("2026-12-29", "2027-01-12");
   assert.deepEqual(
     none,
-    { ok: false, reason: "no-token", holidays: [{ date: "2026-12-30", name: "ปิดปรับปรุง" }], unlisted: [2026, 2027] },
-    "EXTRA_HOLIDAYS still, and neither year listed by the BOT",
+    {
+      ok: false,
+      reason: "no-token",
+      holidays: [
+        { date: "2026-12-16", name: "วันหยุดกรณีพิเศษ" },
+        { date: "2026-12-30", name: "ปิดปรับปรุง" },
+      ],
+      unlisted: [2026, 2027],
+    },
+    "the hospital's own holiday and EXTRA_HOLIDAYS still, and neither year listed by the BOT",
   );
 
   process.env.BOT_API_TOKEN = "token";
@@ -151,7 +193,7 @@ test("the holidays between two days, and the next workday after one, say why whe
   assert.deepEqual(await nextWorkdayAfter("2026-12-29"), { ok: true, date: "2027-01-04" });
   const both = await holidaysBetween("2026-12-29", "2027-01-12");
   assert.equal(both.ok, true);
-  assert.deepEqual(both.holidays.map((h) => h.date).sort(), ["2026-12-30", "2026-12-31", "2027-01-01"]);
+  assert.deepEqual(both.holidays.map((h) => h.date).sort(), ["2026-12-16", "2026-12-30", "2026-12-31", "2027-01-01"]);
   assert.deepEqual(both.unlisted, [], "both years listed");
 
   // The next year's list failing is a failure too, with what did come.
@@ -166,7 +208,15 @@ test("the holidays between two days, and the next workday after one, say why whe
   down = new Set();
   empty = new Set(["2029"]);
   const unannounced = await holidaysBetween("2028-12-20", "2029-01-20");
-  assert.deepEqual(unannounced, { ok: true, holidays: [{ date: "2026-12-30", name: "ปิดปรับปรุง" }, { date: "2026-12-31", name: "วันสิ้นปี" }], unlisted: [2029] });
+  assert.deepEqual(unannounced, {
+    ok: true,
+    holidays: [
+      { date: "2026-12-16", name: "วันหยุดกรณีพิเศษ" },
+      { date: "2026-12-30", name: "ปิดปรับปรุง" },
+      { date: "2026-12-31", name: "วันสิ้นปี" },
+    ],
+    unlisted: [2029],
+  });
 
   // Off Vercel a local stand-in for the BOT may be named; on Vercel it is ignored.
   process.env.BOT_HOLIDAYS_URL = "http://localhost:4010/holidays?x=1";

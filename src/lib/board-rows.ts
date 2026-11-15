@@ -1,4 +1,4 @@
-import { NO_OPERATION_LABEL, bookedRoom, type AddedCase } from "./added-cases.ts";
+import { NO_OPERATION_LABEL, bookedAtText, bookedRoom, type AddedCase } from "./added-cases.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
 import { isDressingCase, placeAll, roomsHeldBy, type RoomChoice } from "./placement.ts";
@@ -18,8 +18,10 @@ import { subtypeLabel } from "./user-labels.ts";
 export type RowSource = "hosxp" | "booking" | "matched";
 
 /**
- * A mismatch to show: a workbook case nobody booked ("unbooked"; during the repair every case is expected to be
- * booked), or a booking the uploaded workbook does not hold ("not-in-hosxp").
+ * A mismatch: a workbook case nobody booked ("unbooked"; during the repair every case is expected to be booked), or a
+ * booking the uploaded workbook does not hold ("not-in-hosxp"). The board shows only the first: a booking HOSxP does not
+ * list is no real patient (Pong, 15 Nov 2026), so its row is left off the board and listed only in MX's upload summary
+ * (BoardRows.unmatched).
  */
 export type RowFlag = "unbooked" | "not-in-hosxp" | null;
 
@@ -30,12 +32,20 @@ export type BoardRow = Operation & {
   hn?: string;
   /** The doctor who booked the room (booking and matched rows). */
   bookedBy?: string;
+  /** When the booking was made, as the row says it: "15 พ.ย. 69, 23:43" (Bangkok time; booking and matched rows). */
+  bookedAt?: string;
   /**
-   * A booking the doctor put in the dressing room: their answer to "scrub ทำให้แทนไหม ?", true when the scrub nurse
-   * does the dressing (ฝาก scrub ทำ), false when the doctor does (แพทย์ทำเอง). Left out on other rows.
+   * A row in the dressing room: who does the dressing, the scrub nurse ("scrub", ฝาก scrub ทำ) or the doctor
+   * ("surgeon", แพทย์ทำเอง), from the booking's answer to "scrub ทำให้แทนไหม ?". A case without that answer (nobody
+   * booked it in the dressing room) is the doctor's, as the question asks whether the scrub does it instead. In the
+   * dressing room whether a case was booked does not matter (Pong, 15 Nov 2026), so the row shows who does it instead
+   * of where it came from. Left out in every other room.
    */
-  scrubDoes?: boolean;
+  doneBy?: DoneBy;
 };
+
+/** Who does a dressing: the scrub nurse or the doctor. */
+export type DoneBy = "scrub" | "surgeon";
 
 /** Who looks at the board, for the HN rule. */
 export type BoardViewer = {
@@ -78,13 +88,19 @@ export type BoardRowsInput = {
 };
 
 export type BoardRows = {
-  /** In each room: workbook cases (matched or not) in file order, then bookings alone in the order they were made. */
+  /**
+   * In each room (Pong, 15 Nov 2026): the booked cases first, the earliest booking first (matched rows, and before an
+   * upload the bookings alone), then the HOSxP cases nobody booked in file order. After an upload a booking HOSxP does
+   * not list is not among them (see `unmatched`).
+   */
   rows: BoardRow[];
+  /** After an upload, the bookings the workbook does not hold, flagged "not-in-hosxp": for MX's upload summary only. */
+  unmatched: BoardRow[];
   /** Whether a workbook was uploaded for the cycle. */
   uploaded: boolean;
   /** Workbook cases paired with a booking (shown or not). */
   matched: number;
-  /** Rows with a flag. */
+  /** Rows on the board with a flag: the HOSxP cases nobody booked, outside the dressing room. */
   mismatchCount: number;
   /** Flagged rows per room. */
   mismatchByRoom: Record<string, number>;
@@ -149,9 +165,13 @@ export function withBookedChoices<T extends WorkbookCase>(
   });
 }
 
-/** The scrub answer of a booking shown in the dressing room it was booked into. */
-function scrubAnswer(booking: AddedCase, own: { roomId: string; dressing: boolean }, roomId: string): { scrubDoes?: boolean } {
-  return own.dressing && roomId === own.roomId && typeof booking.scrubDoes === "boolean" ? { scrubDoes: booking.scrubDoes } : {};
+/**
+ * Who does a row's dressing, in a dressing room only: the scrub nurse when the doctor booked the case in the dressing
+ * room and said so, else the doctor.
+ */
+function doneByIn(roomId: string, dressingRooms: readonly string[], booking?: AddedCase): { doneBy?: DoneBy } {
+  if (!dressingRooms.includes(roomId)) return {};
+  return { doneBy: booking?.dressing && booking.scrubDoes === true ? "scrub" : "surgeon" };
 }
 
 function departmentName(dept: DeptCode | null): string | null {
@@ -172,10 +192,14 @@ function departmentName(dept: DeptCode | null): string | null {
  * (Pong, 15 Nov 2026: "let surgeon decide"): a case booked in the dressing room is placed there, and a case booked in
  * the department's room is placed as if its name were no dressing, so HOSxP's name never moves it to the dressing room
  * and an emergency still goes to the emergency room. A workbook case left over shows in its
- * placed room, flagged "unbooked". A
- * booking left over shows in its room, flagged "not-in-hosxp" only when a workbook was uploaded (without one there is
- * nothing to compare with). A row whose room is not open that day (closed, a recovery or instrument room, or a
- * workbook case not placed) is left off the board.
+ * placed room, flagged "unbooked" (but not in the dressing room, where booking does not matter). A booking left over shows in its room until a workbook is uploaded; after that it is
+ * no real patient (Pong, 15 Nov 2026: "remove that row because no real patient set"), so it goes to `unmatched`,
+ * flagged "not-in-hosxp", for MX's upload summary alone. A row whose room is not open that day (closed, a recovery or
+ * instrument room, or a workbook case not placed) is left off the board.
+ *
+ * In each room the booked cases come first, the earliest booking first, then the cases nobody booked in the
+ * workbook's order (Pong, 15 Nov 2026: "first priority is booking case: sort by prior set; second priority is HOSxP
+ * sequence from workbook"). `bookings` come oldest first (lib/cases.ts), so their order is the booking order.
  */
 export function buildBoardRows({ date, periods, workbook, bookings, viewer }: BoardRowsInput): BoardRows {
   const uploaded = workbook !== null;
@@ -202,7 +226,15 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   const open = (roomId: string | null): roomId is string => roomId !== null && roomUse(roomId, date, periods) === "open";
   // The doctor who made a booking sees its HN; MX and admins see every HN.
   const seesHn = (booking: AddedCase) => viewer.allHn || (viewer.userId !== null && booking.surgeonId === viewer.userId);
-  const rows: Omit<BoardRow, "order">[] = [];
+  // The booked rows by the booking's place in `today` (the booking order), then the unbooked ones in file order.
+  const booked: { at: number; row: Omit<BoardRow, "order"> }[] = [];
+  const unbooked: Omit<BoardRow, "order">[] = [];
+  const unmatchedRows: Omit<BoardRow, "order">[] = [];
+  const bookingIndex = new Map(today.map((booking, index) => [booking, index]));
+  const when = (booking: AddedCase): { bookedAt?: string } => {
+    const text = booking.bookedAt ? bookedAtText(booking.bookedAt) : "";
+    return text ? { bookedAt: text } : {};
+  };
 
   for (const item of cases) {
     const booking = pairs.get(item);
@@ -215,25 +247,31 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       const roomId = fits(placed) ? placed : fits(own.roomId) ? own.roomId : null;
       if (!roomId) continue;
       const hn = booking.hn ?? normalizeHn(item.hn);
-      rows.push({
-        id: `mt-${booking.id}`,
-        roomId,
-        procedure: item.operation || booking.operation || NO_OPERATION_LABEL,
-        surgeon: item.surgeon,
-        specialty: departmentName(item.dept) ?? subtypeLabel("DR", booking.subtype),
-        status: item.status,
-        shift: item.shift ?? booking.shift,
-        source: "matched",
-        flag: null,
-        ...(seesHn(booking) && hn ? { hn } : {}),
-        bookedBy: booking.surgeon,
-        ...scrubAnswer(booking, own, roomId),
+      booked.push({
+        at: bookingIndex.get(booking) ?? 0,
+        row: {
+          id: `mt-${booking.id}`,
+          roomId,
+          procedure: item.operation || booking.operation || NO_OPERATION_LABEL,
+          surgeon: item.surgeon,
+          specialty: departmentName(item.dept) ?? subtypeLabel("DR", booking.subtype),
+          status: item.status,
+          shift: item.shift ?? booking.shift,
+          source: "matched",
+          flag: null,
+          ...(seesHn(booking) && hn ? { hn } : {}),
+          bookedBy: booking.surgeon,
+          ...when(booking),
+          ...doneByIn(roomId, dressingRooms, booking),
+        },
       });
       continue;
     }
     const placed = placedIn.get(item) ?? null;
     if (!open(placed)) continue;
-    rows.push({
+    // In the dressing room a case nobody booked is no mismatch: booking it does not matter there (Pong, 15 Nov 2026).
+    const dressingRoom = dressingRooms.includes(placed);
+    unbooked.push({
       id: `hx-${item.caseId}`,
       roomId: placed,
       procedure: item.operation,
@@ -242,16 +280,17 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       status: item.status,
       shift: item.shift,
       source: "hosxp",
-      flag: "unbooked",
+      flag: dressingRoom ? null : "unbooked",
       ...(viewer.allHn ? { hn: normalizeHn(item.hn) } : {}),
+      ...doneByIn(placed, dressingRooms),
     });
   }
 
-  for (const booking of today) {
+  today.forEach((booking, index) => {
     const own = bookingRooms.get(booking) ?? { roomId: booking.roomId, dressing: false };
     const roomId = own.roomId;
-    if (taken.has(booking) || !open(roomId)) continue;
-    rows.push({
+    if (taken.has(booking) || !open(roomId)) return;
+    const row: Omit<BoardRow, "order"> = {
       id: `bk-${booking.id}`,
       roomId,
       procedure: booking.operation || NO_OPERATION_LABEL,
@@ -263,9 +302,15 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       flag: uploaded ? "not-in-hosxp" : null,
       ...(seesHn(booking) && booking.hn ? { hn: booking.hn } : {}),
       bookedBy: booking.surgeon,
-      ...scrubAnswer(booking, own, roomId),
-    });
-  }
+      ...when(booking),
+      ...doneByIn(roomId, dressingRooms, booking),
+    };
+    if (uploaded) unmatchedRows.push(row);
+    else booked.push({ at: index, row });
+  });
+
+  // A stable sort: a pair keeps the booking order, whatever the file order of its HOSxP case.
+  const rows = [...booked.sort((a, b) => a.at - b.at).map((entry) => entry.row), ...unbooked];
 
   const order = new Map<string, number>();
   const countByRoom: Record<string, number> = {};
@@ -282,7 +327,8 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
     return { ...row, order: slot };
   });
 
-  return { rows: numbered, uploaded, matched: pairs.size, mismatchCount, mismatchByRoom, countByRoom };
+  const unmatched = unmatchedRows.map((row, index): BoardRow => ({ ...row, order: index + 1 }));
+  return { rows: numbered, unmatched, uploaded, matched: pairs.size, mismatchCount, mismatchByRoom, countByRoom };
 }
 
 /**
