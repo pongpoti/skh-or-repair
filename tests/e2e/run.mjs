@@ -2685,7 +2685,9 @@ async function main() {
       const saveCase = async (page, { date, operation, room, dressing = false, shot = null }) => {
         // the room the choice gives that day, shown before saving
         assert((await page.getAttribute('[data-testid="case-room"]', "data-room-id")) === room, `${operation}: in ${room}, not ${await page.getAttribute('[data-testid="case-room"]', "data-room-id")}`);
-        assert((await textOf(page, '[data-testid="case-room-why"]')).startsWith(dressing ? "scrub ทำให้แทนไหม ?" : "ห้องของสาขาคุณ"), `${operation}: what the choice says`);
+        // the dressing room says its scrub answer; the department's room says nothing (Pong, 15 Nov 2026: "remove ห้องของสาขาคุณ...")
+        if (dressing) assert((await textOf(page, '[data-testid="case-room-why"]')).startsWith("scrub ทำให้แทนไหม ?"), `${operation}: the scrub answer`);
+        else assert((await page.locator('[data-testid="case-room-why"]').count()) === 0, `${operation}: nothing under OR X`);
         if (shot) await shot();
         await page.click('[data-testid="case-submit"]');
         const day = { "2026-11-16": "วันจันทร์ที่ 16", "2026-11-17": "วันอังคารที่ 17" }[date];
@@ -2754,7 +2756,13 @@ async function main() {
       assert((await textOf(page, 'label:has([data-testid="case-room-dressing"])')) === "ห้องทำแผลOR 10", `the dressing room: ${await textOf(page, 'label:has([data-testid="case-room-dressing"])')}`);
       assert((await dateValue(page, "case-date")) === "2026-11-16", "the form starts on Monday");
       assert((await textOf(page, '[data-testid="case-date"]')).includes("วันจันทร์ที่ 16 พฤศจิกายน 2569"), "the day written out in Thai");
-      assert((await textOf(page, '[data-testid="case-date-hint"]')) === "จองได้ตั้งแต่ วันจันทร์ที่ 16 พ.ย. 2569", "the earliest day said");
+      // the 15:00 rule in Pong's words, always, then the earliest day (Pong, 15 Nov 2026), a little larger than before
+      assert(
+        (await textOf(page, '[data-testid="case-date-hint"]')) === "หลังเวลา 15.00 น. ระบบจะปิดรับการจอง ของวันทำการถัดไป จองได้ตั้งแต่ วันจันทร์ที่ 16 พ.ย. 2569",
+        `the rule and the earliest day said: ${await textOf(page, '[data-testid="case-date-hint"]')}`,
+      );
+      const hintSize = await page.locator('[data-testid="case-date-hint"]').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+      assert(hintSize === 13, `the hint at 13px: ${hintSize}`);
       await ownerShot(page, "booking-form.png");
       // the calendar: Thai month and Buddhist year, today and the weekend closed
       await page.click('[data-testid="case-date"]');
@@ -2879,10 +2887,11 @@ async function main() {
       await page.fill('[data-testid="case-operation"]', "AV fistula Lt arm");
       setNow("2026-11-16T15:00:30+07:00");
       await page.click('[data-testid="case-submit"]');
-      const cutOff = "หลัง 15:00 น. ปิดรับจองวันทำการถัดไป · จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569";
+      const rule = "หลังเวลา 15.00 น. ระบบจะปิดรับการจอง ของวันทำการถัดไป";
+      const cutOff = `${rule} · จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569`;
       await page.waitForFunction((want) => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === want, cutOff);
       assert((await dateValue(page, "case-date")) === "2026-11-18", `moved on to Wednesday: ${await dateValue(page, "case-date")}`);
-      assert((await textOf(page, '[data-testid="case-date-hint"]')) === cutOff, "the hint says why");
+      assert((await textOf(page, '[data-testid="case-date-hint"]')) === `${rule} จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569`, "the hint says why");
       await ownerShot(page, "booking-cutoff.png");
       assert((await db.query("SELECT 1 FROM cases WHERE hn = '7900003'")).rowCount === 0, "nothing saved for Tuesday");
 
@@ -2899,6 +2908,11 @@ async function main() {
       for (const iso of ["2026-12-07", "2026-12-08"]) assert(await calendar.locator(`[data-date="${iso}"]`).isDisabled(), `${iso} closed`);
       assert(!(await calendar.locator('[data-date="2026-12-09"]').isDisabled()), "Wednesday open");
       assert(((await calendar.locator('[data-date="2026-12-07"]').getAttribute("aria-label")) ?? "").includes(","), "the holiday is named on its day");
+      // the BOT's holidays named under the calendar (Pong, 15 Nov 2026: "for special holiday, disable click and remark
+      // underneath calendar"); the BOT listed this year, so no note that it did not
+      const remarks = await textOf(page, '[data-testid="case-date-calendar"] ul');
+      for (const name of ["7 ธ.ค. ชดเชยวันพ่อแห่งชาติ", "10 ธ.ค. วันรัฐธรรมนูญ", "31 ธ.ค. วันสิ้นปี"]) assert(remarks.includes(name), `${name} under the calendar: ${remarks}`);
+      assert((await page.locator('[data-testid="case-date-calendar-unlisted"]').count()) === 0, "the BOT listed 2569");
       await ownerShot(page, "booking-calendar-holiday.png");
       setNow("2026-11-16T10:00:00+07:00");
       await ctx.close();
@@ -3224,6 +3238,19 @@ async function main() {
       for (const month of ["ธันวาคม 2569", "มกราคม 2570", "กุมภาพันธ์ 2570", "มีนาคม 2570"]) {
         await page.click('#board-date-calendar [data-nav="next"]');
         assert((await textOf(page, "#board-date-calendar-title")) === month, `the next month: ${month}`);
+        if (month !== "ธันวาคม 2569") continue;
+        // the BOT's holidays cannot be picked and are named under the calendar (Pong, 15 Nov 2026)
+        for (const [iso, name] of [["2026-12-07", "ชดเชยวันพ่อแห่งชาติ"], ["2026-12-10", "วันรัฐธรรมนูญ"], ["2026-12-31", "วันสิ้นปี"]]) {
+          assert(await day(iso).isDisabled(), `${iso} is closed`);
+          assert(((await day(iso).getAttribute("aria-label")) ?? "").endsWith(name), `${iso} is named on its day`);
+        }
+        const remarks = await page.$$eval("#board-date-calendar ul li", (items) => items.map((li) => li.textContent.replace(/\s+/g, " ").trim()));
+        assert(
+          JSON.stringify(remarks) === JSON.stringify(["7 ธ.ค. ชดเชยวันพ่อแห่งชาติ", "10 ธ.ค. วันรัฐธรรมนูญ", "31 ธ.ค. วันสิ้นปี"]),
+          `December's holidays under the calendar: ${JSON.stringify(remarks)}`,
+        );
+        assert((await page.locator('[data-testid="board-date-calendar-unlisted"]').count()) === 0, "the BOT listed 2569");
+        await ownerShot(page, "board-date-holidays.png");
       }
       assert(await page.locator('#board-date-calendar [data-nav="next"]').isDisabled(), "no month after the repair");
       assert(await day("2027-03-17").isEnabled(), "the repair's last day can be picked");
@@ -3284,6 +3311,21 @@ async function main() {
         }
         await c.close();
       }
+      // a year the BOT gives no holidays for (the stub lists none for 2028, as for a year not announced yet) says so
+      // under its months: once the repair is over the calendar runs 60 days ahead, into January 2571
+      setNow("2027-12-01T10:00:00+07:00");
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      await openPicker();
+      assert((await textOf(page, "#board-date-calendar-title")) === "ธันวาคม 2570", "December 2570");
+      assert((await page.locator('[data-testid="board-date-calendar-unlisted"]').count()) === 0, "the BOT listed 2570");
+      await page.click('#board-date-calendar [data-nav="next"]');
+      assert((await textOf(page, "#board-date-calendar-title")) === "มกราคม 2571", "January 2571");
+      assert(
+        (await textOf(page, '[data-testid="board-date-calendar-unlisted"]')) === "ยังไม่มีวันหยุดปี 2571 จากธนาคารแห่งประเทศไทย",
+        `the note: ${await textOf(page, "#board-date-calendar ul")}`,
+      );
+      await ownerShot(page, "board-date-unlisted-year.png");
+      await page.keyboard.press("Escape");
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
       rmSync(NOW_FILE, { force: true });

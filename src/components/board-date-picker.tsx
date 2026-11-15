@@ -18,6 +18,8 @@ export type DatePick = {
   max: string;
   /** The holidays from min to max, closed in the calendar as on the server. */
   holidays: readonly Holiday[];
+  /** The years from min to max the BOT gave no holidays for (lib/holidays.ts), named under their months. */
+  unlisted: readonly number[];
 };
 
 /**
@@ -163,6 +165,7 @@ export function BoardDatePicker({
               onPick={go}
               focusOnOpen={opening.byKey}
               today={pick.today}
+              unlisted={pick.unlisted}
               className="mt-3"
               testId="board-date-calendar"
             />

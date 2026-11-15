@@ -50,7 +50,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
     let adding: CaseAdding | null = null;
     if (doctor) {
       // The holidays over the 60 days a doctor can book, for the calendar: the same list the server action checks.
-      const [mine, { holidays }] = await Promise.all([
+      const [mine, { holidays, unlisted }] = await Promise.all([
         // The doctor's own bookings, HN included: theirs to see.
         listCasesBy(pool, doctor.id, day.today),
         holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS)),
@@ -60,6 +60,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
         today: day.today,
         earliest: earliestBookingDay(day.today, day.minutes, holidays),
         holidays,
+        unlisted,
         mine,
         onAdd: addCase,
         onRemove: deleteCase,
@@ -95,7 +96,7 @@ export default async function BoardPage({
   // The days the date picker offers (today to the repair's last day), with the holidays it closes: the address of a
   // picked day is checked against them.
   const range = pickRange(day.today, periods);
-  const { holidays: closed } = await holidaysBetween(range.min, range.max);
+  const { holidays: closed, unlisted } = await holidaysBetween(range.min, range.max);
   // Another day picked on the board (?date=YYYY-MM-DD, Pong, 15 Nov 2026), when it is one the picker offers; else the
   // board's own day. Picking the board's own day is the same as picking none.
   const picked = pickedDay(params.date, day.today, periods, closed);
@@ -121,7 +122,7 @@ export default async function BoardPage({
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
         adminHref={isAdmin(user.sub) ? "/admin" : null}
         uploadHref={canUpload ? "/upload" : null}
-        datePick={{ today: day.today, current: day.boardDate, ...range, holidays: closed }}
+        datePick={{ today: day.today, current: day.boardDate, ...range, holidays: closed, unlisted }}
       />
       <SuiteBoard
         board={board}

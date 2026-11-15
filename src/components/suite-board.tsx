@@ -54,6 +54,8 @@ export type CaseAdding = {
   earliest: string;
   /** The holidays from today to 60 days ahead, which the calendar closes. */
   holidays: readonly Holiday[];
+  /** The years in those 60 days the BOT gave no holidays for (lib/holidays.ts), named under the calendar. */
+  unlisted: readonly number[];
   mine: readonly AddedCase[];
   onAdd: (input: unknown) => Promise<CaseResult>;
   onRemove: (id: string) => Promise<CaseResult>;
@@ -384,6 +386,7 @@ export function SuiteBoard({
           today={adding.today}
           earliest={adding.earliest}
           holidays={adding.holidays}
+          unlisted={adding.unlisted}
           periods={periods}
           initialMine={adding.mine}
           onAdd={adding.onAdd}

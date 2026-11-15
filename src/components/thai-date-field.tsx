@@ -176,7 +176,9 @@ function Chevron({ to }: { to: "left" | "right" }) {
  * A month calendar in Thai with the Buddhist year (‹ month › and a grid of days from Sunday), on its own: the booking
  * form's date field opens it under the field, and the board's date picker shows it in a floating card. Days outside
  * min..max or that `dayState` disables cannot be picked; a disabled weekday with a note is taken to be a holiday, marked
- * with a dot and named under the grid. The keyboard works as in the ARIA date picker pattern. It opens on the picked
+ * with a dot and named under the grid (Pong, 15 Nov 2026: "for special holiday, disable click and remark underneath
+ * calendar. Use reference from BOT holiday API"). A month of a year the Bank of Thailand gave no holidays for says so
+ * there too, since its holidays cannot be closed. The keyboard works as in the ARIA date picker pattern. It opens on the picked
  * day's month (before a day is picked, on the first day that can be picked); `focusOnOpen` moves the focus to that day,
  * for a calendar opened by the keyboard, since script focus after a tap still draws the focus ring in Chrome. All date
  * math is on YYYY-MM-DD strings as UTC dates, so the phone's time zone never moves a day.
@@ -198,6 +200,7 @@ export function ThaiCalendar({
   testId,
   className = CALENDAR_LOOK,
   today: givenToday,
+  unlisted = [],
 }: {
   /** The calendar's id; its month title is `${id}-title`. */
   id: string;
@@ -216,6 +219,8 @@ export function ThaiCalendar({
   className?: string;
   /** Today in Thailand, YYYY-MM-DD, by the server's clock; the phone's own date when left out. */
   today?: string;
+  /** The years (Gregorian) the BOT gave no holidays for (lib/holidays.ts holidaysBetween), named under their months. */
+  unlisted?: readonly number[];
 }): JSX.Element {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = `${id}-title`;
@@ -304,6 +309,8 @@ export function ThaiCalendar({
     return note ? [{ iso, note }] : [];
   });
   const weeks = Array.from({ length: cells.length / 7 }, (_, week) => cells.slice(week * 7, week * 7 + 7));
+  const year = Number(month.slice(0, 4));
+  const noHolidays = unlisted.includes(year);
 
   return (
     <div ref={panelRef} id={id} role="group" aria-label="ปฏิทิน" onKeyDown={onPanelKey} className={className} data-testid={testId}>
@@ -389,7 +396,7 @@ export function ThaiCalendar({
         ))}
       </div>
 
-      {holidays.length > 0 || monthOf(today) === month ? (
+      {holidays.length > 0 || monthOf(today) === month || noHolidays ? (
         <ul className="mt-1.5 space-y-0.5 border-t border-line px-1.5 pt-2 pb-1 text-xs text-muted">
           {monthOf(today) === month ? (
             <li className="flex items-center gap-2">
@@ -411,6 +418,27 @@ export function ThaiCalendar({
               </li>
             );
           })}
+          {noHolidays ? (
+            <li className="flex items-start gap-2" data-testid={testId ? `${testId}-unlisted` : undefined}>
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="-mx-[3px] mt-[3px] size-3 shrink-0"
+              >
+                {/* Lucide "info" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 16v-4M12 8h.01" />
+              </svg>
+              <span className="min-w-0">ยังไม่มีวันหยุดปี {year + 543} จากธนาคารแห่งประเทศไทย</span>
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </div>
@@ -441,6 +469,7 @@ export function ThaiDateField({
   describedBy,
   testId,
   today,
+  unlisted,
 }: {
   /** For the parent's <label htmlFor>, which names the field. */
   id: string;
@@ -459,6 +488,8 @@ export function ThaiDateField({
   testId?: string;
   /** Today in Thailand, YYYY-MM-DD, by the server's clock; the phone's own date when left out. */
   today?: string;
+  /** The years the BOT gave no holidays for, named under their months (ThaiCalendar). */
+  unlisted?: readonly number[];
 }): JSX.Element {
   const fieldRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -545,6 +576,7 @@ export function ThaiDateField({
           revealOnOpen
           testId={testId ? `${testId}-calendar` : undefined}
           today={today}
+          unlisted={unlisted}
         />
       ) : null}
     </div>

@@ -127,12 +127,24 @@ export function earliestBookingDay(today: string, minutes: number, holidays: rea
 }
 
 /**
- * What the form says about the earliest day, and the error for a day before it: "from 15:00" when the cut-off moved it
- * past the next workday.
+ * The 15:00 rule as the booking form states it, under the date (Pong's words, 15 Nov 2026), in its phrases: the form
+ * breaks a line only between them, so a word such as ถัดไป is never split.
+ */
+export const BOOKING_CUTOFF_PHRASES = ["หลังเวลา 15.00 น.", "ระบบจะปิดรับการจอง", "ของวันทำการถัดไป"] as const;
+export const BOOKING_CUTOFF_RULE = BOOKING_CUTOFF_PHRASES.join(" ");
+
+/** The first day that can be booked, as the form says it. */
+export function bookableFrom(earliest: string): string {
+  return `จองได้ตั้งแต่ ${thaiDate(earliest, "short")}`;
+}
+
+/**
+ * The error for a day before the earliest: the 15:00 rule as well when the cut-off moved the earliest day past the next
+ * workday.
  */
 export function earliestText(today: string, earliest: string, holidays: readonly Holiday[]): string {
   const closed = earliest > workdayAfter(today, holidays);
-  return `${closed ? "หลัง 15:00 น. ปิดรับจองวันทำการถัดไป · " : ""}จองได้ตั้งแต่ ${thaiDate(earliest, "short")}`;
+  return `${closed ? `${BOOKING_CUTOFF_RULE} · ` : ""}${bookableFrom(earliest)}`;
 }
 
 /** Why a day cannot be booked in the calendar, or null when it can (the earliest day and the 60 days aside). */
