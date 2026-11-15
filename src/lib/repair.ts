@@ -84,10 +84,9 @@ export const DEFAULT_REPAIR_PERIODS: RepairPeriods = {
 export type RepairHalf = RepairLayout & RepairDates;
 
 /**
- * The colour of a recovery room and of the instrument room during the repair (the app's brown, `--brand-top`; white
- * labels clear 9:1 on it). Rooms that operate keep their department's colour.
+ * Rooms that operate during the repair keep their department's colour. A recovery room is mint and the instrument room
+ * light tan: RECOVERY_ROOM and INSTRUMENT_ROOM in lib/allocation.ts, the colour list.
  */
-export const REPAIR_COLOR = "#54402F";
 
 /** Thai name of a room used as a recovery room during the repair, and its label on the plan. */
 export const RECOVERY_USE = { name: "ห้องพักฟื้น (RR)", label: "RR" } as const;
@@ -121,14 +120,6 @@ export function shortThaiDate(iso: string): string {
   return new Intl.DateTimeFormat("th-TH-u-ca-buddhist", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(
     new Date(Date.UTC(y, m - 1, d)),
   );
-}
-
-/**
- * The board's note while the repair runs, e.g. "ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 26 ม.ค. 2570" (short enough for one line on
- * a 360px phone; the top bar already shows the board's date).
- */
-export function repairNote(half: RepairHalf): string {
-  return `ปิดซ่อมห้องผ่าตัด ช่วงที่ ${half.half} · ถึง ${shortThaiDate(half.to)}`;
 }
 
 export type CheckedPeriods = { ok: true; periods: RepairPeriods } | { ok: false; error: string };

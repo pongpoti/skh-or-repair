@@ -80,8 +80,8 @@ test("a holiday list with no workday in two weeks still gives the next weekday",
 
 test("the top bar says today, tomorrow or neither", () => {
   assert.equal(boardEyebrow("today"), "ตารางผ่าตัดวันนี้");
-  assert.equal(boardEyebrow("tomorrow"), "ตารางผ่าตัดพรุ่งนี้");
-  assert.equal(boardEyebrow("later"), "ตารางผ่าตัด");
+  assert.equal(boardEyebrow("tomorrow"), "ตารางผ่าตัดถัดไป");
+  assert.equal(boardEyebrow("later"), "ตารางผ่าตัดถัดไป");
 });
 
 test("MX uploads from 15:00:00 up to 16:00, every day", () => {

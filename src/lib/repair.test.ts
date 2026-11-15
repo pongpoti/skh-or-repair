@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkCase, roomForSubtype, withAddedCases, type AddedCase } from "./added-cases.ts";
-import { allocationFor, DEPARTMENTS, readableTextOn } from "./allocation.ts";
+import { allocationFor, DEPARTMENTS } from "./allocation.ts";
 import {
   checkRepairPeriods,
   DEFAULT_REPAIR_PERIODS,
   INSTRUMENT_USE,
-  REPAIR_COLOR,
   REPAIR_IN_USE,
   REPAIR_LAYOUTS,
-  repairNote,
   repairOn,
   type RepairPeriods,
 } from "./repair.ts";
@@ -136,7 +134,6 @@ test("rooms hold one department all day, whatever the weekly schedule says, in t
   assert.equal(allocation.am?.color, DEPARTMENTS.GENSX.color, "the department's colour (Pong, 14 Nov 2026)");
   assert.equal(allocation.am?.label, "GENSX");
   assert.equal(DEPARTMENTS.GENSX.color, "#1E7B3C", "the department list keeps its colour");
-  assert.equal(readableTextOn(REPAIR_COLOR), "#ffffff", "recovery and instrument rooms keep the repair's brown");
 
   assert.equal(allocationFor("or-12", "2026-11-21", REPAIR), null, "Saturday");
   assert.equal(allocationFor("or-4", "2026-11-09", REPAIR)?.repair, false);
@@ -275,12 +272,6 @@ test("the board is dated on its own day even when the loaded export is from anot
   assert.equal(weekBoard(stale, REPAIR)[1].date, "2026-11-03");
 });
 
-test("the board's note names the half and its last day", () => {
-  assert.equal(repairNote(repairOn(FIRST_DAY, REPAIR)!), "ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 26 ม.ค. 2570");
-  assert.equal(repairNote(repairOn(SECOND_DAY, REPAIR)!), "ปิดซ่อมห้องผ่าตัด ช่วงที่ 2 · ถึง 17 มี.ค. 2570");
-  assert.equal(numberRanges([6, 7, 8, 10, 12, 13]), "6–8, 10, 12–13");
-});
-
 test("an admin's dates are checked: four real dates, each half in order, the second after the first", () => {
   const good = { half1: { from: "2026-11-14", to: "2027-01-26" }, half2: { from: "2027-01-27", to: "2027-03-17" } };
   assert.deepEqual(checkRepairPeriods(good), { ok: true, periods: good });
@@ -299,4 +290,8 @@ test("an admin's dates are checked: four real dates, each half in order, the sec
   assert.equal(error({ half1: good.half1, half2: { from: "2027-03-18", to: "2027-03-17" } }), "ช่วงที่ 2: วันเริ่มต้องไม่หลังวันสิ้นสุด");
   assert.equal(error({ half1: good.half1, half2: { from: "2027-01-26", to: "2027-03-17" } }), "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1");
   assert.equal(error({ half1: { from: "2026-11-14", to: "2026-11-14" }, half2: { from: "2026-12-01", to: "2026-12-01" } }), "ok", "one-day halves and a gap");
+});
+
+test("room numbers read as short ranges", () => {
+  assert.equal(numberRanges([6, 7, 8, 10, 12, 13]), "6–8, 10, 12–13");
 });

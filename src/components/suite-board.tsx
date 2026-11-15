@@ -11,7 +11,7 @@ import { firstBookingDay, type AddedCase } from "@/lib/added-cases";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
 import { boardHref } from "@/lib/days";
-import { repairOn, type RepairPeriods } from "@/lib/repair";
+import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, isSelectableRoom, roomLabel } from "@/lib/rooms";
 import { roomMark, type CaseStatus } from "@/lib/schedule";
 
@@ -114,7 +114,6 @@ export function SuiteBoard({
   const router = useRouter();
   // The day whose rooms are shown: the board's own date, or today when the suite is closed.
   const day = board?.date ?? today;
-  const repair = repairOn(day, periods);
   const found = getRoom(roomId);
   const urlRoom = found && isSelectableRoom(found, day, periods) ? found.id : null;
   const [selectedId, setSelectedId] = useState<string | null>(urlRoom);
@@ -198,9 +197,12 @@ export function SuiteBoard({
             failed={casesUnavailable}
             missingUpload={missingUploadDay(board, casesUnavailable)}
             mismatches={board?.mismatchCount ?? 0}
-            repair={repair}
           />
-          <div className="flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0">
+          {/* On phones the plan stops above the จองห้อง button, so the button never covers a room, however many notes
+              push the plan down (Pong, 15 Nov 2026). */}
+          <div
+            className={`flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0 ${adding ? "max-lg:pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.5rem)]" : ""}`}
+          >
             <FloorPlan
               selectedId={selectedId}
               marks={marks}

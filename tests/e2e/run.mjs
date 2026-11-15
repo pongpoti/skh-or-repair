@@ -2117,9 +2117,9 @@ async function main() {
       page.on("pageerror", (e) => errors.push(e.message));
       for (const [at, eyebrow, date, label] of [
         ["2026-11-16T10:00:00+07:00", "ตารางผ่าตัดวันนี้", "2026-11-16", "16 พ.ย. 2569"], // a workday before 16:00: today
-        ["2026-11-16T16:00:00+07:00", "ตารางผ่าตัดพรุ่งนี้", "2026-11-17", "17 พ.ย. 2569"], // from 16:00: the next workday
-        ["2026-11-14T09:00:00+07:00", "ตารางผ่าตัด", "2026-11-16", "16 พ.ย. 2569"], // a Saturday: Monday
-        ["2026-12-04T16:30:00+07:00", "ตารางผ่าตัด", "2026-12-08", "8 ธ.ค. 2569"], // Friday 16:30: the weekend and Mon 7 Dec (a BOT holiday) skipped
+        ["2026-11-16T16:00:00+07:00", "ตารางผ่าตัดถัดไป", "2026-11-17", "17 พ.ย. 2569"], // from 16:00: the next workday
+        ["2026-11-14T09:00:00+07:00", "ตารางผ่าตัดถัดไป", "2026-11-16", "16 พ.ย. 2569"], // a Saturday: Monday
+        ["2026-12-04T16:30:00+07:00", "ตารางผ่าตัดถัดไป", "2026-12-08", "8 ธ.ค. 2569"], // Friday 16:30: the weekend and Mon 7 Dec (a BOT holiday) skipped
       ]) {
         setNow(at);
         await page.goto(`${APP}/`, { waitUntil: "networkidle" });
@@ -2127,7 +2127,8 @@ async function main() {
         assert((await page.getAttribute("header time", "datetime")) === date, `${at}: the board's date ${await page.getAttribute("header time", "datetime")}`);
         // every one of these days is in the repair's first half, and nothing has been uploaded
         assert((await textOf(page, '[data-testid="no-upload-alert"]')) === `ยังไม่มีตาราง HOSxP ของ ${label}`, `${at}: no-upload alert`);
-        assert((await textOf(page, '[data-testid="repair-note"]')) === "ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 26 ม.ค. 2570", `${at}: repair note`);
+        assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", `${at}: the first half's repair zone`);
+        assert((await page.locator('[data-testid="repair-note"]').count()) === 0, `${at}: no repair note above the plan`);
         assert((await page.locator('[data-testid="upload-button"], [data-testid="account-upload-link"]').count()) === 0, "no upload link for a nurse");
       }
       // After the repair (it ends 17 Mar 2027) the board's rows still come only from MX's uploads, so a day without
@@ -2135,7 +2136,7 @@ async function main() {
       setNow("2027-03-22T10:00:00+07:00");
       await page.goto(`${APP}/`, { waitUntil: "networkidle" });
       assert((await page.getAttribute("header time", "datetime")) === "2027-03-22", "Monday 22 Mar 2027");
-      assert((await page.locator('[data-testid="repair-note"]').count()) === 0, "no repair note after the repair");
+      assert((await page.locator('[data-testid="repair-zone"]').count()) === 0, "no repair zone after the repair");
       assert((await textOf(page, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 22 มี.ค. 2570", "no-upload alert after the repair");
       const calls = await (await fetch(`${LINE}/__control/bot/calls`)).json();
       assert(calls.some((c) => c.year === "2026") && calls.every((c) => c.authorized), `holidays from the BOT stub with its token: ${JSON.stringify(calls)}`);
@@ -2164,7 +2165,7 @@ async function main() {
         window.__sameDocument = true;
       });
       setNow("2026-11-16T16:00:05+07:00");
-      await shows("ตารางผ่าตัดพรุ่งนี้", "2026-11-17", "Tuesday's board by itself after 16:00", 20_000);
+      await shows("ตารางผ่าตัดถัดไป", "2026-11-17", "Tuesday's board by itself after 16:00", 20_000);
       assert(await page.evaluate(() => window.__sameDocument === true), "refreshed in place, not reloaded");
 
       // Hidden for more than 5 minutes (the page's clock moved on by 6), then shown: refreshed at once, though the
@@ -2188,7 +2189,7 @@ async function main() {
       await page.evaluate(() => window.__skip(6 * 60_000));
       setNow("2026-11-17T16:00:05+07:00");
       await page.evaluate(() => window.__setHidden(false));
-      await shows("ตารางผ่าตัดพรุ่งนี้", "2026-11-18", "Wednesday's board when the tab comes back", 5_000);
+      await shows("ตารางผ่าตัดถัดไป", "2026-11-18", "Wednesday's board when the tab comes back", 5_000);
       assert(await page.evaluate(() => window.__sameDocument === true), "refreshed in place after the tab came back");
 
       // Back: the router brings the board back from its cache with the props it had. Its wait counts from when it was
@@ -2206,7 +2207,7 @@ async function main() {
       await sleep(Math.max(0, seen + 12_000 - Date.now()));
       await page.goBack();
       await page.waitForURL(`${APP}/`);
-      await shows("ตารางผ่าตัดพรุ่งนี้", "2026-11-17", "the board brought back by Back refreshed at once", 4_000);
+      await shows("ตารางผ่าตัดถัดไป", "2026-11-17", "the board brought back by Back refreshed at once", 4_000);
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
     });
@@ -2251,16 +2252,30 @@ async function main() {
       const nurse = await contextAs(RP.nurse);
       const board = await nurse.newPage();
       await board.goto(`${APP}/`, { waitUntil: "networkidle" });
-      assert((await textOf(board, '[data-testid="repair-note"]')) === "ปิดซ่อมห้องผ่าตัด ช่วงที่ 2 · ถึง 17 มี.ค. 2570", `second half: ${await textOf(board, '[data-testid="repair-note"]')}`);
+      assert((await board.getAttribute('[data-testid="repair-zone"]', "data-half")) === "2", "the second half's repair zone");
       assert((await board.getAttribute("#or-1 .fp-floor", "role")) === "button", "OR 1 operates in the second half");
       assert((await board.getAttribute("#or-12 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 12 is closed in the second half");
+      // As on the repair plan images: RR 2 stays open as a mint RR, RR 1 is closed, and the dark zone lies under the rooms.
+      assert((await board.getAttribute("#r-2", "class"))?.includes("is-rr"), "RR 2 is a recovery room in the second half");
+      assert((await textOf(board, "#r-2 text")) === "RR", "RR 2 is labelled RR");
+      assert((await board.getAttribute("#r-1", "class"))?.includes("is-closed"), "RR 1 is closed in the second half");
+      assert((await textOf(board, "#r-1 text")) === "ปิด", "RR 1 says ปิด");
+      assert(
+        await board.evaluate(() => {
+          const fill = document.querySelector('[data-testid="repair-zone-fill"]');
+          const rooms = document.querySelector("#fp-rooms");
+          return Boolean(fill && rooms && fill.compareDocumentPosition(rooms) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }),
+        "the zone's stripes are drawn under the rooms",
+      );
 
       // and back to the planned dates
       await save("2026-11-14", "2027-01-26", "2027-01-27", "2027-03-17");
       await board.reload({ waitUntil: "networkidle" });
-      assert((await textOf(board, '[data-testid="repair-note"]')) === "ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 26 ม.ค. 2570", "first half again");
+      assert((await board.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "first half again");
       assert((await board.getAttribute("#or-1 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 1 closed again");
       assert((await board.getAttribute("#or-12 .fp-floor", "role")) === "button", "OR 12 operates again");
+      assert((await board.getAttribute("#r-2", "class"))?.includes("is-closed"), "RR 2 is closed in the first half");
       assert((await board.locator('[data-testid="repair-zone"]').count()) === 1, "the repair zone is drawn");
       await nurse.close();
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
@@ -2343,6 +2358,21 @@ async function main() {
       page.on("pageerror", (e) => errors.push(e.message));
       await page.goto(`${APP}/`, { waitUntil: "networkidle" });
       assert((await textOf(page, '[data-testid="add-case-button"]')) === "จองห้อง", "the booking button");
+      // The button floats over the plan's corner: the plan must stop above it, with the no-upload note above the plan
+      // too, on a tall phone and a short one (Pong saw it cover OR 10, 15 Nov 2026).
+      for (const [width, height] of [[390, 844], [360, 640]]) {
+        await page.setViewportSize({ width, height });
+        const r = await page.evaluate(() => {
+          const svg = document.querySelector('svg[aria-label="แปลนห้องผ่าตัด"]').getBoundingClientRect();
+          const button = document.querySelector('[data-testid="add-case-button"]').getBoundingClientRect();
+          // The drawing is top-aligned in its box (xMidYMin meet) at the plan's own aspect ratio.
+          return { planBottom: svg.top + Math.min(svg.height, (svg.width * 1706) / 1207), buttonTop: button.top };
+        });
+        assert(await page.isVisible('[data-testid="no-upload-alert"]'), `${width}x${height}: the no-upload note shows`);
+        assert(r.buttonTop >= r.planBottom - 0.5, `${width}x${height}: the booking button clears the plan (${r.buttonTop} < ${r.planBottom})`);
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      await ownerShot(page, "board-doctor.png");
       await page.click('[data-testid="add-case-button"]');
       await page.waitForSelector('[data-testid="add-case-dialog"][open]');
       assert((await textOf(page, "#add-case-title")) === "จองห้องผ่าตัด", "dialog title");
@@ -2529,7 +2559,7 @@ async function main() {
 
       setNow("2026-11-16T16:30:00+07:00");
       await page.reload({ waitUntil: "networkidle" });
-      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดพรุ่งนี้", "tomorrow's list");
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดถัดไป", "tomorrow's list");
       assert((await page.getAttribute("header time", "datetime")) === "2026-11-17", "dated Tuesday");
       assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "uploaded: no alert");
       assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 6 รายการ", `mismatch alert: ${await textOf(page, '[data-testid="mismatch-alert"]')}`);

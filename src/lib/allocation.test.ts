@@ -5,7 +5,9 @@ import {
   allocationText,
   DEPARTMENTS,
   INK,
+  INSTRUMENT_ROOM,
   readableTextOn,
+  RECOVERY_ROOM,
   weekdayIndex,
   weekOfMonth,
 } from "./allocation.ts";
@@ -178,6 +180,14 @@ test("every department label is white and meets 4.5:1 on its colour", () => {
     assert.equal(readableTextOn(dept.color), "#ffffff", dept.code);
     assert.ok(contrast(dept.color, "#ffffff") >= 4.5, `${dept.code} ${dept.color}`);
   }
+  // RR is in the list too, mint with dark green text (Pong, 15 Nov 2026).
+  assert.equal(RECOVERY_ROOM.color, "#BFE4D5");
+  assert.equal(readableTextOn(RECOVERY_ROOM.color), INK, "white would not read on mint");
+  assert.ok(contrast(RECOVERY_ROOM.ink, RECOVERY_ROOM.color) >= 7, `RR ${RECOVERY_ROOM.ink} on ${RECOVERY_ROOM.color}`);
+  // The instrument room is light tan with near-black text, as on the repair plan images (Pong, 15 Nov 2026).
+  assert.equal(INSTRUMENT_ROOM.color, "#D9C7AE");
+  assert.equal(readableTextOn(INSTRUMENT_ROOM.color), INK, "white would not read on light tan");
+  assert.ok(contrast(INSTRUMENT_ROOM.ink, INSTRUMENT_ROOM.color) >= 7, `${INSTRUMENT_ROOM.ink} on ${INSTRUMENT_ROOM.color}`);
 });
 
 test("room outlines enclose their label point", () => {

@@ -78,6 +78,25 @@ export const DEPARTMENTS: Record<DeptCode, Department> = {
   UNK: dept("UNK", "ไม่ทราบสาขา", "#7A746C"), // neutral: department not known
 };
 
+/**
+ * Not a department, but in the same colour list (Pong, 15 Nov 2026): a recovery room (RR), such as an OR the repair
+ * turns into one. Light mint, the only cool light fill on the plan, so it never reads as a department, with dark green
+ * text (7.1:1) where every department has white.
+ */
+export const RECOVERY_ROOM = { code: "RR", name: "ห้องพักฟื้น", label: "RR", color: "#BFE4D5", ink: "#0F4D3A" } as const;
+
+/**
+ * Not a department either: the room that holds the instruments during the second half of the repair. Light tan with
+ * near-black text, as on the repair plan images (Pong, 15 Nov 2026), so it reads as a store room, never a department.
+ */
+export const INSTRUMENT_ROOM = {
+  code: "INSTR",
+  name: "ห้องเก็บเครื่องมือ",
+  label: "เครื่องมือ",
+  color: "#D9C7AE",
+  ink: "#241C16",
+} as const;
+
 /** A department holding the room on a given day. `nth` limits it to those occurrences of the weekday in the month. */
 type Turn = { dept: DeptCode; nth?: readonly number[] };
 /** Empty means the room is not allocated that day. */
