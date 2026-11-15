@@ -35,7 +35,7 @@ const NO_MISMATCH: Record<string, number> = {};
  * bookings). The server has already left out every HN the viewer may not see.
  */
 export type BoardView = Pick<BoardRows, "uploaded" | "mismatchCount" | "mismatchByRoom"> & {
-  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts). */
+  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts), or the day picked. */
   date: string;
   rows: readonly BoardRow[];
 };
@@ -146,8 +146,8 @@ export function SuiteBoard({
   const mismatchCount = board?.mismatchCount ?? 0;
   const missingUpload = missingUploadDay(board, casesUnavailable);
   const ownNotices = useMemo(
-    () => boardNotices({ closed: board === null, holiday, failed: casesUnavailable, missingUpload, mismatches: mismatchCount, today }),
-    [board, holiday, casesUnavailable, missingUpload, mismatchCount, today],
+    () => boardNotices({ closed: board === null, holiday, failed: casesUnavailable, missingUpload, mismatches: mismatchCount }),
+    [board, holiday, casesUnavailable, missingUpload, mismatchCount],
   );
   const notices = givenNotices ?? ownNotices;
   // A notice can go while its bubble is open (the 16:00 refresh, an upload): forget it, so its bubble does not open
@@ -191,8 +191,8 @@ export function SuiteBoard({
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      // Escape in the add-case dialog closes the dialog only.
-      if (addRequest) return;
+      // Escape in the add-case dialog, or in any other open dialog (the date picker's card), closes the dialog only.
+      if (addRequest || document.querySelector("dialog[open]")) return;
       // Escape belongs to an open popover (the account menu) first.
       if (isPopoverOpen()) return;
       // Then to an open notice bubble. Its badge gets the focus back only when the focus was in the strip or the

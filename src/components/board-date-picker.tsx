@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition, type ReactNode } from "react";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { ThaiCalendar, type DayState } from "@/components/thai-date-field";
 import { closedDayNote } from "@/lib/added-cases";
 import { thaiDate } from "@/lib/days";
@@ -31,7 +31,9 @@ const CARD =
  * The board's date as a button that picks another day (Pong, 15 Nov 2026: "Allow user to select date on main page :
  * display floating card with taint bg", then "Display simply as calendar"). A tap on the date, or the line above it,
  * opens a floating card with the month calendar of the booking form (ThaiCalendar: Thai months, the Buddhist year,
- * weekends and holidays closed and named), from 30 days back to 60 days ahead. Picking a day shows the board for it at
+ * weekends and holidays closed and named), from today to the repair's last day (lib/board-day.ts pickRange; Pong, 15
+ * Nov 2026: "It should be current and future day only", "Calendar confine Within time range"). Picking a day shows the
+ * board for it, with the plan of the repair's half that day falls in, at
  * /?date=YYYY-MM-DD, keeping the room that is open; กลับไปตารางปัจจุบัน, or picking the board's own day, goes back to
  * the address without a date. Escape, the close button or a tap outside the card closes it, and the focus goes back to
  * the date.
@@ -56,6 +58,19 @@ export function BoardDatePicker({
   // Each opening draws a fresh calendar on the day shown; whether the keyboard opened it moves the focus into it.
   const [opening, setOpening] = useState<{ byKey: boolean; count: number } | null>(null);
   const [pending, startTransition] = useTransition();
+  // A tap that closes the account menu or a notice bubble only closes it, as everywhere else on the board.
+  const dismissing = useRef(false);
+
+  // An address whose day is the board's own (picked before 16:00 made it so, or one the calendar does not offer) loses
+  // its date, so the board turns over at the next 16:00 again instead of staying on that day.
+  const current = pick.current;
+  useEffect(() => {
+    if (date !== current) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("date")) return;
+    url.searchParams.delete("date");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [date, current]);
 
   function show(byKey: boolean) {
     setOpening((prev) => ({ byKey, count: (prev?.count ?? 0) + 1 }));
@@ -79,32 +94,32 @@ export function BoardDatePicker({
   return (
     <>
       <h1 className={headingClassName}>
-        {/* The button's ::after covers the whole date block (the line above it too), a 44px target. */}
+        {/* The button's ::after covers the whole date block (the line above it too, with its chevron), a 44px target. */}
         <button
           type="button"
           aria-haspopup="dialog"
           aria-busy={pending || undefined}
-          onClick={(event) => show(event.detail === 0)}
-          className="inline-flex max-w-full cursor-pointer items-center gap-1 text-left after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-focus aria-busy:opacity-60"
+          onPointerDown={() => {
+            let open = document.getElementById("board-notice-bubble") !== null;
+            try {
+              open ||= document.querySelector(":popover-open") !== null;
+            } catch {
+              // No popovers in this browser: the account menu is a plain button there.
+            }
+            dismissing.current = open;
+          }}
+          onClick={(event) => {
+            if (dismissing.current && event.detail !== 0) {
+              dismissing.current = false;
+              return;
+            }
+            show(event.detail === 0);
+          }}
+          className="inline-flex max-w-full cursor-pointer items-center text-left after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-focus aria-busy:opacity-60"
           data-testid="board-date-button"
         >
           <span className="min-w-0 truncate">{children}</span>
           <span className="sr-only">, เลือกวันที่</span>
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            className="shrink-0 text-muted"
-          >
-            {/* Lucide "chevron-down" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
-            <path d="m6 9 6 6 6-6" />
-          </svg>
         </button>
       </h1>
       <dialog

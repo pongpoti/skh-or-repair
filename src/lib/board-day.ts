@@ -1,4 +1,5 @@
 import { addDays, bangkokParts, workdayIndex } from "./days.ts";
+import { REPAIR_IN_USE, type RepairPeriods } from "./repair.ts";
 import { holidaysBetween, isWorkday, LOOKAHEAD_DAYS, nextWorkdayAfter, nextWorkdayIn, type Holiday, type NextWorkday } from "./holidays.ts";
 
 /**
@@ -39,8 +40,8 @@ export function boardDateOf(cycleDay: string, holidays: readonly Holiday[]): str
   return weekday;
 }
 
-/** How the board's date stands to today, for the top bar's eyebrow ("earlier" only for a day picked in the past). */
-export type BoardDayRelation = "earlier" | "today" | "tomorrow" | "later";
+/** How the board's date stands to today, for the top bar's eyebrow. */
+export type BoardDayRelation = "today" | "tomorrow" | "later";
 
 export type BoardDay = {
   /** The Bangkok date of the moment. */
@@ -61,32 +62,33 @@ export function boardDayAt(at: Date, holidays: readonly Holiday[]): BoardDay {
   return { today, minutes, cycleDay, boardDate, relation };
 }
 
-/** How `date` stands to `today`. */
+/** How `date`, today or a day after it, stands to `today`. */
 export function relationTo(date: string, today: string): BoardDayRelation {
-  if (date === today) return "today";
-  if (date < today) return "earlier";
+  if (date <= today) return "today";
   return date === addDays(today, 1) ? "tomorrow" : "later";
 }
 
 /** The top bar's line above the date. */
 export function boardEyebrow(relation: BoardDayRelation): string {
-  // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026); a day
-  // picked in the past is the list as it was.
-  if (relation === "earlier") return "ตารางผ่าตัดย้อนหลัง";
+  // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026).
   return relation === "today" ? "ตารางผ่าตัดวันนี้" : "ตารางผ่าตัดถัดไป";
 }
 
 /**
- * How far back the board's date can be picked (Pong, 15 Nov 2026: "Allow user to select date on main page"): as long as
- * HOSxP uploads are kept (lib/workbook-store.ts KEEP_UPLOAD_DAYS), so a past day still has its list.
+ * How far ahead the board's date can be picked when no repair lies ahead: as far as doctors can book
+ * (lib/added-cases.ts BOOK_AHEAD_DAYS).
  */
-export const PICK_BACK_DAYS = 30;
-/** How far ahead: as far as doctors can book (lib/added-cases.ts BOOK_AHEAD_DAYS). */
 export const PICK_AHEAD_DAYS = 60;
 
-/** The days the board's date can be picked from, YYYY-MM-DD. */
-export function pickRange(today: string): { min: string; max: string } {
-  return { min: addDays(today, -PICK_BACK_DAYS), max: addDays(today, PICK_AHEAD_DAYS) };
+/**
+ * The days the board's date can be picked from, YYYY-MM-DD. Only today and the days after it (Pong, 15 Nov 2026: "It
+ * should be current and future day only"); today stays pickable after 16:00, when the board itself has moved on to the
+ * next workday. The last day is the repair's last day, so the calendar stays within it, second half included ("Calendar
+ * confine Within time range"); once the repair is over, PICK_AHEAD_DAYS ahead.
+ */
+export function pickRange(today: string, periods: RepairPeriods): { min: string; max: string } {
+  const end = periods.half2.to > periods.half1.to ? periods.half2.to : periods.half1.to;
+  return { min: today, max: REPAIR_IN_USE && end >= today ? end : addDays(today, PICK_AHEAD_DAYS) };
 }
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -95,9 +97,9 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
  * The day picked in the board's address (?date=YYYY-MM-DD), or null when none is given or it cannot be shown: not a
  * real day, outside pickRange, or a weekend or holiday (the suite runs no list then, and the calendar never offers one).
  */
-export function pickedDay(value: unknown, today: string, holidays: readonly Holiday[]): string | null {
+export function pickedDay(value: unknown, today: string, periods: RepairPeriods, holidays: readonly Holiday[]): string | null {
   if (typeof value !== "string" || !ISO_DAY.test(value) || addDays(value, 0) !== value) return null;
-  const { min, max } = pickRange(today);
+  const { min, max } = pickRange(today, periods);
   if (value < min || value > max) return null;
   return isWorkday(value, holidays) ? value : null;
 }

@@ -60,14 +60,3 @@ test("the bubble: centred on its badge, kept inside the strip, its tail on the b
   assert.equal(bubblePlace({ width: 390 }, { left: -200, width: 100 }).tail, 24);
   assert.equal(bubblePlace({ width: 390 }, { left: 600, width: 100 }).tail, 352 - 24);
 });
-
-test("no upload for a past day picked on the board: not \"yet\"", () => {
-  const [past] = boardNotices({ ...NONE, missingUpload: "2026-11-16", today: "2026-11-17" });
-  assert.equal(past.text, "ไม่มีตาราง HOSxP ของ 16 พ.ย. 2569");
-  assert.equal(past.short, "ไม่มี HOSxP");
-  assert.equal(past.testId, "no-upload-alert");
-  for (const day of ["2026-11-17", "2026-11-18"]) {
-    const [coming] = boardNotices({ ...NONE, missingUpload: day, today: "2026-11-17" });
-    assert.ok(coming.text.startsWith("ยังไม่มีตาราง HOSxP ของ "), coming.text);
-  }
-});

@@ -10,7 +10,6 @@ import { everyNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
-import { bangkokParts } from "@/lib/days";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
@@ -29,7 +28,7 @@ export const dynamic = "force-dynamic";
  * (lib/board-rows.ts), the add-case form for a doctor, and whether the viewer may upload. The HN is filtered here, on
  * the server: only the doctor who made a booking, MX and admins get it in the page at all. A database problem leaves
  * the rooms empty with a notice and hides the form. A day picked on the board (`picked`) shows the latest upload for that
- * day, whichever cycle made it (a past day's list as it last was, or none yet for a day further ahead).
+ * day, whichever cycle made it (today's after 16:00, or none yet for a day further ahead).
  */
 async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriods, picked: boolean) {
   try {
@@ -86,19 +85,20 @@ export default async function BoardPage({
   const at = now();
   // The full name of the user the number (or the doctor's email sign-in) has claimed, read on every request (a corrected
   // name shows without signing out).
-  const range = pickRange(bangkokParts(at).date);
-  const [profile, day, periods, { holidays: closed }] = await Promise.all([
+  const [profile, day, periods] = await Promise.all([
     profileFor(user, user.name),
     // The day the board shows: today until 16:00, then the next workday, skipping weekends and Thai holidays.
     loadBoardDay(at),
     // The repair's dates as an admin set them, read on every request so a change shows at once.
     currentRepairPeriods(),
-    // The holidays the date picker closes, as the address of a picked day is checked against them.
-    holidaysBetween(range.min, range.max),
   ]);
+  // The days the date picker offers (today to the repair's last day), with the holidays it closes: the address of a
+  // picked day is checked against them.
+  const range = pickRange(day.today, periods);
+  const { holidays: closed } = await holidaysBetween(range.min, range.max);
   // Another day picked on the board (?date=YYYY-MM-DD, Pong, 15 Nov 2026), when it is one the picker offers; else the
   // board's own day. Picking the board's own day is the same as picking none.
-  const picked = pickedDay(params.date, day.today, closed);
+  const picked = pickedDay(params.date, day.today, periods, closed);
   const view: BoardDay =
     picked && picked !== day.boardDate ? { ...day, boardDate: picked, relation: relationTo(picked, day.today) } : day;
   const { board, adding, canUpload, failed } = await loadBoard(user, view, periods, view !== day);

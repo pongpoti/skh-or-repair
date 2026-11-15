@@ -53,7 +53,7 @@ export function TopBar({
   phone?: string;
   /** LINE profile picture; only https *.line-scdn.net is shown, otherwise the name's first letter. */
   image?: string | null;
-  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts). */
+  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts), or the day picked. */
   date: string;
   /** The line above the date, saying how it stands to today (lib/board-day.ts boardEyebrow). */
   eyebrow?: string;
@@ -76,7 +76,7 @@ export function TopBar({
   const when = (
     <time dateTime={date}>
       {/* The month is abbreviated on narrow phones so the whole date, year included, fits beside the avatar (and the
-          upload and admin buttons, which take another 56px each; the date picker's chevron another 20px). */}
+          upload and admin buttons, which take another 56px each). */}
       <span className={shortDate}>{thaiDate(date, "short")}</span>
       <span className={longDate}>{thaiDate(date)}</span>
     </time>
@@ -89,8 +89,29 @@ export function TopBar({
           <BrandMark className="h-10 w-10 rounded-xl transition-[filter] hover:brightness-115" />
         </Link>
         <div className="relative min-w-0 flex-1">
-          <p className="truncate text-xs leading-5 font-medium text-muted" data-testid="board-eyebrow">
-            {eyebrow}
+          <p className="flex items-center gap-0.5 text-xs leading-5 font-medium text-muted">
+            <span className="truncate" data-testid="board-eyebrow">
+              {eyebrow}
+            </span>
+            {/* The date picker's sign sits on this short line, so it never takes room from the date and its year. */}
+            {datePick ? (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="shrink-0"
+                data-testid="board-date-chevron"
+              >
+                {/* Lucide "chevron-down" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            ) : null}
           </p>
           {datePick ? (
             <BoardDatePicker date={date} pick={datePick} pathname={pathname} headingClassName={HEADING}>
