@@ -10,9 +10,9 @@ import { isOpenRoom } from "./rooms.ts";
  */
 
 /**
- * A dressing case, from any sub-specialty: the same rule as for doctors' bookings (lib/dressing.ts), so a booking and
- * its HOSxP case go to the dressing room alike (Pong, 15 Nov 2026). It replaced the hospital's own keyword rule, which
- * left out debridement and several other procedures; a graft still keeps a case out.
+ * A dressing case, from any sub-specialty, by its name (lib/dressing.ts, Pong's words of 15 Nov 2026). It replaced the
+ * hospital's own keyword rule, which left out debridement and several other procedures; a graft still keeps a case
+ * out. Doctors' bookings do not use it: the surgeon picks the room (lib/added-cases.ts).
  */
 export function isDressingCase(procedure: string): boolean {
   return isDressingOperation(procedure);
@@ -38,7 +38,16 @@ export type PlaceInput = {
   emergency: boolean;
   /** The surgeon's team in the physician list (resolveSurgeon in lib/week.ts), for the SCOPE rule. */
   team: string | null;
+  /**
+   * The surgeon's choice of room (lib/added-cases.ts), which wins over the name: "dept" never goes to the dressing room,
+   * whatever the name; "dressing" goes to the day's dressing room (or, with none that day, where the other rules
+   * place it). Left out, the name decides (isDressingCase).
+   */
+  choice?: RoomChoice;
 };
+
+/** The surgeon's choice for a booking: their department's room that day, or the dressing room. */
+export type RoomChoice = "dept" | "dressing";
 
 /** Why a case is left off the board. */
 export type UnplacedReason = "obgyn-building" | "no-department" | "no-room";
@@ -96,7 +105,8 @@ export function placeCase(input: PlaceInput, date: string, periods: RepairPeriod
   if (repair && input.dept === "OBGYN") return unplaced("obgyn-building");
 
   const dressing = roomsHeldBy("INFECT", date, periods);
-  if (isDressingCase(input.procedure) && dressing.length > 0) return placed(dressing[0]);
+  const toDressing = input.choice ? input.choice === "dressing" : isDressingCase(input.procedure);
+  if (toDressing && dressing.length > 0) return placed(dressing[0]);
 
   if (input.emergency) {
     if (repair && (input.dept === "NEURO" || input.dept === "CVT")) {
@@ -136,6 +146,8 @@ export type PlaceableCase = {
   urgency: string | null;
   /** The surgeon's team for the SCOPE rule (lib/workbook.ts WorkbookRow.team); null falls back to the department, as there. */
   team: string | null;
+  /** The room chosen by the surgeon of a booking that matches the case (lib/board-rows.ts), which wins over the name. */
+  choice?: RoomChoice;
 };
 
 /**
@@ -148,7 +160,13 @@ export type PlaceableCase = {
 export function placeAll(cases: readonly PlaceableCase[], date: string, periods: RepairPeriods): Placement[] {
   const load = new Map<string, number>();
   return cases.map((item) => {
-    const input = { procedure: item.operation, dept: item.dept, emergency: isEmergencyUrgency(item.urgency), team: item.team ?? item.dept };
+    const input = {
+      procedure: item.operation,
+      dept: item.dept,
+      emergency: isEmergencyUrgency(item.urgency),
+      team: item.team ?? item.dept,
+      choice: item.choice,
+    };
     const placement = placeCase(input, date, periods, load);
     if (placement.ok) load.set(placement.roomId, (load.get(placement.roomId) ?? 0) + 1);
     return placement;

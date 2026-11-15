@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   addDays,
+  bookedChoice,
+  bookedMessage,
+  bookedRoom,
   bookingRoom,
   checkCase,
   cleanOperation,
@@ -61,8 +64,8 @@ test("the calendar closes weekends and holidays, with why", () => {
   assert.equal(closedDayNote("2026-12-11", DECEMBER), null);
 });
 
-test("the room: the department's room that day, by the workbook's rules, never the doctor's pick", () => {
-  const room = (subtype: string | null, operation: string, date: string) => bookingRoom(subtype, operation, date, REPAIR);
+test("OR X: the department's room that day, by the workbook's rules, whatever the operation's name", () => {
+  const room = (subtype: string | null, operation: string, date: string) => bookingRoom(subtype, operation, date, REPAIR, "dept");
   const FIRST = "2026-11-16"; // the repair's first half: OR 9 EMER, 10 D/S, 11 mixed, 12 GENSX, 13 ORTHO
   const SECOND = "2027-01-27"; // the second half: OR 1 D/S, 2 ORTHO, 3 EMER, 4 mixed, 5 GENSX
   assert.deepEqual(room("GENSX", "Lap chole", FIRST), { ok: true, roomId: "or-12", dressing: false });
@@ -74,46 +77,113 @@ test("the room: the department's room that day, by the workbook's rules, never t
   assert.deepEqual(room("URO", "TURP", "2026-11-11"), { ok: true, roomId: "or-7", dressing: false }, "before the repair, the weekly schedule's room");
   // an empty name still shows the department's room in the form
   assert.deepEqual(room("ORTHO", "", FIRST), { ok: true, roomId: "or-13", dressing: false });
+  // the surgeon decides (Pong, 15 Nov 2026): a name that reads like a dressing stays in the department's room
+  for (const name of ["D/S + VAC", "Debridement", "I&D abscess", "Wound dressing"]) {
+    assert.deepEqual(room("ORTHO", name, FIRST), { ok: true, roomId: "or-13", dressing: false }, name);
+  }
 });
 
-test("a dressing case goes to the dressing room, whatever the department", () => {
-  const room = (subtype: string | null, operation: string, date: string) => bookingRoom(subtype, operation, date, REPAIR);
+test("ห้องทำแผล: the dressing room that day, whatever the department or the name", () => {
+  const room = (subtype: string | null, operation: string, date: string) => bookingRoom(subtype, operation, date, REPAIR, "dressing");
   assert.deepEqual(room("GENSX", "D/S + VAC", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true });
-  assert.deepEqual(room("ORTHO", "dresing leg", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "a typo");
-  assert.deepEqual(room("PLASTIC", "Debridement + VAC", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "debridement is a dressing case (Pong, 15 Nov 2026)");
-  assert.deepEqual(room("GENSX", "D/S", "2027-01-27"), { ok: true, roomId: "or-1", dressing: true });
+  assert.deepEqual(room("ORTHO", "ORIF radius", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "the name does not gate it");
+  assert.deepEqual(room("URO", "", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true });
+  assert.deepEqual(room("GENSX", "D/S", "2027-01-27"), { ok: true, roomId: "or-1", dressing: true }, "the second half");
   assert.deepEqual(room("GENSX", "dressing", "2026-11-11"), { ok: true, roomId: "or-1", dressing: true }, "before the repair, OR 1");
-  // VAC on its own is a dressing, and the form says so
-  assert.deepEqual(room("GENSX", "change vac", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true });
+  assert.deepEqual(room(null, "Dressing", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "no department needed");
+  assert.deepEqual(room("GENSX", "D/S", "2026-11-21"), { ok: false, error: "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น" }, "a Saturday");
 });
 
 test("no room: obstetrics-gynaecology during the repair, an unknown department, a day without the department's room", () => {
   const refused = (subtype: string | null, operation: string, date: string) => {
-    const room = bookingRoom(subtype, operation, date, REPAIR);
+    const room = bookingRoom(subtype, operation, date, REPAIR, "dept");
     return room.ok ? room.roomId : room.error;
   };
   assert.equal(refused("OBGYN", "TAH", "2026-11-16"), "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้");
-  assert.equal(refused("OBGYN", "Dressing", "2026-11-16"), "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้", "even a dressing");
+  const obgynDressing = bookingRoom("OBGYN", "Dressing", "2026-11-16", REPAIR, "dressing");
+  assert.deepEqual(obgynDressing, { ok: false, error: "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้" }, "the dressing room too");
   assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "or-6", "after the repair, its own room again");
   assert.equal(refused(null, "Lap chole", "2026-11-16"), "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ");
   assert.equal(refused("", "Lap chole", "2026-11-16"), "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ");
   assert.equal(refused("ANES", "Lap chole", "2026-11-16"), "or-11", "a subtype the suite has no department for: the mixed room");
-  assert.equal(refused(null, "Dressing", "2026-11-16"), "or-10", "a dressing needs no department");
   assert.equal(refused("GENSX", "Lap chole", "2026-11-21"), "สาขาของคุณไม่มีห้องผ่าตัดในวันที่เลือก เลือกวันอื่น", "a Saturday");
 });
 
-test("a good booking passes, cleaned, with the room the app picked", () => {
+test("a good booking passes, cleaned, in the room of the doctor's choice; a room the form sends is ignored", () => {
   const checked = check({ ...ok, operation: "  Lap \u200bchole\n  ", roomId: "or-2" });
   assert.deepEqual(checked, {
     ok: true,
-    value: { date: "2026-11-16", roomId: "or-12", hn: "12345", operation: "Lap chole", shift: "in" },
-    dressing: false,
+    value: { date: "2026-11-16", roomId: "or-12", hn: "12345", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null },
   });
   assert.equal(cleanOperation("a\t b"), "a b");
-  const dressing = check({ ...ok, operation: "Wound D/S" });
-  assert.ok(dressing.ok);
-  assert.equal(dressing.value.roomId, "or-10");
-  assert.equal(dressing.dressing, true);
+  // the department's room unless the doctor picks the dressing room, whatever the name
+  const named = check({ ...ok, operation: "Wound D/S" });
+  assert.ok(named.ok);
+  assert.deepEqual([named.value.roomId, named.value.dressing, named.value.scrubDoes], ["or-12", false, null]);
+  const explicit = check({ ...ok, room: "dept", scrubDoes: true });
+  assert.ok(explicit.ok);
+  assert.deepEqual([explicit.value.roomId, explicit.value.scrubDoes], ["or-12", null], "no scrub answer for the department's room");
+  // the dressing room, with the scrub answer either way
+  for (const scrubDoes of [true, false]) {
+    const dressing = check({ ...ok, operation: "ORIF radius", room: "dressing", scrubDoes });
+    assert.ok(dressing.ok);
+    assert.deepEqual([dressing.value.roomId, dressing.value.dressing, dressing.value.scrubDoes], ["or-10", true, scrubDoes]);
+  }
+});
+
+test("the room choice is checked: only OR X or ห้องทำแผล, and ห้องทำแผล needs the scrub answer", () => {
+  const error = (input: Record<string, unknown>) => {
+    const checked = check({ ...ok, ...input });
+    return checked.ok ? "ok" : [checked.field, checked.error];
+  };
+  for (const room of ["or-10", "DRESSING", 1, true, null]) assert.deepEqual(error({ room }), room === null ? "ok" : ["room", "เลือกห้องผ่าตัด"], String(room));
+  for (const scrubDoes of [undefined, null, "yes", 1]) {
+    assert.deepEqual(error({ room: "dressing", scrubDoes }), ["room", "ห้องทำแผล: ตอบก่อนว่า scrub ทำให้แทนไหม ?"], String(scrubDoes));
+  }
+  // a day without the room: another day may have one
+  assert.deepEqual(
+    check({ ...ok, room: "dept" }, { subtype: "OBGYN" }),
+    { ok: false, field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้" },
+  );
+  assert.deepEqual(error({ room: "dressing", scrubDoes: true, operation: "x" }), "ok", "no department needed for the dressing room");
+  assert.equal(check({ ...ok, room: "dept" }, { subtype: null }).ok, false, "but needed for OR X");
+});
+
+test("a saved booking: the doctor's choice, or for one saved before the form asked, the room it was saved in", () => {
+  const saved = (more: Partial<AddedCase>): AddedCase => ({
+    id: "1",
+    date: "2026-11-16",
+    roomId: "or-12",
+    hn: "12345",
+    operation: "Wound dressing",
+    shift: "in",
+    dressing: null,
+    scrubDoes: null,
+    surgeonId: "7",
+    surgeon: "x",
+    subtype: "GENSX",
+    ...more,
+  });
+  assert.equal(bookedChoice(saved({}), REPAIR), "dept", "saved in GENSX's room: OR X, whatever the name");
+  assert.equal(bookedChoice(saved({ roomId: "or-10" }), REPAIR), "dressing", "saved in the dressing room");
+  assert.equal(bookedChoice(saved({ roomId: "or-12", dressing: true, scrubDoes: true }), REPAIR), "dressing");
+  assert.equal(bookedChoice(saved({ roomId: "or-10", dressing: false }), REPAIR), "dept");
+  // saved before the form asked, then an admin moved the halves: a dressing room closed on its day now still counts,
+  // and the booking goes to that day's dressing room
+  const moved = { half1: { from: "2026-11-14", to: "2026-11-13" }, half2: { from: "2026-11-16", to: "2027-03-17" } };
+  assert.equal(bookedChoice(saved({ roomId: "or-10" }), moved), "dressing", "OR 10 is closed in the second half");
+  assert.deepEqual(bookedRoom(saved({ roomId: "or-10" }), moved), { roomId: "or-1", dressing: true });
+  assert.equal(bookedChoice(saved({ roomId: "or-12" }), moved), "dept", "a closed room that is no dressing room");
+  // the room is worked out again: the dressing room of the second half, the department's room after a change
+  assert.deepEqual(bookedRoom(saved({ date: "2027-01-27", roomId: "or-10", dressing: true, scrubDoes: false }), REPAIR), { roomId: "or-1", dressing: true });
+  assert.deepEqual(bookedRoom(saved({ date: "2027-01-27", dressing: false }), REPAIR), { roomId: "or-5", dressing: false });
+  // no room can be worked out (no department): the saved one
+  assert.deepEqual(bookedRoom(saved({ subtype: null, roomId: "or-12", dressing: false }), REPAIR), { roomId: "or-12", dressing: false });
+});
+
+test("the saved booking's message names the dressing room", () => {
+  assert.equal(bookedMessage({ roomId: "or-12", date: "2026-11-17", dressing: false }), "จอง OR 12 วันอังคารที่ 17 พ.ย. 2569 แล้ว");
+  assert.equal(bookedMessage({ roomId: "or-10", date: "2026-11-17", dressing: true }), "จอง OR 10 ห้องทำแผล วันอังคารที่ 17 พ.ย. 2569 แล้ว");
 });
 
 test("dates: from the earliest day up to 60 days ahead, weekdays only, not a holiday", () => {
@@ -189,7 +259,7 @@ test("added cases join the board after its own, numbered per room", () => {
       { id: "a", roomId: "or-2", order: 1, procedure: "EGD", surgeon: "x", specialty: null, status: "scheduled", shift: "in" },
     ],
   };
-  const base = { operation: "Op", shift: "in" as const, hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
+  const base = { operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
   const added: AddedCase[] = [
     { ...base, id: "1", date: TODAY, roomId: "or-2" },
     { ...base, id: "2", date: TODAY, roomId: "or-3", shift: "out" },

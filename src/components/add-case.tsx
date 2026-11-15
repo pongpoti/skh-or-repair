@@ -14,11 +14,17 @@ import {
   checkCase,
   cleanOperation,
   closedDayNote,
+  DRESSING_ROOM_NAME,
   earliestText,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
+  SCRUB_NO,
+  SCRUB_QUESTION,
+  SCRUB_YES,
+  scrubTag,
   type AddedCase,
   type CaseField,
+  type RoomChoice,
 } from "@/lib/added-cases";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate } from "@/lib/days";
@@ -29,14 +35,20 @@ import { getRoom, roomLabel, roomUse } from "@/lib/rooms";
 import type { Shift } from "@/lib/schedule";
 import { subtypeLabel } from "@/lib/user-labels";
 
-const DIALOG =
-  "m-auto max-h-[calc(100dvh-1.5rem)] w-[min(32rem,calc(100%-1.5rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-surface p-4 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px] min-[360px]:p-5 sm:p-6";
+const DIALOG_LOOK =
+  "m-auto max-h-[calc(100dvh-1.5rem)] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-surface p-4 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px] min-[360px]:p-5 sm:p-6";
+const DIALOG = `${DIALOG_LOOK} w-[min(32rem,calc(100%-1.5rem))]`;
+/** The scrub question, a smaller dialog over the booking form. */
+const QUESTION_DIALOG = `${DIALOG_LOOK} w-[min(24rem,calc(100%-2.5rem))]`;
 
 const UNSAVED = "บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
 
 /** A picked radio: brown edge and tint. The input itself is visually hidden but still takes focus and arrow keys. */
 const OPTION =
-  "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-line-strong bg-white px-1 py-2 text-center transition-colors hover:border-brand has-checked:border-brand has-checked:bg-brand-tint has-checked:shadow-[inset_0_0_0_1px_var(--brand)] has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus";
+  "flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-line-strong bg-white px-1 py-2 text-center transition-colors hover:border-brand has-checked:border-brand has-checked:bg-brand-tint has-checked:shadow-[inset_0_0_0_1px_var(--brand)] has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-focus has-disabled:cursor-not-allowed has-disabled:border-line has-disabled:bg-surface-2 has-disabled:text-muted has-disabled:hover:border-line";
+/** An answer to the scrub question: the answer given before is marked like a picked option. */
+const ANSWER =
+  "flex min-h-14 items-center justify-center rounded-xl border border-line-strong bg-white px-2 py-3 text-center text-[0.9375rem] font-semibold text-ink transition-colors hover:border-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-pressed:border-brand aria-pressed:bg-brand-tint aria-pressed:shadow-[inset_0_0_0_1px_var(--brand)]";
 
 export type Doctor = { name: string; subtype: string | null };
 
@@ -60,10 +72,12 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
  * The doctor's booking of a room for one patient, in a dialog (Pong, 15 Nov 2026): the day, in Thai with a calendar
  * that offers only the days that can be booked (from the next workday, or the one after once 15:00 has passed, up to
  * 60 days ahead, never a weekend or holiday); the patient's 7-digit HN on its own card (the HOSxP workbook's case is
- * matched by it); the operation's name, required; and in or out of hours. A booking is an elective case, so the room
- * is not asked: the app arranges it from the doctor's department, or the dressing room for a dressing case, and the
- * form shows which before it is saved. The surgeon is always the signed-in doctor. Below it, the doctor's own bookings
- * from today on, with their HN, each one cancellable. `request` opens it.
+ * matched by it); the operation's name, required; the room, the doctor's own choice between their department's room
+ * that day (OR X, picked to start with) and the dressing room (ห้องทำแผล; Pong, 15 Nov 2026: "let surgeon decide which
+ * room to use"), each named with the room it is that day; and in or out of hours. Picking the dressing room asks, in
+ * a dialog over the form, whether the scrub nurse does the dressing for the doctor (Pong's "scrub ทำให้แทนไหม ?");
+ * closing it unanswered puts the choice back on the department's room. The surgeon is always the signed-in doctor.
+ * Below it, the doctor's own bookings from today on, with their HN, each one cancellable. `request` opens it.
  */
 export function AddCase({
   request,
@@ -98,6 +112,8 @@ export function AddCase({
   const hnRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef<HTMLInputElement>(null);
   const dateRef = useRef<HTMLDivElement>(null);
+  const roomRef = useRef<HTMLFieldSetElement>(null);
+  const scrubRef = useRef<HTMLDialogElement>(null);
   // A later first day the server gave when 15:00 passed while the form was open, until the page brings its own.
   const [movedOn, setMovedOn] = useState<string | null>(null);
   // The page's own first day replaces it: after midnight, say, the first day can be earlier than the one the server
@@ -112,6 +128,9 @@ export function AddCase({
   const [hn, setHn] = useState("");
   const [operation, setOperation] = useState("");
   const [shift, setShift] = useState<Shift>("in");
+  const [choice, setChoice] = useState<RoomChoice>("dept");
+  // The answer to the scrub question, for the dressing room only; null until asked.
+  const [scrubDoes, setScrubDoes] = useState<boolean | null>(null);
   // The field the shown error is about, marked for screen readers too, not only by the message.
   const [invalid, setInvalid] = useState<CaseField | null>(null);
   const [error, setError] = useState("");
@@ -152,6 +171,8 @@ export function AddCase({
       setHn("");
       setOperation("");
       setShift("in");
+      setChoice("dept");
+      setScrubDoes(null);
       setInvalid(null);
       setError("");
       setDone("");
@@ -164,6 +185,7 @@ export function AddCase({
     if (!dialog) return;
     if (request && !dialog.open) dialog.showModal();
     if (!request && dialog.open) dialog.close();
+    if (!request && scrubRef.current?.open) scrubRef.current.close();
   }, [request]);
 
   function edited(field: CaseField) {
@@ -179,6 +201,31 @@ export function AddCase({
     if (field === "hn") hnRef.current?.focus();
     else if (field === "operation") operationRef.current?.focus();
     else if (field === "date") dateRef.current?.querySelector<HTMLElement>("button")?.focus();
+    else if (field === "room") {
+      const group = roomRef.current;
+      (group?.querySelector<HTMLElement>("input:checked") ?? group?.querySelector<HTMLElement>("input:enabled"))?.focus();
+    }
+  }
+
+  // The doctor's choice of room. The dressing room asks the scrub question at once, in a dialog over the form.
+  function pickRoom(next: RoomChoice) {
+    setChoice(next);
+    edited("room");
+    if (next === "dressing") scrubRef.current?.showModal();
+    else setScrubDoes(null);
+  }
+
+  function answerScrub(answer: boolean) {
+    setScrubDoes(answer);
+    setChoice("dressing");
+    edited("room");
+    scrubRef.current?.close();
+  }
+
+  // Closed without an answer (ย้อนกลับ, Escape, the phone's back gesture): a dressing room without one is no choice,
+  // so the department's room is picked again. An answer given before stays when the doctor only looked again.
+  function leaveScrub() {
+    if (scrubDoes === null) setChoice("dept");
   }
 
   function apply(result: CaseResult, from: "save" | "remove") {
@@ -202,9 +249,7 @@ export function AddCase({
     const field = focusAfter.current;
     if (pending || !field) return;
     focusAfter.current = null;
-    if (field === "hn") hnRef.current?.focus();
-    else if (field === "operation") operationRef.current?.focus();
-    else if (field === "date") dateRef.current?.querySelector<HTMLElement>("button")?.focus();
+    focusField(field);
   }, [pending]);
 
   function refuse(message: string, field: CaseField | undefined, saving = false) {
@@ -218,7 +263,8 @@ export function AddCase({
 
   function save(event: React.FormEvent) {
     event.preventDefault();
-    const checked = checkCase({ date, hn, operation, shift }, { today, earliest: first, periods, subtype: doctor.subtype, holidays });
+    const input = { date, hn, operation, shift, room: choice, scrubDoes };
+    const checked = checkCase(input, { today, earliest: first, periods, subtype: doctor.subtype, holidays });
     if (!checked.ok) {
       refuse(checked.error, checked.field);
       return;
@@ -226,9 +272,9 @@ export function AddCase({
     setInvalid(null);
     startTransition(async () => {
       try {
-        // The checked value carries the HN normalised and the room; the server checks it all again and picks the room
-        // itself, from the doctor's department as the database has it.
-        const result = await onAdd({ date, hn, operation, shift });
+        // The checked value carries the HN normalised and the room; the server checks it all again and works out the
+        // room itself, from the doctor's choice and their department as the database has it.
+        const result = await onAdd(input);
         if (!result.ok && result.earliest) {
           // 15:00 passed while the form was open: the calendar moves on with the server's first day.
           setMovedOn(result.earliest);
@@ -240,9 +286,11 @@ export function AddCase({
         }
         apply(result, "save");
         if (result.ok) {
-          // Ready for the next patient on the same day.
+          // Ready for the next patient on the same day, whose room is chosen afresh.
           setHn("");
           setOperation("");
+          setChoice("dept");
+          setScrubDoes(null);
           focusAfter.current = "hn";
         }
       } catch {
@@ -277,16 +325,24 @@ export function AddCase({
     const note = closedDayNote(iso, holidays);
     return note ? { disabled: true, note } : { disabled: false };
   };
-  // The room the server will pick, shown before saving: worked out again on each render from the day and the name.
-  const room = bookingRoom(doctor.subtype, cleanOperation(operation), date, periods);
-  const allocation = room.ok ? allocationFor(room.roomId, date, periods) : null;
-  const shownRoom = room.ok ? getRoom(room.roomId) : null;
+  // The two rooms the doctor can pick that day, worked out again on each render from the day (and the name, which sends
+  // a general surgeon's endoscopy to the mixed room during the repair).
+  const name = cleanOperation(operation);
+  const deptRoom = bookingRoom(doctor.subtype, name, date, periods, "dept");
+  const dressingRoom = bookingRoom(doctor.subtype, name, date, periods, "dressing");
+  const room = choice === "dressing" ? dressingRoom : deptRoom;
+  const allocation = deptRoom.ok ? allocationFor(deptRoom.roomId, date, periods) : null;
+  const label = (roomId: string) => {
+    const found = getRoom(roomId);
+    return found ? roomLabel(found) : roomId;
+  };
   const saveError = about === "save" && error ? error : "";
   // The message under จองห้อง names the field it is about, for screen readers on that field.
   const describe = (field: CaseField, own?: string) => [own, invalid === field && saveError ? "case-save-status" : null].filter(Boolean).join(" ") || undefined;
 
   return (
-    // While a save runs the dialog stays open (Escape too), so its answer lands in the dialog that sent it.
+    <>
+    {/* While a save runs the dialog stays open (Escape too), so its answer lands in the dialog that sent it. */}
     <dialog
       ref={ref}
       aria-labelledby="add-case-title"
@@ -397,21 +453,35 @@ export function AddCase({
             />
           </div>
 
-          {/* No room to pick: the app arranges it, and says which before the booking is saved. */}
-          <div>
-            <p className="text-sm font-semibold text-ink" id="case-room-label">
-              ห้องผ่าตัด
-            </p>
-            <div
-              className="mt-1.5 flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-line bg-surface-2 px-3 py-2"
-              role="status"
-              aria-labelledby="case-room-label"
-              data-testid="case-room"
-              data-room-id={room.ok ? room.roomId : undefined}
-            >
-              {room.ok ? (
-                <>
-                  <span className="text-[0.9375rem] font-bold text-ink">{shownRoom ? roomLabel(shownRoom) : room.roomId}</span>
+          {/*
+            The doctor's choice of room, each named with the room it is that day. A room the day does not have is shown
+            greyed, with the reason under the choices, and is never shown picked: a picked radio that is disabled would
+            keep the keyboard out of the whole group.
+          */}
+          <fieldset
+            ref={roomRef}
+            data-testid="case-room"
+            data-choice={choice}
+            data-room-id={room.ok ? room.roomId : undefined}
+            aria-describedby="case-room-why"
+          >
+            <legend className="text-sm font-semibold text-ink">ห้องผ่าตัด</legend>
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+              <label className={`${OPTION} min-h-16`}>
+                <input
+                  type="radio"
+                  name="room"
+                  value="dept"
+                  checked={choice === "dept" && deptRoom.ok}
+                  disabled={!deptRoom.ok}
+                  onChange={() => pickRoom("dept")}
+                  aria-invalid={(invalid === "room" && choice === "dept") || undefined}
+                  aria-describedby={describe("room")}
+                  className="sr-only"
+                  data-testid="case-room-dept"
+                />
+                <span className="text-[0.9375rem] font-bold">{deptRoom.ok ? label(deptRoom.roomId) : "ห้องของสาขา"}</span>
+                <span className="flex flex-wrap justify-center gap-1">
                   {allocation?.split ? (
                     <>
                       <DeptTag dept={allocation.am} />
@@ -419,18 +489,54 @@ export function AddCase({
                     </>
                   ) : allocation ? (
                     <DeptTag dept={allocation.am} />
-                  ) : null}
-                  <span className="basis-full text-xs text-ink-3" data-testid="case-room-why">
-                    {room.dressing ? "ห้องทำแผล: ชื่อการผ่าตัดเป็นการทำแผล" : "จัดให้อัตโนมัติตามสาขาของคุณ (เคสนัด)"}
-                  </span>
-                </>
-              ) : (
+                  ) : (
+                    <span className="text-xs">ไม่มีในวันที่เลือก</span>
+                  )}
+                </span>
+              </label>
+              <label className={`${OPTION} min-h-16`}>
+                <input
+                  type="radio"
+                  name="room"
+                  value="dressing"
+                  checked={choice === "dressing" && dressingRoom.ok}
+                  disabled={!dressingRoom.ok}
+                  onChange={() => pickRoom("dressing")}
+                  aria-invalid={(invalid === "room" && choice === "dressing") || undefined}
+                  aria-describedby={describe("room")}
+                  className="sr-only"
+                  data-testid="case-room-dressing"
+                />
+                <span className="text-[0.9375rem] font-bold">{DRESSING_ROOM_NAME}</span>
+                <span className="text-xs text-ink-3">{dressingRoom.ok ? label(dressingRoom.roomId) : "ไม่มีในวันที่เลือก"}</span>
+              </label>
+            </div>
+            <div id="case-room-why" className="mt-1.5 flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1" aria-live="polite">
+              {!room.ok ? (
                 <span className="text-sm font-semibold text-[var(--stop)]" data-testid="case-room-why">
                   {room.error}
                 </span>
+              ) : choice === "dressing" && scrubDoes !== null ? (
+                <>
+                  <span className="text-xs text-ink-3" data-testid="case-room-why">
+                    {SCRUB_QUESTION} <span className="font-semibold text-ink">{scrubDoes ? SCRUB_YES : SCRUB_NO}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost min-h-11 px-2 text-sm"
+                    onClick={() => scrubRef.current?.showModal()}
+                    data-testid="case-scrub-change"
+                  >
+                    เปลี่ยนคำตอบ
+                  </button>
+                </>
+              ) : (
+                <span className="text-xs text-ink-3" data-testid="case-room-why">
+                  {choice === "dressing" ? `ตอบคำถาม ${SCRUB_QUESTION}` : "ห้องของสาขาคุณในวันที่เลือก (เคสนัด)"}
+                </span>
               )}
             </div>
-          </div>
+          </fieldset>
 
           <fieldset>
             <legend className="text-sm font-semibold text-ink">เวลา</legend>
@@ -501,8 +607,8 @@ export function AddCase({
         ) : (
           <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-white/70" data-testid="my-cases">
             {mine.map((item) => {
-              // Where the booking is now (the app picks the room again if the repair's dates moved).
-              const roomId = bookedRoom(item, periods).roomId;
+              // Where the booking is now (the app works the room out again if the repair's dates moved).
+              const { roomId, dressing } = bookedRoom(item, periods);
               const room = getRoom(roomId);
               const asking = confirming === item.id;
               // A case whose room is not in use that day (the ventilation repair moves the rooms) is not on the board.
@@ -520,6 +626,12 @@ export function AddCase({
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-ink-2">
                       {thaiDate(item.date, "short")} · {room ? roomLabel(room) : roomId}
+                      {dressing ? ` ${DRESSING_ROOM_NAME}` : null}
+                      {dressing && typeof item.scrubDoes === "boolean" ? (
+                        <span className="badge badge-muted ml-1.5 align-middle" data-testid="my-case-scrub">
+                          {scrubTag(item.scrubDoes)}
+                        </span>
+                      ) : null}
                       {item.shift === "out" ? <span className="badge badge-warning ml-1.5 align-middle">นอกเวลา</span> : null}
                       {offBoard ? <span className="badge badge-warning ml-1.5 align-middle">ห้องนี้ไม่เปิดวันนั้น</span> : null}
                     </p>
@@ -550,5 +662,48 @@ export function AddCase({
         )}
       </section>
     </dialog>
+
+    {/*
+      The scrub question, over the booking form (Pong, 15 Nov 2026: "show consecutive question on another dialog
+      (overlying previous one)"). Beside the form's dialog rather than inside it, so its close never reaches the form's.
+    */}
+    <dialog
+      ref={scrubRef}
+      aria-labelledby="scrub-title"
+      aria-describedby="scrub-room"
+      className={QUESTION_DIALOG}
+      onCancel={leaveScrub}
+      data-testid="scrub-dialog"
+    >
+      <h2 id="scrub-title" className="text-lg font-bold">
+        {SCRUB_QUESTION}
+      </h2>
+      <p id="scrub-room" className="mt-0.5 text-sm text-ink-2">
+        {DRESSING_ROOM_NAME}
+        {dressingRoom.ok ? ` ${label(dressingRoom.roomId)}` : ""} · {thaiDate(date, "short")}
+      </p>
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button type="button" className={ANSWER} aria-pressed={scrubDoes === true} onClick={() => answerScrub(true)} data-testid="scrub-yes">
+          {SCRUB_YES}
+        </button>
+        <button type="button" className={ANSWER} aria-pressed={scrubDoes === false} onClick={() => answerScrub(false)} data-testid="scrub-no">
+          {SCRUB_NO}
+        </button>
+      </div>
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => {
+            leaveScrub();
+            scrubRef.current?.close();
+          }}
+          data-testid="scrub-back"
+        >
+          ย้อนกลับ
+        </button>
+      </div>
+    </dialog>
+    </>
   );
 }

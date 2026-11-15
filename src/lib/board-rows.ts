@@ -1,7 +1,7 @@
 import { NO_OPERATION_LABEL, bookedRoom, type AddedCase } from "./added-cases.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
-import { placeAll } from "./placement.ts";
+import { placeAll, roomsHeldBy } from "./placement.ts";
 import type { RepairPeriods } from "./repair.ts";
 import { roomUse } from "./rooms.ts";
 import type { CaseStatus, Operation, Shift } from "./schedule.ts";
@@ -30,6 +30,11 @@ export type BoardRow = Operation & {
   hn?: string;
   /** The doctor who booked the room (booking and matched rows). */
   bookedBy?: string;
+  /**
+   * A booking the doctor put in the dressing room: their answer to "scrub ทำให้แทนไหม ?", true when the scrub nurse
+   * does the dressing (ฝาก scrub ทำ), false when the doctor does (แพทย์ทำเอง). Left out on other rows.
+   */
+  scrubDoes?: boolean;
 };
 
 /** Who looks at the board, for the HN rule. */
@@ -87,6 +92,11 @@ export type BoardRows = {
   countByRoom: Record<string, number>;
 };
 
+/** The scrub answer of a booking shown in the dressing room it was booked into. */
+function scrubAnswer(booking: AddedCase, own: { roomId: string; dressing: boolean }, roomId: string): { scrubDoes?: boolean } {
+  return own.dressing && roomId === own.roomId && typeof booking.scrubDoes === "boolean" ? { scrubDoes: booking.scrubDoes } : {};
+}
+
 function departmentName(dept: DeptCode | null): string | null {
   return dept && Object.hasOwn(DEPARTMENTS, dept) ? DEPARTMENTS[dept].name : null;
 }
@@ -96,13 +106,16 @@ function departmentName(dept: DeptCode | null): string | null {
  *
  * Workbook cases are placed first, in file order, by the report's rules under `periods` (lib/placement.ts): the
  * same rooms the upload gave them, unless an admin has moved the repair's dates since, and then the rooms in use
- * under the new dates. Bookings are placed again too (lib/added-cases.ts bookedRoom): the app, not the doctor, picks
- * their rooms. Matching is one to one by normalised HN on the board's date, in a stable order: workbook cases in file
- * order each take the earliest booking with their HN that is still free. A matched pair is shown once, with the
- * workbook's operation name and status, in the room placement gave the workbook case: MX's list is the day's schedule,
- * and it spreads a department's cases over its rooms, which a booking alone cannot. The one exception is a booking the
- * form sent to the dressing room by its name when HOSxP names the case otherwise: it stays there, as the doctor was
- * told. A workbook case left over shows in its placed room, flagged "unbooked". A
+ * under the new dates. Bookings are placed again too (lib/added-cases.ts bookedRoom): the doctor picks their
+ * department's room or the dressing room, and the app works out which room that is. Matching is one to one by
+ * normalised HN on the board's date, in a stable order: workbook cases in file order each take the earliest booking with
+ * their HN that is still free. A matched pair is shown once, with the workbook's operation name and status, in the room
+ * placement gave the workbook case: MX's list is the day's schedule, and it spreads a department's cases over its
+ * rooms, which a booking alone cannot. The doctor's choice of room takes the place of the workbook's name, though
+ * (Pong, 15 Nov 2026: "let surgeon decide"): a case booked in the dressing room is placed there, and a case booked in
+ * the department's room is placed as if its name were no dressing, so HOSxP's name never moves it to the dressing room
+ * and an emergency still goes to the emergency room. A workbook case left over shows in its
+ * placed room, flagged "unbooked". A
  * booking left over shows in its room, flagged "not-in-hosxp" only when a workbook was uploaded (without one there is
  * nothing to compare with). A row whose room is not open that day (closed, a recovery or instrument room, or a
  * workbook case not placed) is left off the board.
@@ -112,12 +125,6 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   const today = bookings.filter((item) => item.date === date);
   const bookingRooms = new Map(today.map((booking) => [booking, bookedRoom(booking, periods)]));
   const cases = [...(workbook ?? [])].sort((a, b) => a.position - b.position);
-  const placements = placeAll(cases, date, periods);
-  const placedIn = new Map<WorkbookCase, string | null>();
-  cases.forEach((item, index) => {
-    const placement = placements[index];
-    placedIn.set(item, placement.ok ? placement.roomId : null);
-  });
 
   // The bookings waiting for a match, per HN, oldest first.
   const waiting = new Map<string, AddedCase[]>();
@@ -138,6 +145,24 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
     taken.add(booking);
   }
 
+  // A matched case is placed by the doctor's choice of room instead of its name, and by the workbook's other rules
+  // (emergencies, NEURO and CVT, SCOPE, the load of a department's rooms) as any other case.
+  const choiceOf = (item: WorkbookCase) => {
+    const booking = pairs.get(item);
+    return booking ? (bookingRooms.get(booking)?.dressing ? "dressing" : "dept") : undefined;
+  };
+  const placements = placeAll(
+    cases.map((item) => ({ ...item, choice: choiceOf(item) })),
+    date,
+    periods,
+  );
+  const dressingRooms = roomsHeldBy("INFECT", date, periods);
+  const placedIn = new Map<WorkbookCase, string | null>();
+  cases.forEach((item, index) => {
+    const placement = placements[index];
+    placedIn.set(item, placement.ok ? placement.roomId : null);
+  });
+
   const open = (roomId: string | null): roomId is string => roomId !== null && roomUse(roomId, date, periods) === "open";
   // The doctor who made a booking sees its HN; MX and admins see every HN.
   const seesHn = (booking: AddedCase) => viewer.allHn || (viewer.userId !== null && booking.surgeonId === viewer.userId);
@@ -148,7 +173,10 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
     if (booking) {
       const placed = placedIn.get(item) ?? null;
       const own = bookingRooms.get(booking) ?? { roomId: booking.roomId, dressing: false };
-      const roomId = own.dressing && open(own.roomId) ? own.roomId : open(placed) ? placed : open(own.roomId) ? own.roomId : null;
+      // Where MX's list places it by the doctor's choice; the booking's own room when the case cannot be placed (its
+      // department is not known), but a department's booking never in the dressing room.
+      const fits = (roomId: string | null): roomId is string => open(roomId) && (own.dressing || !dressingRooms.includes(roomId));
+      const roomId = fits(placed) ? placed : fits(own.roomId) ? own.roomId : null;
       if (!roomId) continue;
       const hn = booking.hn ?? normalizeHn(item.hn);
       rows.push({
@@ -163,6 +191,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
         flag: null,
         ...(seesHn(booking) && hn ? { hn } : {}),
         bookedBy: booking.surgeon,
+        ...scrubAnswer(booking, own, roomId),
       });
       continue;
     }
@@ -183,7 +212,8 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   }
 
   for (const booking of today) {
-    const roomId = bookingRooms.get(booking)?.roomId ?? booking.roomId;
+    const own = bookingRooms.get(booking) ?? { roomId: booking.roomId, dressing: false };
+    const roomId = own.roomId;
     if (taken.has(booking) || !open(roomId)) continue;
     rows.push({
       id: `bk-${booking.id}`,
@@ -197,6 +227,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       flag: uploaded ? "not-in-hosxp" : null,
       ...(seesHn(booking) && booking.hn ? { hn: booking.hn } : {}),
       bookedBy: booking.surgeon,
+      ...scrubAnswer(booking, own, roomId),
     });
   }
 

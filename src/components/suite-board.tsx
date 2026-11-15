@@ -7,7 +7,7 @@ import { AddCase, type Doctor } from "@/components/add-case";
 import { BoardNotices, noticeBadge } from "@/components/board-notices";
 import { CaseFlag, CaseSource } from "@/components/case-source";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
-import type { AddedCase } from "@/lib/added-cases";
+import { scrubTag, type AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
@@ -346,6 +346,12 @@ export function SuiteBoard({
                           <CaseSource source={item.source} />
                           <CaseFlag flag={item.flag} />
                           {item.shift === "out" ? <span className="badge badge-warning">นอกเวลา</span> : null}
+                          {/* A dressing-room booking: who does the dressing, as the doctor said when booking. */}
+                          {typeof item.scrubDoes === "boolean" ? (
+                            <span className="badge badge-muted" data-testid="row-scrub" data-scrub={item.scrubDoes ? "yes" : "no"}>
+                              {scrubTag(item.scrubDoes)}
+                            </span>
+                          ) : null}
                           {item.hn ? (
                             <span className="text-xs font-semibold text-ink-2 tabular-nums" data-testid="row-hn">
                               HN {displayHn(item.hn)}

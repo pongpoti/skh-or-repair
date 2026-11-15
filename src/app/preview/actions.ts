@@ -1,9 +1,7 @@
 "use server";
 
 import type { CaseResult } from "@/app/(board)/actions";
-import { checkCase, type AddedCase, type BookingContext } from "@/lib/added-cases";
-import { thaiDate } from "@/lib/days";
-import { getRoom, roomLabel } from "@/lib/rooms";
+import { bookedMessage, checkCase, type AddedCase, type BookingContext } from "@/lib/added-cases";
 import { SAMPLE_DOCTOR_ID } from "./sample";
 
 /**
@@ -23,8 +21,7 @@ export async function previewAddCase(context: BookingContext & { name: string },
   const value = checked.value;
   kept.push({ ...value, id: String(Date.now()), surgeonId: SAMPLE_DOCTOR_ID, surgeon: context.name, subtype: context.subtype });
   kept.sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-  const room = getRoom(value.roomId);
-  return { ok: true, mine: [...kept], message: `จอง ${room ? roomLabel(room) : value.roomId} ${thaiDate(value.date, "short")} แล้ว` };
+  return { ok: true, mine: [...kept], message: bookedMessage(value) };
 }
 
 /** The preview doctor's bookings so far, so the form's list survives the refresh after each save. */

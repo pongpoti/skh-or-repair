@@ -230,6 +230,25 @@ BEGIN
   END IF;
 END $$;
 
+-- The doctor's choice of room (Pong, 15 Nov 2026: "let surgeon decide which room to use: dept room or dressing room"):
+-- dressing is true for the dressing room (ห้องทำแผล) and false for the doctor's department's room; scrub_does is the
+-- answer to "scrub ทำให้แทนไหม ?" for a dressing-room booking, true when the scrub nurse does the dressing and false
+-- when the doctor does, and NULL otherwise. Bookings saved before the form asked keep NULL in both, and their saved
+-- room says which room they are in (lib/added-cases.ts bookedChoice). Applied to existing databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'dressing' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN dressing boolean;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'scrub_does' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN scrub_does boolean;
+  END IF;
+  -- The scrub answer is given for a dressing-room booking, and only for one.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'cases'::regclass AND conname = 'cases_scrub_does_check') THEN
+    ALTER TABLE cases ADD CONSTRAINT cases_scrub_does_check CHECK ((dressing IS TRUE) = (scrub_does IS NOT NULL));
+  END IF;
+END $$;
+
 -- The ventilation repair's two halves, which an admin can move on /admin (lib/repair-store.ts; the room layout of each
 -- half is in lib/repair.ts). Seeded once with the planned dates; a saved row is never overwritten by the seed.
 -- updated_by is the LINE sub of the admin who saved it (NULL for the seed).

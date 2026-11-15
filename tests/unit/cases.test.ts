@@ -46,9 +46,9 @@ describe("added cases (database)", () => {
   });
 
   test("cases list by day and by surgeon, with the HN and the surgeon's id; only the surgeon removes them", async () => {
-    const a = await insertCase(pool, doctor, "U1", { date: "2026-11-04", roomId: "or-2", hn: "12345", operation: "ORIF", shift: "in" });
-    const b = await insertCase(pool, other, "U3", { date: "2026-11-04", roomId: "or-2", hn: "A7", operation: "Hernia", shift: "out" });
-    await insertCase(pool, doctor, "U1", { date: "2026-11-05", roomId: "or-5", hn: "9", operation: "TKA", shift: "in" });
+    const a = await insertCase(pool, doctor, "U1", { date: "2026-11-04", roomId: "or-2", hn: "12345", operation: "ORIF", shift: "in", dressing: false, scrubDoes: null });
+    const b = await insertCase(pool, other, "U3", { date: "2026-11-04", roomId: "or-2", hn: "A7", operation: "Hernia", shift: "out", dressing: false, scrubDoes: null });
+    await insertCase(pool, doctor, "U1", { date: "2026-11-05", roomId: "or-5", hn: "9", operation: "TKA", shift: "in", dressing: false, scrubDoes: null });
 
     const day = await listCasesOn(pool, "2026-11-04");
     assert.deepEqual(
@@ -69,16 +69,45 @@ describe("added cases (database)", () => {
   });
 
   test("a booking without an operation name stores NULL and reads back as an empty name", async () => {
-    const id = await insertCase(pool, doctor, "U1", { date: "2026-11-20", roomId: "or-12", hn: "77", operation: "", shift: "in" });
+    const id = await insertCase(pool, doctor, "U1", { date: "2026-11-20", roomId: "or-12", hn: "77", operation: "", shift: "in", dressing: false, scrubDoes: null });
     assert.equal((await pool.query("SELECT operation FROM cases WHERE id = $1", [id])).rows[0].operation, null);
     const [item] = await listCasesOn(pool, "2026-11-20");
     assert.deepEqual([item.id, item.operation, item.hn], [id, "", "77"]);
   });
 
-  test("cases saved before bookings carried an HN read back with none", async () => {
+  test("cases saved before bookings carried an HN read back with none, and with no room choice", async () => {
     await pool.query("INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub) VALUES ('2026-11-06', 'or-3', 'Old', $1, 'U1')", [doctor]);
     const [item] = await listCasesOn(pool, "2026-11-06");
-    assert.deepEqual([item.operation, item.hn], ["Old", null]);
+    assert.deepEqual([item.operation, item.hn, item.dressing, item.scrubDoes], ["Old", null, null, null]);
+  });
+
+  test("the doctor's room choice and scrub answer are kept with the booking", async () => {
+    const yes = await insertCase(pool, doctor, "U1", { date: "2026-11-23", roomId: "or-10", hn: "81", operation: "I&D", shift: "in", dressing: true, scrubDoes: true });
+    const no = await insertCase(pool, doctor, "U1", { date: "2026-11-23", roomId: "or-10", hn: "82", operation: "D/S", shift: "in", dressing: true, scrubDoes: false });
+    // a scrub answer sent with the department's room is not kept
+    const dept = await insertCase(pool, doctor, "U1", { date: "2026-11-23", roomId: "or-13", hn: "83", operation: "ORIF", shift: "in", dressing: false, scrubDoes: true });
+    const listed = await listCasesOn(pool, "2026-11-23");
+    assert.deepEqual(
+      listed.map((item) => [item.id, item.roomId, item.dressing, item.scrubDoes]),
+      [
+        [yes, "or-10", true, true],
+        [no, "or-10", true, false],
+        [dept, "or-13", false, null],
+      ],
+    );
+  });
+
+  test("the table keeps a scrub answer with a dressing-room booking, and only with one", async () => {
+    for (const [dressing, scrub] of [[true, null], [false, true], [false, false], [null, true]]) {
+      await assert.rejects(
+        pool.query(
+          "INSERT INTO cases (op_date, room_id, hn, operation, dressing, scrub_does, surgeon_id, line_sub) VALUES ('2026-11-04', 'or-10', '1', 'x', $1, $2, $3, 'U1')",
+          [dressing, scrub, doctor],
+        ),
+        (e: { code?: string }) => e.code === "23514",
+        `${dressing} ${scrub}`,
+      );
+    }
   });
 
   test("the table keeps the HN in its normalised form only", async () => {

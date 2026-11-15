@@ -182,7 +182,7 @@ test("each half's repair zone covers its closed rooms and none of the rooms in u
 
 test("a booking's room follows the repair: own department's room, else the mixed-department room", () => {
   const room = (subtype: string | null, date: string) => {
-    const placed = bookingRoom(subtype, "Operation", date, REPAIR);
+    const placed = bookingRoom(subtype, "Operation", date, REPAIR, "dept");
     return placed.ok ? placed.roomId : null;
   };
   assert.equal(room("GENSX", FIRST_MONDAY), "or-12");
@@ -214,6 +214,8 @@ test("an added case in a room not operating that day stays off the board", () =>
     hn: "1",
     operation: "x",
     shift: "in",
+    dressing: null,
+    scrubDoes: null,
     surgeonId: "1",
     surgeon: "ก ข",
     subtype: "GENSX",
