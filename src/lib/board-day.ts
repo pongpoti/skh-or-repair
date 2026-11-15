@@ -1,5 +1,6 @@
 import { addDays, bangkokParts, workdayIndex } from "./days.ts";
-import { holidaysBetween, LOOKAHEAD_DAYS, nextWorkdayAfter, nextWorkdayIn, type Holiday, type NextWorkday } from "./holidays.ts";
+import { REPAIR_IN_USE, type RepairPeriods } from "./repair.ts";
+import { holidaysBetween, isWorkday, LOOKAHEAD_DAYS, nextWorkdayAfter, nextWorkdayIn, type Holiday, type NextWorkday } from "./holidays.ts";
 
 /**
  * Which day the board shows, and when MX may upload (Bangkok time, UTC+7). The suite's day turns over at 16:00, not at
@@ -61,10 +62,46 @@ export function boardDayAt(at: Date, holidays: readonly Holiday[]): BoardDay {
   return { today, minutes, cycleDay, boardDate, relation };
 }
 
+/** How `date`, today or a day after it, stands to `today`. */
+export function relationTo(date: string, today: string): BoardDayRelation {
+  if (date <= today) return "today";
+  return date === addDays(today, 1) ? "tomorrow" : "later";
+}
+
 /** The top bar's line above the date. */
 export function boardEyebrow(relation: BoardDayRelation): string {
   // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026).
   return relation === "today" ? "ตารางผ่าตัดวันนี้" : "ตารางผ่าตัดถัดไป";
+}
+
+/**
+ * How far ahead the board's date can be picked when no repair lies ahead: as far as doctors can book
+ * (lib/added-cases.ts BOOK_AHEAD_DAYS).
+ */
+export const PICK_AHEAD_DAYS = 60;
+
+/**
+ * The days the board's date can be picked from, YYYY-MM-DD. Only today and the days after it (Pong, 15 Nov 2026: "It
+ * should be current and future day only"); today stays pickable after 16:00, when the board itself has moved on to the
+ * next workday. The last day is the repair's last day, so the calendar stays within it, second half included ("Calendar
+ * confine Within time range"); once the repair is over, PICK_AHEAD_DAYS ahead.
+ */
+export function pickRange(today: string, periods: RepairPeriods): { min: string; max: string } {
+  const end = periods.half2.to > periods.half1.to ? periods.half2.to : periods.half1.to;
+  return { min: today, max: REPAIR_IN_USE && end >= today ? end : addDays(today, PICK_AHEAD_DAYS) };
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The day picked in the board's address (?date=YYYY-MM-DD), or null when none is given or it cannot be shown: not a
+ * real day, outside pickRange, or a weekend or holiday (the suite runs no list then, and the calendar never offers one).
+ */
+export function pickedDay(value: unknown, today: string, periods: RepairPeriods, holidays: readonly Holiday[]): string | null {
+  if (typeof value !== "string" || !ISO_DAY.test(value) || addDays(value, 0) !== value) return null;
+  const { min, max } = pickRange(today, periods);
+  if (value < min || value > max) return null;
+  return isWorkday(value, holidays) ? value : null;
 }
 
 /** Inside MX's upload window: Bangkok 15:00:00 ≤ t < 16:00:00, every day. Admins may upload at any time. */

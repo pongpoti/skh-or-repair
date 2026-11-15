@@ -3142,6 +3142,153 @@ async function main() {
       rmSync(NOW_FILE, { force: true });
     });
 
+    await t("the board's date picks another day: a floating month calendar in Thai, a day's own HOSxP list, back to the current board", async () => {
+      // Tuesday after 16:00: the board shows Wednesday, which has no upload yet
+      setNow("2026-11-17T17:00:00+07:00");
+      const ctx = await contextAs(RP.nurse);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      const shownDay = () => page.getAttribute("header time", "datetime");
+      assert((await shownDay()) === "2026-11-18", "after 16:00 the board shows Wednesday");
+      const dialog = page.locator('[data-testid="board-date-dialog"]');
+      const day = (iso) => page.locator(`#board-date-calendar [data-date="${iso}"]`);
+      const openPicker = async () => {
+        await page.click('[data-testid="board-date-button"]');
+        await dialog.waitFor({ state: "visible" });
+      };
+      // the date (and the line above it) is a 44px target that opens the calendar in a floating card over a tinted page
+      const target = await page.evaluate(() => {
+        const box = document.querySelector('[data-testid="board-date-button"]').parentElement.parentElement.getBoundingClientRect();
+        return box.height;
+      });
+      assert(target >= 44, `the date block is a 44px target: ${target}`);
+      await openPicker();
+      assert((await dialog.evaluate((el) => el.matches(":modal"))) === true, "a modal card");
+      assert((await textOf(page, "#board-date-calendar-title")) === "พฤศจิกายน 2569", "opens on the board's month, in Thai with the Buddhist year");
+      assert((await day("2026-11-18").getAttribute("aria-pressed")) === "true", "the board's day is the picked one");
+      assert((await day("2026-11-17").getAttribute("aria-current")) === "date", "today is marked");
+      assert(await day("2026-11-22").isDisabled(), "a Sunday is closed");
+      assert((await page.locator('[data-testid="board-date-current"]').count()) === 0, "no way back needed on the board's own day");
+      // today and the days ahead only (Pong, 15 Nov 2026: "current and future day only"), up to the repair's last day
+      // ("Calendar confine Within time range"): November 2569 to March 2570
+      assert(await day("2026-11-16").isDisabled(), "yesterday is closed");
+      assert(await page.locator('#board-date-calendar [data-nav="prev"]').isDisabled(), "no month before this one");
+      assert(await page.locator('#board-date-calendar [data-nav="next"]').isEnabled(), "December can be shown");
+      await ownerShot(page, "board-date-picker.png");
+      // Escape closes it and the date gets the focus back
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      assert(await page.evaluate(() => document.activeElement?.dataset.testid === "board-date-button"), "the focus goes back to the date");
+      // a tap outside the card closes it too
+      await openPicker();
+      await page.mouse.click(4, 840);
+      await dialog.waitFor({ state: "hidden" });
+      // a tap on the date that closes the account menu only closes the menu
+      await page.click('[data-testid="user-menu"]');
+      await page.locator('[data-testid="account-menu"]').waitFor({ state: "visible" });
+      const dateBox = await page.locator('[data-testid="board-eyebrow"]').boundingBox();
+      await page.mouse.click(dateBox.x + 4, dateBox.y + dateBox.height / 2);
+      await page.locator('[data-testid="account-menu"]').waitFor({ state: "hidden" });
+      await page.waitForTimeout(300);
+      assert(!(await dialog.isVisible()), "the tap that closed the menu did not open the calendar");
+      // the line above the date carries the picker's chevron, so the date keeps its room
+      assert((await page.locator('[data-testid="board-date-chevron"]').count()) === 1, "the chevron by the line above the date");
+
+      // today, after 16:00: Tuesday's HOSxP list again, with its mismatches
+      await openPicker();
+      await day("2026-11-17").click();
+      await page.waitForURL((url) => url.searchParams.get("date") === "2026-11-17");
+      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-17");
+      await dialog.waitFor({ state: "hidden" });
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดวันนี้", "today's eyebrow");
+      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 6 รายการ", `Tuesday's list: ${await textOf(page, "[data-notice-strip]")}`);
+      assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "Tuesday has its upload");
+      await ownerShot(page, "board-picked-day.png");
+      // a room opened on the picked day keeps it, and shows that day's cases
+      await page.goto(`${APP}/?date=2026-11-17&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".case-row");
+      assert((await page.locator(".case-row").count()) === 2, `OR 12 on Tuesday: ${await page.locator(".case-row").count()} rows`);
+      // Escape in the card closes the card only: the room stays open behind it
+      await openPicker();
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      await page.waitForTimeout(300);
+      assert((await page.locator(".case-row").count()) === 2 && new URL(page.url()).searchParams.get("room") === "or-12", "the room stays open");
+      await page.goto(`${APP}/?date=2026-11-17`, { waitUntil: "networkidle" });
+
+      // a day in the repair's second half draws the second half's plan; the calendar ends on the repair's last day
+      assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "Tuesday is in the first half");
+      await openPicker();
+      for (const month of ["ธันวาคม 2569", "มกราคม 2570", "กุมภาพันธ์ 2570", "มีนาคม 2570"]) {
+        await page.click('#board-date-calendar [data-nav="next"]');
+        assert((await textOf(page, "#board-date-calendar-title")) === month, `the next month: ${month}`);
+      }
+      assert(await page.locator('#board-date-calendar [data-nav="next"]').isDisabled(), "no month after the repair");
+      assert(await day("2027-03-17").isEnabled(), "the repair's last day can be picked");
+      assert(await day("2027-03-18").isDisabled(), "the day after the repair cannot");
+      await day("2027-03-01").click();
+      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2027-03-01");
+      assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "2", "the second half's repair zone");
+      assert((await page.getAttribute("#or-1 .fp-floor", "role")) === "button", "OR 1 operates in the second half");
+      assert((await page.getAttribute("#or-12 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 12 is closed in the second half");
+      await ownerShot(page, "board-picked-second-half.png");
+      await page.goto(`${APP}/?date=2026-11-17`, { waitUntil: "networkidle" });
+
+      // a day further ahead: no list yet; the way back to the current board
+      await openPicker();
+      assert((await page.locator('[data-testid="board-date-current"]').count()) === 1, "a way back to the current board");
+      await day("2026-11-20").click();
+      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-20");
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดถัดไป", "a day ahead's eyebrow");
+      assert((await textOf(page, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 20 พ.ย. 2569", "a day ahead has no list yet");
+      await openPicker();
+      await page.click('[data-testid="board-date-current"]');
+      await page.waitForURL((url) => !url.searchParams.has("date"));
+      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-18");
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดถัดไป", "back on the current board");
+
+      // the keyboard: Enter on the date puts the focus on the shown day, the arrows move it, Enter picks
+      await page.focus('[data-testid="board-date-button"]');
+      await page.keyboard.press("Enter");
+      await dialog.waitFor({ state: "visible" });
+      await page.waitForFunction(() => document.activeElement?.dataset.date === "2026-11-18");
+      await page.keyboard.press("ArrowRight");
+      assert(await page.evaluate(() => document.activeElement?.dataset.date === "2026-11-19"), "the right arrow moves a day");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-19");
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดถัดไป", "Thursday by the keyboard");
+
+      // an address with a day the calendar never offers, or the board's own day, shows the board's own day and loses its
+      // date, so the board turns over at the next 16:00 again
+      for (const bad of ["2026-11-16", "2026-11-22", "2027-03-18", "2026-11-31", "tomorrow", "2026-11-18"]) {
+        await page.goto(`${APP}/?date=${bad}&room=or-13`, { waitUntil: "networkidle" });
+        assert((await shownDay()) === "2026-11-18", `?date=${bad} -> ${await shownDay()}`);
+        await page.waitForURL((url) => !url.searchParams.has("date") && url.searchParams.get("room") === "or-13");
+      }
+      // the date keeps its year beside the chevron on a narrow phone, for a nurse and for an admin with two more buttons
+      for (const person of [RP.nurse, RP.admin]) {
+        const c = await contextAs(person);
+        const p = await c.newPage();
+        for (const width of [360, 390, 450, 768, 1280]) {
+          await p.setViewportSize({ width, height: 800 });
+          // a Thursday, the longest day name
+          await p.goto(`${APP}/?date=2026-11-19`, { waitUntil: "networkidle" });
+          const cut = await p.evaluate(() => {
+            const span = document.querySelector('[data-testid="board-date-button"] > span');
+            return span.scrollWidth > span.clientWidth + 0.5;
+          });
+          assert(!cut, `the date is cut short at ${width}px for ${person.name}`);
+          await noSideScroll(p, `the date picker's button at ${width}px`);
+        }
+        await c.close();
+      }
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+      rmSync(NOW_FILE, { force: true });
+    });
+
     await t("no OTP code, deeSMSX token, key, HN or workbook row appears in server logs", async () => {
       assert(issuedCodes.length >= 20, `codes and tokens collected: ${issuedCodes.length}`);
       for (const proc of [app, fileApp].filter(Boolean)) {

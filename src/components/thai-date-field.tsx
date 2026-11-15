@@ -23,7 +23,7 @@ const MONTHS = [
 const MONTHS_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."] as const;
 
 /** Sunday first, as Thai wall calendars are: the short name shown, the full name read out. */
-const WEEKDAYS = [
+export const WEEKDAYS = [
   ["อา", "วันอาทิตย์"],
   ["จ", "วันจันทร์"],
   ["อ", "วันอังคาร"],
@@ -42,7 +42,7 @@ const MAX_WALK = 732;
 const labels = new Map<string, string>();
 
 /** `thaiDate(iso)`, kept once made: building its two Intl formatters for 42 days on every render is slow on cheap phones. */
-function dayLabel(iso: string): string {
+export function dayLabel(iso: string): string {
   let label = labels.get(iso);
   if (label === undefined) {
     label = thaiDate(iso);
@@ -66,12 +66,12 @@ function weekday(iso: string): number {
   return new Date(Date.UTC(y, m - 1, d)).getUTCDay();
 }
 
-function monthOf(iso: string): string {
+export function monthOf(iso: string): string {
   return iso.slice(0, 7);
 }
 
 /** `month` (YYYY-MM) moved by `months`. */
-function shiftMonth(month: string, months: number): string {
+export function shiftMonth(month: string, months: number): string {
   const [y, m] = parts(`${month}-01`);
   return isoOf(y, m - 1 + months, 1).slice(0, 7);
 }
@@ -173,66 +173,68 @@ function Chevron({ to }: { to: "left" | "right" }) {
 }
 
 /**
- * The surgery date as a field that is shown and picked in Thai, whatever language the phone is set to: the native date
- * input follows the phone's language, so an English iPhone showed "16 Nov BE 2569". The field shows the day written
- * out ("วันอังคารที่ 17 พฤศจิกายน 2569") and opens a month calendar with the Buddhist year right under it. The calendar
- * sits in the page, pushing what follows down, rather than floating over it, so the booking dialog's scroll carries it
- * and never clips it. Days outside min..max or that `dayState` disables cannot be picked; a disabled weekday with a
- * note is taken to be a holiday, marked with a dot and named under the grid. The keyboard works as in the ARIA date
- * picker pattern, and Escape closes the calendar without closing the dialog around it. All date math is on YYYY-MM-DD
- * strings as UTC dates, so the phone's time zone never moves a day.
+ * A month calendar in Thai with the Buddhist year (‹ month › and a grid of days from Sunday), on its own: the booking
+ * form's date field opens it under the field, and the board's date picker shows it in a floating card. Days outside
+ * min..max or that `dayState` disables cannot be picked; a disabled weekday with a note is taken to be a holiday, marked
+ * with a dot and named under the grid. The keyboard works as in the ARIA date picker pattern. It opens on the picked
+ * day's month (before a day is picked, on the first day that can be picked); `focusOnOpen` moves the focus to that day,
+ * for a calendar opened by the keyboard, since script focus after a tap still draws the focus ring in Chrome. All date
+ * math is on YYYY-MM-DD strings as UTC dates, so the phone's time zone never moves a day.
  *
  * Each day is a 44px tall button a seventh of the calendar wide. The browser keeps a modal dialog 2em + 6px narrower
  * than the screen, so on a 360px phone the dialog's content is 280px and a day is 38px wide (40px at 375px, 42px at
- * 390px); its circle shrinks with it and stays round. A tap opens the calendar with the focus left on the field, so no
- * focus ring shows; Enter or Space on the field moves the focus to the picked day (or the first one that can be picked).
+ * 390px); its circle shrinks with it and stays round.
  */
-export function ThaiDateField({
+export function ThaiCalendar({
   id,
   value,
-  onChange,
   min,
   max,
   dayState,
-  invalid = false,
-  describedBy,
+  onPick,
+  onEscape,
+  focusOnOpen = false,
+  revealOnOpen = false,
   testId,
+  className = CALENDAR_LOOK,
   today: givenToday,
 }: {
-  /** For the parent's <label htmlFor>, which names the field. */
+  /** The calendar's id; its month title is `${id}-title`. */
   id: string;
-  /** YYYY-MM-DD, or "" before a day is picked. */
+  /** The picked day, YYYY-MM-DD, or "" before one is picked. */
   value: string;
-  onChange: (iso: string) => void;
-  /** The first day that can be picked, YYYY-MM-DD. */
   min: string;
-  /** The last day that can be picked, YYYY-MM-DD. */
   max: string;
-  /** Asked for each day between min and max, e.g. weekends and holidays disabled with the holiday's name as the note. */
   dayState: (iso: string) => DayState;
-  invalid?: boolean;
-  describedBy?: string;
-  /** On the field button (with data-value); the calendar gets `${testId}-calendar`. */
+  onPick: (iso: string) => void;
+  /** Escape inside the calendar, kept from the dialog around it; left to the dialog when not given. */
+  onEscape?: () => void;
+  focusOnOpen?: boolean;
+  /** Scroll the calendar into view once drawn (it opens inside a scrolling form). */
+  revealOnOpen?: boolean;
   testId?: string;
+  className?: string;
   /** Today in Thailand, YYYY-MM-DD, by the server's clock; the phone's own date when left out. */
   today?: string;
 }): JSX.Element {
-  const fieldRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const [open, setOpen] = useState(false);
-  const [month, setMonth] = useState(() => monthOf(value || min));
-  // The day that keeps keyboard focus in the grid (roving tabindex), while it is in the month shown.
-  const [focused, setFocused] = useState<string | null>(null);
-  // What to focus once the calendar has been drawn (a CSS selector inside it), and whether to scroll it into view first.
-  const focusNext = useRef<string | null>(null);
-  const revealNext = useRef(false);
-
-  const panelId = `${id}-calendar`;
-  const titleId = `${id}-calendar-title`;
-  const valueId = `${id}-value`;
-
+  const titleId = `${id}-title`;
   const inRange = (iso: string) => iso >= min && iso <= max;
   const pickable = (iso: string) => inRange(iso) && !dayState(iso).disabled;
+
+  // The picked day's month; before a day is picked, the month of the first day that can be picked.
+  const [start] = useState(() => {
+    const shown = monthOf(value || min);
+    return value && pickable(value)
+      ? value
+      : (walk(`${shown}-01`, 1, `${shown}-31`, min, max, pickable) ?? walk(min, 1, max, min, max, pickable));
+  });
+  const [month, setMonth] = useState(() => (value || !start ? monthOf(value || min) : monthOf(start)));
+  // The day that keeps keyboard focus in the grid (roving tabindex), while it is in the month shown.
+  const [focused, setFocused] = useState<string | null>(start);
+  // What to focus once the calendar has been drawn (a CSS selector inside it), and whether to scroll it into view first.
+  const focusNext = useRef<string | null>(start && focusOnOpen ? `[data-date="${start}"]` : null);
+  const revealNext = useRef(revealOnOpen);
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -245,54 +247,12 @@ export function ThaiDateField({
     if (selector) panel.querySelector<HTMLElement>(selector)?.focus({ preventScroll: reveal });
   });
 
-  // The dialog stays mounted between bookings, so its closing folds the calendar away for the next time it opens.
-  useEffect(() => {
-    const dialog = fieldRef.current?.closest("dialog");
-    if (!dialog) return;
-    // The close event comes a task later: a dialog already opened again keeps the calendar it has.
-    const fold = () => {
-      if (!dialog.open) setOpen(false);
-    };
-    dialog.addEventListener("close", fold);
-    return () => dialog.removeEventListener("close", fold);
-  }, []);
-
-  function close() {
-    setOpen(false);
-    fieldRef.current?.focus();
-  }
-
-  /** `byKey` when Enter or Space clicked the field (a click with no pointer has detail 0). */
-  function toggle(byKey: boolean) {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    // The picked day's month; before a day is picked, the month of the first day that can be picked.
-    const shown = monthOf(value || min);
-    const start =
-      value && pickable(value)
-        ? value
-        : (walk(`${shown}-01`, 1, `${shown}-31`, min, max, pickable) ?? walk(min, 1, max, min, max, pickable));
-    setMonth(value || !start ? shown : monthOf(start));
-    setFocused(start);
-    // Script focus after a tap still draws the focus ring in Chrome, so only the keyboard moves it into the grid.
-    focusNext.current = start && byKey ? `[data-date="${start}"]` : null;
-    revealNext.current = true;
-    setOpen(true);
-  }
-
-  function pick(iso: string) {
-    onChange(iso);
-    close();
-  }
-
   function onPanelKey(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== "Escape") return;
-    // Escape would also close the booking dialog: this one only folds the calendar.
+    if (event.key !== "Escape" || !onEscape) return;
+    // Escape would also close a dialog around the calendar: this one only does what its owner says.
     event.preventDefault();
     event.stopPropagation();
-    close();
+    onEscape();
   }
 
   function onGridKey(event: KeyboardEvent<HTMLDivElement>) {
@@ -323,7 +283,7 @@ export function ThaiDateField({
     }
   }
 
-  const cells = open ? monthGrid(month) : [];
+  const cells = monthGrid(month);
   const states = new Map<string, DayState>();
   // A day outside the range cannot be picked, but keeps its note: a holiday just before the first day that can be
   // booked is still named, which says why the days around it are closed.
@@ -338,12 +298,207 @@ export function ThaiDateField({
   const days = cells.filter((iso): iso is string => iso !== null);
   const tabDay =
     [focused, value].find((iso): iso is string => !!iso && monthOf(iso) === month && canPick(iso)) ?? days.find(canPick) ?? null;
-  const today = open ? (givenToday ?? todayIso()) : "";
+  const today = givenToday ?? todayIso();
   const holidays = days.flatMap((iso) => {
     const note = holidayNote(iso);
     return note ? [{ iso, note }] : [];
   });
   const weeks = Array.from({ length: cells.length / 7 }, (_, week) => cells.slice(week * 7, week * 7 + 7));
+
+  return (
+    <div ref={panelRef} id={id} role="group" aria-label="ปฏิทิน" onKeyDown={onPanelKey} className={className} data-testid={testId}>
+      <div className="flex items-center justify-between gap-1">
+        <button
+          type="button"
+          data-nav="prev"
+          className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
+          aria-label="เดือนก่อนหน้า"
+          disabled={month <= monthOf(min)}
+          onClick={(event) => showMonth(shiftMonth(month, -1), event)}
+        >
+          <Chevron to="left" />
+        </button>
+        <p id={titleId} aria-live="polite" className="text-base font-bold text-ink">
+          {thaiMonthTitle(month)}
+        </p>
+        <button
+          type="button"
+          data-nav="next"
+          className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
+          aria-label="เดือนถัดไป"
+          disabled={month >= monthOf(max)}
+          onClick={(event) => showMonth(shiftMonth(month, 1), event)}
+        >
+          <Chevron to="right" />
+        </button>
+      </div>
+      <div role="grid" aria-labelledby={titleId} onKeyDown={onGridKey} className="mt-1">
+        <div role="row" className="grid grid-cols-7">
+          {WEEKDAYS.map(([short, long], index) => (
+            <span
+              key={short}
+              role="columnheader"
+              aria-label={long}
+              className={`flex h-8 items-center justify-center text-xs font-semibold ${index === 0 || index === 6 ? "text-muted" : "text-ink"}`}
+            >
+              {short}
+            </span>
+          ))}
+        </div>
+        {weeks.map((week, row) => (
+          <div key={row} role="row" className="grid grid-cols-7">
+            {week.map((iso, column) => {
+              if (!iso) return <span key={`blank-${column}`} role="gridcell" />;
+              const enabled = canPick(iso);
+              const selected = iso === value;
+              const note = states.get(iso)?.note;
+              const holiday = holidayNote(iso) !== null;
+              const face = selected
+                ? "bg-brand font-bold text-white"
+                : enabled
+                  ? "font-semibold text-ink group-hover:bg-brand-tint"
+                  : "text-muted/55";
+              return (
+                <span key={iso} role="gridcell">
+                  <button
+                    type="button"
+                    data-date={iso}
+                    tabIndex={iso === tabDay ? 0 : -1}
+                    disabled={!enabled}
+                    aria-label={!enabled && note ? `${dayLabel(iso)}, ${note}` : dayLabel(iso)}
+                    aria-pressed={selected || undefined}
+                    aria-current={iso === today ? "date" : undefined}
+                    onClick={() => onPick(iso)}
+                    // Raised while focused, so the next day's filled circle does not cover its focus ring.
+                    className="group relative flex h-11 w-full cursor-pointer items-center justify-center rounded-xl focus-visible:z-10 disabled:cursor-default"
+                  >
+                    {/* Up to 40px, and never wider than the column: 38px on a 360px phone, still a circle. */}
+                    <span
+                      className={`relative flex aspect-square w-full max-w-10 items-center justify-center rounded-full text-[0.9375rem] tabular-nums motion-safe:transition-colors ${face} ${iso === today && !selected ? "ring-[1.5px] ring-brand ring-inset" : ""}`}
+                    >
+                      {Number(iso.slice(8))}
+                      {holiday ? (
+                        <span aria-hidden="true" className="absolute bottom-1 left-1/2 size-1 -translate-x-1/2 rounded-full bg-[var(--stop)]" />
+                      ) : null}
+                    </span>
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {holidays.length > 0 || monthOf(today) === month ? (
+        <ul className="mt-1.5 space-y-0.5 border-t border-line px-1.5 pt-2 pb-1 text-xs text-muted">
+          {monthOf(today) === month ? (
+            <li className="flex items-center gap-2">
+              <span aria-hidden="true" className="-mx-[3px] size-3 shrink-0 rounded-full ring-[1.5px] ring-brand ring-inset" />
+              วันนี้
+            </li>
+          ) : null}
+          {holidays.map(({ iso, note }) => {
+            const [, m, d] = parts(iso);
+            return (
+              <li key={iso} className="flex items-start gap-2">
+                <span aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--stop)]" />
+                <span className="min-w-0">
+                  <span className="tabular-nums">
+                    {d} {MONTHS_SHORT[m - 1]}
+                  </span>{" "}
+                  {note}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+/** The calendar's own look under a field: a white card with a soft shadow that slides in. */
+const CALENDAR_LOOK =
+  "mt-2 scroll-my-3 rounded-2xl border border-line bg-white p-1.5 shadow-[var(--shadow-md)] min-[420px]:p-2.5 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:-translate-y-1 motion-safe:starting:opacity-0";
+
+/**
+ * The surgery date as a field that is shown and picked in Thai, whatever language the phone is set to: the native date
+ * input follows the phone's language, so an English iPhone showed "16 Nov BE 2569". The field shows the day written
+ * out ("วันอังคารที่ 17 พฤศจิกายน 2569") and opens ThaiCalendar right under it. The calendar sits in the page, pushing
+ * what follows down, rather than floating over it, so the booking dialog's scroll carries it and never clips it.
+ * Escape closes the calendar without closing the dialog around it. A tap opens the calendar with the focus left on the
+ * field, so no focus ring shows; Enter or Space on the field moves the focus to the picked day (or the first one that
+ * can be picked).
+ */
+export function ThaiDateField({
+  id,
+  value,
+  onChange,
+  min,
+  max,
+  dayState,
+  invalid = false,
+  describedBy,
+  testId,
+  today,
+}: {
+  /** For the parent's <label htmlFor>, which names the field. */
+  id: string;
+  /** YYYY-MM-DD, or "" before a day is picked. */
+  value: string;
+  onChange: (iso: string) => void;
+  /** The first day that can be picked, YYYY-MM-DD. */
+  min: string;
+  /** The last day that can be picked, YYYY-MM-DD. */
+  max: string;
+  /** Asked for each day between min and max, e.g. weekends and holidays disabled with the holiday's name as the note. */
+  dayState: (iso: string) => DayState;
+  invalid?: boolean;
+  describedBy?: string;
+  /** On the field button (with data-value); the calendar gets `${testId}-calendar`. */
+  testId?: string;
+  /** Today in Thailand, YYYY-MM-DD, by the server's clock; the phone's own date when left out. */
+  today?: string;
+}): JSX.Element {
+  const fieldRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  // Whether the keyboard opened the calendar, which moves the focus into it.
+  const [byKey, setByKey] = useState(false);
+
+  const panelId = `${id}-calendar`;
+  const valueId = `${id}-value`;
+
+  // The dialog stays mounted between bookings, so its closing folds the calendar away for the next time it opens.
+  useEffect(() => {
+    const dialog = fieldRef.current?.closest("dialog");
+    if (!dialog) return;
+    // The close event comes a task later: a dialog already opened again keeps the calendar it has.
+    const fold = () => {
+      if (!dialog.open) setOpen(false);
+    };
+    dialog.addEventListener("close", fold);
+    return () => dialog.removeEventListener("close", fold);
+  }, []);
+
+  function close() {
+    setOpen(false);
+    fieldRef.current?.focus();
+  }
+
+  /** `key` when Enter or Space clicked the field (a click with no pointer has detail 0). */
+  function toggle(key: boolean) {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setByKey(key);
+    setOpen(true);
+  }
+
+  function pick(iso: string) {
+    onChange(iso);
+    close();
+  }
 
   return (
     <div>
@@ -378,123 +533,19 @@ export function ThaiDateField({
       <input type="hidden" name="date" value={value} />
 
       {open ? (
-        <div
-          ref={panelRef}
+        <ThaiCalendar
           id={panelId}
-          role="group"
-          aria-label="ปฏิทิน"
-          onKeyDown={onPanelKey}
-          className="mt-2 scroll-my-3 rounded-2xl border border-line bg-white p-1.5 shadow-[var(--shadow-md)] min-[420px]:p-2.5 motion-safe:transition-[opacity,translate] motion-safe:duration-150 motion-safe:starting:-translate-y-1 motion-safe:starting:opacity-0"
-          data-testid={testId ? `${testId}-calendar` : undefined}
-        >
-          <div className="flex items-center justify-between gap-1">
-            <button
-              type="button"
-              data-nav="prev"
-              className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
-              aria-label="เดือนก่อนหน้า"
-              disabled={month <= monthOf(min)}
-              onClick={(event) => showMonth(shiftMonth(month, -1), event)}
-            >
-              <Chevron to="left" />
-            </button>
-            <p id={titleId} aria-live="polite" className="text-base font-bold text-ink">
-              {thaiMonthTitle(month)}
-            </p>
-            <button
-              type="button"
-              data-nav="next"
-              className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
-              aria-label="เดือนถัดไป"
-              disabled={month >= monthOf(max)}
-              onClick={(event) => showMonth(shiftMonth(month, 1), event)}
-            >
-              <Chevron to="right" />
-            </button>
-          </div>
-
-          <div role="grid" aria-labelledby={titleId} onKeyDown={onGridKey} className="mt-1">
-            <div role="row" className="grid grid-cols-7">
-              {WEEKDAYS.map(([short, long], index) => (
-                <span
-                  key={short}
-                  role="columnheader"
-                  aria-label={long}
-                  className={`flex h-8 items-center justify-center text-xs font-semibold ${index === 0 || index === 6 ? "text-muted" : "text-ink"}`}
-                >
-                  {short}
-                </span>
-              ))}
-            </div>
-            {weeks.map((week, row) => (
-              <div key={row} role="row" className="grid grid-cols-7">
-                {week.map((iso, column) => {
-                  if (!iso) return <span key={`blank-${column}`} role="gridcell" />;
-                  const enabled = canPick(iso);
-                  const selected = iso === value;
-                  const note = states.get(iso)?.note;
-                  const holiday = holidayNote(iso) !== null;
-                  const face = selected
-                    ? "bg-brand font-bold text-white"
-                    : enabled
-                      ? "font-semibold text-ink group-hover:bg-brand-tint"
-                      : "text-muted/55";
-                  return (
-                    <span key={iso} role="gridcell">
-                      <button
-                        type="button"
-                        data-date={iso}
-                        tabIndex={iso === tabDay ? 0 : -1}
-                        disabled={!enabled}
-                        aria-label={!enabled && note ? `${dayLabel(iso)}, ${note}` : dayLabel(iso)}
-                        aria-pressed={selected || undefined}
-                        aria-current={iso === today ? "date" : undefined}
-                        onClick={() => pick(iso)}
-                        // Raised while focused, so the next day's filled circle does not cover its focus ring.
-                        className="group relative flex h-11 w-full cursor-pointer items-center justify-center rounded-xl focus-visible:z-10 disabled:cursor-default"
-                      >
-                        {/* Up to 40px, and never wider than the column: 38px on a 360px phone, still a circle. */}
-                        <span
-                          className={`relative flex aspect-square w-full max-w-10 items-center justify-center rounded-full text-[0.9375rem] tabular-nums motion-safe:transition-colors ${face} ${iso === today && !selected ? "ring-[1.5px] ring-brand ring-inset" : ""}`}
-                        >
-                          {Number(iso.slice(8))}
-                          {holiday ? (
-                            <span aria-hidden="true" className="absolute bottom-1 left-1/2 size-1 -translate-x-1/2 rounded-full bg-[var(--stop)]" />
-                          ) : null}
-                        </span>
-                      </button>
-                    </span>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-
-          {holidays.length > 0 || monthOf(today) === month ? (
-            <ul className="mt-1.5 space-y-0.5 border-t border-line px-1.5 pt-2 pb-1 text-xs text-muted">
-              {monthOf(today) === month ? (
-                <li className="flex items-center gap-2">
-                  <span aria-hidden="true" className="-mx-[3px] size-3 shrink-0 rounded-full ring-[1.5px] ring-brand ring-inset" />
-                  วันนี้
-                </li>
-              ) : null}
-              {holidays.map(({ iso, note }) => {
-                const [, m, d] = parts(iso);
-                return (
-                  <li key={iso} className="flex items-start gap-2">
-                    <span aria-hidden="true" className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--stop)]" />
-                    <span className="min-w-0">
-                      <span className="tabular-nums">
-                        {d} {MONTHS_SHORT[m - 1]}
-                      </span>{" "}
-                      {note}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-        </div>
+          value={value}
+          min={min}
+          max={max}
+          dayState={dayState}
+          onPick={pick}
+          onEscape={close}
+          focusOnOpen={byKey}
+          revealOnOpen
+          testId={testId ? `${testId}-calendar` : undefined}
+          today={today}
+        />
       ) : null}
     </div>
   );

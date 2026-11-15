@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BoardDatePicker, type DatePick } from "@/components/board-date-picker";
 import { BrandMark } from "@/components/brand-mark";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -25,6 +26,8 @@ const UPLOAD_ICON = (
   </svg>
 );
 
+const HEADING = "text-[0.9375rem] leading-6 font-bold text-ink min-[400px]:text-base sm:text-lg";
+
 /**
  * One bar: the mark, the board's date as the page heading, the upload page for MX and admins, the admin page for
  * admins, and the account menu behind the avatar.
@@ -40,6 +43,7 @@ export function TopBar({
   showAccount = true,
   adminHref = null,
   uploadHref = null,
+  datePick = null,
 }: {
   /** The person's full name (claimed user, else the LINE name). */
   name: string;
@@ -49,7 +53,7 @@ export function TopBar({
   phone?: string;
   /** LINE profile picture; only https *.line-scdn.net is shown, otherwise the name's first letter. */
   image?: string | null;
-  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts). */
+  /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts), or the day picked. */
   date: string;
   /** The line above the date, saying how it stands to today (lib/board-day.ts boardEyebrow). */
   eyebrow?: string;
@@ -59,6 +63,8 @@ export function TopBar({
   adminHref?: string | null;
   /** The HOSxP upload page, shown only to MX and admins. */
   uploadHref?: string | null;
+  /** When given, the date is a button that opens a calendar to show the board of another day (BoardDatePicker). */
+  datePick?: DatePick | null;
 }) {
   const src = avatarSrc(image);
   const initial = initialOf(name);
@@ -67,6 +73,14 @@ export function TopBar({
   const buttons = (adminHref ? 1 : 0) + (uploadHref ? 1 : 0);
   const shortDate = buttons === 2 ? "md:hidden" : buttons === 1 ? "min-[480px]:hidden" : "min-[400px]:hidden";
   const longDate = buttons === 2 ? "hidden md:inline" : buttons === 1 ? "hidden min-[480px]:inline" : "hidden min-[400px]:inline";
+  const when = (
+    <time dateTime={date}>
+      {/* The month is abbreviated on narrow phones so the whole date, year included, fits beside the avatar (and the
+          upload and admin buttons, which take another 56px each). */}
+      <span className={shortDate}>{thaiDate(date, "short")}</span>
+      <span className={longDate}>{thaiDate(date)}</span>
+    </time>
+  );
 
   return (
     <header className="appbar z-30">
@@ -74,18 +88,38 @@ export function TopBar({
         <Link href={pathname} className="flex min-h-11 shrink-0 items-center rounded-xl" aria-label="ORSKH.APP หน้าแรก">
           <BrandMark className="h-10 w-10 rounded-xl transition-[filter] hover:brightness-115" />
         </Link>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs leading-5 font-medium text-muted" data-testid="board-eyebrow">
-            {eyebrow}
+        <div className="relative min-w-0 flex-1">
+          <p className="flex items-center gap-0.5 text-xs leading-5 font-medium text-muted">
+            <span className="truncate" data-testid="board-eyebrow">
+              {eyebrow}
+            </span>
+            {/* The date picker's sign sits on this short line, so it never takes room from the date and its year. */}
+            {datePick ? (
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="shrink-0"
+                data-testid="board-date-chevron"
+              >
+                {/* Lucide "chevron-down" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            ) : null}
           </p>
-          <h1 className="truncate text-[0.9375rem] leading-6 font-bold text-ink min-[400px]:text-base sm:text-lg">
-            <time dateTime={date}>
-              {/* The month is abbreviated on narrow phones so the whole date, year included, fits beside the avatar
-                  (and the upload and admin buttons, which take another 56px each). */}
-              <span className={shortDate}>{thaiDate(date, "short")}</span>
-              <span className={longDate}>{thaiDate(date)}</span>
-            </time>
-          </h1>
+          {datePick ? (
+            <BoardDatePicker date={date} pick={datePick} pathname={pathname} headingClassName={HEADING}>
+              {when}
+            </BoardDatePicker>
+          ) : (
+            <h1 className={`truncate ${HEADING}`}>{when}</h1>
+          )}
         </div>
         {uploadHref ? (
           // Like the admin button: the account menu's link stands in below 390px, and below 450px when the admin

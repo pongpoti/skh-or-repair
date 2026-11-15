@@ -5,7 +5,7 @@ import { addDays, BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases"
 import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
-import { boardEyebrow, loadBoardDay, nextBoardRefresh, type BoardDay } from "@/lib/board-day";
+import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickedDay, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
 import { everyNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
@@ -18,7 +18,7 @@ import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import type { SessionUser } from "@/lib/tokens";
 import { fullName } from "@/lib/user-list";
-import { workbookFor } from "@/lib/workbook-store";
+import { workbookFor, workbookForDay } from "@/lib/workbook-store";
 import { addCase, deleteCase } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -27,15 +27,16 @@ export const dynamic = "force-dynamic";
  * The board's rows for its day: the cycle's latest HOSxP upload matched with the doctors' bookings
  * (lib/board-rows.ts), the add-case form for a doctor, and whether the viewer may upload. The HN is filtered here, on
  * the server: only the doctor who made a booking, MX and admins get it in the page at all. A database problem leaves
- * the rooms empty with a notice and hides the form.
+ * the rooms empty with a notice and hides the form. A day picked on the board (`picked`) shows the latest upload for that
+ * day, whichever cycle made it (today's after 16:00, or none yet for a day further ahead).
  */
-async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriods) {
+async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriods, picked: boolean) {
   try {
     const pool = await db();
     const [doctor, bookings, workbook, viewer] = await Promise.all([
       doctorFor(pool, user),
       listCasesOn(pool, day.boardDate),
-      workbookFor(pool, day.cycleDay, day.boardDate),
+      picked ? workbookForDay(pool, day.boardDate) : workbookFor(pool, day.cycleDay, day.boardDate),
       boardViewer(pool, user),
     ]);
     const built = buildBoardRows({ date: day.boardDate, periods, workbook: workbook?.cases ?? null, bookings, viewer });
@@ -76,7 +77,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
 export default async function BoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ room?: string; notices?: string }>;
+  searchParams: Promise<{ room?: string; notices?: string; date?: string | string[] }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
@@ -91,10 +92,19 @@ export default async function BoardPage({
     // The repair's dates as an admin set them, read on every request so a change shows at once.
     currentRepairPeriods(),
   ]);
-  const { board, adding, canUpload, failed } = await loadBoard(user, day, periods);
+  // The days the date picker offers (today to the repair's last day), with the holidays it closes: the address of a
+  // picked day is checked against them.
+  const range = pickRange(day.today, periods);
+  const { holidays: closed } = await holidaysBetween(range.min, range.max);
+  // Another day picked on the board (?date=YYYY-MM-DD, Pong, 15 Nov 2026), when it is one the picker offers; else the
+  // board's own day. Picking the board's own day is the same as picking none.
+  const picked = pickedDay(params.date, day.today, periods, closed);
+  const view: BoardDay =
+    picked && picked !== day.boardDate ? { ...day, boardDate: picked, relation: relationTo(picked, day.today) } : day;
+  const { board, adding, canUpload, failed } = await loadBoard(user, view, periods, view !== day);
   // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
   // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
-  const testNotices = params.notices === "all" && isAdmin(user.sub) ? everyNotice(day.boardDate) : undefined;
+  const testNotices = params.notices === "all" && isAdmin(user.sub) ? everyNotice(view.boardDate) : undefined;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -102,8 +112,8 @@ export default async function BoardPage({
           render's, so a board brought back by Back keeps counting from when it was first seen. */}
       <BoardRefresh renderId={crypto.randomUUID()} delayMs={nextBoardRefresh(at).getTime() - at.getTime()} />
       <TopBar
-        date={day.boardDate}
-        eyebrow={boardEyebrow(day.relation)}
+        date={view.boardDate}
+        eyebrow={boardEyebrow(view.relation)}
         name={profile.name}
         role={profile.role}
         phone={user.phone ? formatPhone(user.phone) : undefined}
@@ -111,6 +121,7 @@ export default async function BoardPage({
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
         adminHref={isAdmin(user.sub) ? "/admin" : null}
         uploadHref={canUpload ? "/upload" : null}
+        datePick={{ today: day.today, current: day.boardDate, ...range, holidays: closed }}
       />
       <SuiteBoard
         board={board}
