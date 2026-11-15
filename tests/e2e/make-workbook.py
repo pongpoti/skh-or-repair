@@ -4,8 +4,8 @@
 It is the made-up sample export (tests/fixtures/sample-or-export.xlsx) cut to rows 1-17, the rows that make one
 day's file (the sample's own answers: 9 kept, 7 dropped, 1 repeated ID, 2 cut), moved from Thu 5 Nov 2026 to the
 e2e upload's day, Tue 17 Nov 2026. Every date column moves by the same 12 days, so the rules see the same gaps
-between request, booking and operation. The HNs are replaced by other invented ones (71 + the case number), one
-written with leading zeros so the matching's normalisation is exercised. Every name, HN and AN in it is invented.
+between request, booking and operation. The HNs are replaced by other invented ones of 7 digits, as the hospital's
+are (7 + the case number), one written with leading zeros so the matching's normalisation is exercised. Every name, HN and AN in it is invented.
 
 Run with: python3 -I tests/e2e/make-workbook.py (needs openpyxl). The e2e tests read the result; they never run this.
 """
@@ -44,7 +44,7 @@ def main() -> int:
             if isinstance(cell.value, datetime.datetime):
                 cell.value = cell.value + SHIFT
         case_id = int(sheet.cell(row=row, column=id_col).value)
-        hn = f"71{case_id - 900000:06d}"
+        hn = f"7{case_id - 900000:06d}"
         sheet.cell(row=row, column=hn_col).value = f"00{hn}" if case_id in PADDED else hn
 
     book.save(TARGET)

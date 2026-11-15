@@ -147,15 +147,17 @@ test("the whole sample file is refused: it holds several booked days, so nothing
 test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 9 kept, 2 cut, 7 placed by the weekly schedule", () => {
   const result = processed(runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: WEEKLY, bookings: [] }));
   // The answers sheet's placement: GENSX rooms, the ORTHO room, dressing to OR 1, the endoscopy to SCOPE (OR 3), the
-  // ENT room. On Thursdays GENSX holds OR 2 and OR 5 (fewest cases first), ORTHO OR 11 and ENT OR 4.
+  // ENT room. On Thursdays GENSX holds OR 2 and OR 5 (fewest cases first), ORTHO OR 11 and ENT OR 4. One change since
+  // the sheet was made: 900003, "I&D abscess Rt thigh", is a dressing case now that I&D counts (Pong, 15 Nov 2026), so
+  // it goes to OR 1 rather than a GENSX room, and 900015 takes OR 5.
   assert.deepEqual(roomOf(result), {
     "900001": "or-2",
     "900002": "or-11",
-    "900003": "or-5",
+    "900003": "or-1",
     "900010": "or-1",
     "900011": "or-3",
     "900014": "or-4",
-    "900015": "or-2",
+    "900015": "or-5",
   });
   const summary: FlowSummary = result.summary;
   assert.equal(summary.rows, 17);
@@ -187,8 +189,8 @@ test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 9 kept, 2 cut, 
   assert.deepEqual(
     summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
-      ["OR 1", DEPARTMENTS.INFECT.label, 1],
-      ["OR 2", "GENSX", 2],
+      ["OR 1", DEPARTMENTS.INFECT.label, 2],
+      ["OR 2", "GENSX", 1],
       ["OR 3", "SCOPE", 1],
       ["OR 4", "ENT", 1],
       ["OR 5", "GENSX", 1],
@@ -230,7 +232,7 @@ test("the same file during the first half of the repair: the half's rooms, endos
   assert.deepEqual(roomOf(result), {
     "900001": "or-12",
     "900002": "or-13",
-    "900003": "or-12",
+    "900003": "or-10",
     "900010": "or-10",
     "900011": "or-11",
     "900014": "or-11",
@@ -241,9 +243,9 @@ test("the same file during the first half of the repair: the half's rooms, endos
   assert.deepEqual(
     result.summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
-      ["OR 10", DEPARTMENTS.INFECT.label, 1],
+      ["OR 10", DEPARTMENTS.INFECT.label, 2],
       ["OR 11", DEPARTMENTS.MIXED.label, 2],
-      ["OR 12", "GENSX", 3],
+      ["OR 12", "GENSX", 2],
       ["OR 13", "ORTHO", 1],
     ],
   );
@@ -255,7 +257,7 @@ test("the second half of the repair uses OR 1 to 5", () => {
   assert.deepEqual(roomOf(result), {
     "900001": "or-5",
     "900002": "or-2",
-    "900003": "or-5",
+    "900003": "or-1",
     "900010": "or-1",
     "900011": "or-4",
     "900014": "or-4",
@@ -336,6 +338,8 @@ function booking(more: Partial<AddedCase>): AddedCase {
     hn: `7700${nextId}`,
     operation: "",
     shift: "in",
+    dressing: false,
+    scrubDoes: null,
     surgeonId: "7",
     surgeon: "สมชาย ใจดี",
     subtype: "GENSX",
@@ -347,7 +351,8 @@ test("matching: a booking with the case's HN pairs with it; the rest are unbooke
   const bookings = [
     // Bookings hold the HN normalised (lib/hn.ts): this is 900001's patient.
     booking({ hn: "99000001", roomId: "or-5" }),
-    booking({ hn: "55555", roomId: "or-4", surgeon: "สมหญิง ใจงาม", operation: "Tonsillectomy" }),
+    // No department: the booking keeps the room saved with it (the app cannot pick one), here OR 4.
+    booking({ hn: "55555", roomId: "or-4", subtype: null, surgeon: "สมหญิง ใจงาม", operation: "Tonsillectomy" }),
     booking({ hn: "66666", date: "2026-11-06" }),
   ];
   const result = runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: WEEKLY, bookings });
@@ -369,17 +374,33 @@ test("matching: a booking with the case's HN pairs with it; the rest are unbooke
   );
 });
 
+test("the upload's own rooms are the board's: a case a doctor booked goes by the doctor's choice of room", () => {
+  // 900003, "I&D abscess Rt thigh", goes to the dressing room (OR 1) by its name; its doctor booked GENSX's room.
+  const mine = booking({ hn: "99000003", operation: "I&D abscess Rt thigh" });
+  const result = runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: WEEKLY, bookings: [mine] });
+  assert.ok(result.ok);
+  assert.equal(result.cases.find((item) => item.caseId === "900003")?.roomId, "or-5", "GENSX's emptier room that Thursday");
+  const board = buildBoardRows({ date: THURSDAY, periods: WEEKLY, workbook: result.cases, bookings: [mine], viewer: { allHn: true, userId: null } });
+  const counted = Object.fromEntries(result.summary.rooms.map((room) => [room.roomId, room.count]));
+  assert.deepEqual(counted, board.countByRoom);
+  assert.deepEqual(counted, { "or-1": 1, "or-2": 2, "or-3": 1, "or-4": 1, "or-5": 1, "or-11": 1 });
+  // Read again on the upload page with the same bookings: the same; without them, the name places it again.
+  assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, WEEKLY, [mine]), result.summary);
+  const alone = placedSummary(result.summary, result.cases, THURSDAY, WEEKLY);
+  assert.equal(alone.rooms.find((room) => room.roomId === "or-1")?.count, 2);
+});
+
 test("matching: a booking with no operation name and no HN reads as such; no bookings flags every case", () => {
   const cases = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY)).cases;
   const none = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [] });
   assert.deepEqual([none.bookings, none.matched, none.unbooked.length, none.notInHosxp.length], [0, 0, 7, 0]);
-  const old = booking({ hn: null, roomId: "or-3" });
+  const old = booking({ hn: null, roomId: "or-3", subtype: null });
   const result = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [old] });
   assert.deepEqual(result.notInHosxp, [
     { key: `bk-${old.id}`, roomId: "or-3", room: "OR 3", surgeon: "สมชาย ใจดี", hn: null, operation: "จองห้อง (รอข้อมูล HOSxP)" },
   ]);
   // A booking in a room that does not operate that day is not on the board, so it is not listed either.
-  const closed = matchBookings({ date: THURSDAY, periods: FIRST_HALF, cases: [], bookings: [booking({ roomId: "or-2" })] });
+  const closed = matchBookings({ date: THURSDAY, periods: FIRST_HALF, cases: [], bookings: [booking({ roomId: "or-2", subtype: null })] });
   assert.deepEqual(closed.notInHosxp, []);
 });
 

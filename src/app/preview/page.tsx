@@ -1,21 +1,28 @@
 import { notFound } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
-import { SuiteBoard, type BoardView } from "@/components/suite-board";
+import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
+import { BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
 import { TopBar } from "@/components/top-bar";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, type BoardDay } from "@/lib/board-day";
+import { boardNotices } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { addDays, parseDay, todayIso, weekDates } from "@/lib/days";
+import { holidaysBetween } from "@/lib/holidays";
 import { currentRepairPeriods } from "@/lib/repair-store";
+import { previewAddCase, previewMine, previewRemoveCase } from "./actions";
 import { SAMPLE_DOCTOR_ID, sampleCases } from "./sample";
 
 export const dynamic = "force-dynamic";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})$/;
+const CLOCK = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
-/** The board's day for a date given outright: that date is today and the board's day. */
-function fixedDay(date: string): BoardDay {
-  return { today: date, minutes: 9 * 60, cycleDay: addDays(date, -1), boardDate: date, relation: "today" };
+/** The board's day for a date given outright: that date is today and the board's day, at 09:00 or `time`. */
+function fixedDay(date: string, time: string | undefined): BoardDay {
+  const clock = time ? CLOCK.exec(time) : null;
+  const minutes = clock ? Number(clock[1]) * 60 + Number(clock[2]) : 9 * 60;
+  return { today: date, minutes, cycleDay: addDays(date, -1), boardDate: date, relation: "today" };
 }
 
 /**
@@ -29,6 +36,10 @@ function fixedDay(date: string): BoardDay {
  *   with ?upload=0 the bookings alone, as before MX uploads.
  * - ?mx=1 shows the board as MX sees it (every HN, the upload button); otherwise as the sample's doctor, who sees the
  *   HN of their own bookings. ?admin=1 adds the admin button.
+ * - ?failed=1 shows the board as when its cases cannot be read; ?notices=all puts every kind of notice in the strip at
+ *   once, to see the short badges, the sideways scroll and each bubble.
+ * - ?book=1 adds the booking form as the sample doctor of ?dept= (a department code, GENSX unless given) sees it;
+ *   ?time=15:30 with ?date= sets the clock that picks the first day that can be booked. Bookings stay in memory.
  */
 export default async function PreviewPage({
   searchParams,
@@ -43,6 +54,11 @@ export default async function PreviewPage({
     mx?: string;
     sample?: string;
     upload?: string;
+    failed?: string;
+    notices?: string;
+    book?: string;
+    dept?: string;
+    time?: string;
   }>;
 }) {
   if (process.env.NODE_ENV !== "development") notFound();
@@ -53,7 +69,7 @@ export default async function PreviewPage({
     params.date && ISO_DATE.test(params.date) ? params.date : weekday !== null ? weekDates(todayIso())[weekday] : null;
   const at = params.at && ISO_TIME.test(params.at) ? new Date(params.at) : new Date();
   const [day, periods] = await Promise.all([
-    date ? fixedDay(date) : loadBoardDay(at),
+    date ? fixedDay(date, params.time) : loadBoardDay(at),
     // The repair's dates from the database, or the planned ones when there is none.
     currentRepairPeriods(),
   ]);
@@ -70,6 +86,23 @@ export default async function PreviewPage({
   const board: BoardView | null = holiday
     ? null
     : { date: day.boardDate, rows: built.rows, uploaded: built.uploaded, mismatchCount: built.mismatchCount, mismatchByRoom: built.mismatchByRoom };
+
+  let adding: CaseAdding | null = null;
+  if (params.book) {
+    const { holidays } = await holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS));
+    const name = "ตัวอย่าง หนึ่ง";
+    const subtype = params.dept?.trim() || "GENSX";
+    const earliest = earliestBookingDay(day.today, day.minutes, holidays);
+    adding = {
+      doctor: { name, subtype },
+      today: day.today,
+      earliest,
+      holidays,
+      mine: await previewMine(),
+      onAdd: previewAddCase.bind(null, { today: day.today, earliest, periods, subtype, holidays, name }),
+      onRemove: previewRemoveCase,
+    };
+  }
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -91,6 +124,13 @@ export default async function PreviewPage({
         holiday={holiday}
         roomId={params.room ?? null}
         pathname="/preview"
+        casesUnavailable={Boolean(params.failed)}
+        adding={adding}
+        notices={
+          params.notices === "all"
+            ? boardNotices({ closed: true, holiday: holiday ?? "วันปิยมหาราช", failed: true, missingUpload: day.boardDate, mismatches: 3 })
+            : undefined
+        }
       />
     </div>
   );

@@ -412,6 +412,178 @@ body {
     font-variant-numeric: tabular-nums;
   }
 
+  /*
+   * The notice strip above the plan (components/board-notices.tsx): always the same height, so the plan never moves;
+   * one row of badges that scrolls sideways, fading at an end that has more past it.
+   */
+  .notice-strip-wrap {
+    position: relative;
+    flex: none;
+    height: 3.75rem;
+  }
+  .notice-strip {
+    display: flex;
+    height: 100%;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.75rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 0.75rem;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .notice-strip::-webkit-scrollbar { display: none; }
+  .notice-strip[data-fade-start] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 1.5rem);
+    mask-image: linear-gradient(to right, transparent, #000 1.5rem);
+  }
+  .notice-strip[data-fade-end] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
+  }
+  .notice-strip[data-fade-start][data-fade-end] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
+  }
+  @media (min-width: 1024px) {
+    .notice-strip-wrap { height: 3.5rem; }
+    .notice-strip { padding: 0.25rem 0.25rem 0.375rem; scroll-padding-inline: 0.25rem; }
+  }
+  .notice-item {
+    flex: none;
+    scroll-snap-align: start;
+  }
+  /* Alone, a badge may take the strip's whole width and cuts a long message short; the bubble has it all. */
+  .notice-item-alone {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .notice-badge {
+    display: inline-flex;
+    max-width: 100%;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0 0.625rem 0 0.875rem;
+    border-radius: 999px;
+    background: rgb(255 255 255 / 0.78);
+    border: 1px solid var(--glass-edge);
+    box-shadow: 0 1px 2px rgb(41 29 20 / 0.06), 0 4px 12px -4px rgb(41 29 20 / 0.14), var(--highlight);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--ink-2);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .notice-badge > svg { flex: none; }
+  .notice-badge:hover { background: rgb(255 255 255 / 0.95); }
+  .notice-badge[data-tone="warning"] { color: var(--late); }
+  .notice-badge[data-tone="danger"] { color: var(--stop); }
+  .notice-badge[aria-expanded="true"] {
+    background: #fff;
+    border-color: currentColor;
+    box-shadow: 0 0 0 3px rgb(124 96 66 / 0.12), 0 4px 12px -4px rgb(41 29 20 / 0.18);
+  }
+  .notice-badge-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .notice-badge-chevron {
+    display: inline-flex;
+    flex: none;
+    opacity: 0.7;
+    transition: transform 0.18s ease;
+  }
+  .notice-badge[aria-expanded="true"] .notice-badge-chevron { transform: rotate(180deg); }
+
+  /* A notice's message, said as a chat bubble under its badge with a soft shadow; the tail points at the badge. */
+  .notice-bubble {
+    position: absolute;
+    top: calc(100% + 0.25rem);
+    z-index: 8;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.875rem 0.375rem 0.875rem 0.875rem;
+    border-radius: 1.25rem;
+    background: #fff;
+    border: 1px solid rgb(124 96 66 / 0.14);
+    box-shadow:
+      0 28px 56px -18px rgb(41 29 20 / 0.42),
+      0 10px 22px -10px rgb(41 29 20 / 0.24),
+      0 1px 2px rgb(41 29 20 / 0.06);
+    transform-origin: var(--tail) -0.5rem;
+    animation: notice-bubble-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+  }
+  .notice-bubble::before {
+    content: "";
+    position: absolute;
+    top: -0.4375rem;
+    left: calc(var(--tail) - 0.4375rem);
+    width: 0.875rem;
+    height: 0.875rem;
+    background: #fff;
+    border-top: 1px solid rgb(124 96 66 / 0.14);
+    border-left: 1px solid rgb(124 96 66 / 0.14);
+    border-top-left-radius: 0.1875rem;
+    transform: rotate(45deg);
+  }
+  .notice-bubble-icon {
+    display: grid;
+    flex: none;
+    width: 2.25rem;
+    height: 2.25rem;
+    place-items: center;
+    border-radius: 999px;
+    background: var(--brand-tint);
+    color: var(--ink-2);
+  }
+  .notice-bubble[data-tone="warning"] .notice-bubble-icon { background: var(--late-tint); color: var(--late); }
+  .notice-bubble[data-tone="danger"] .notice-bubble-icon { background: rgb(253 236 234); color: var(--stop); }
+  .notice-bubble-close {
+    display: grid;
+    flex: none;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin: -0.625rem 0 -0.625rem -0.25rem;
+    place-items: center;
+    border-radius: 999px;
+    color: var(--ink-3);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .notice-bubble-close:hover { background: var(--surface-2); color: var(--ink); }
+
+  /* The จองห้อง button's glow (Pong, 15 Nov 2026): a warm halo that breathes, and a ring that grows out and fades. */
+  /* It pulses twice when the board opens (under 5 s, WCAG 2.2.2), then keeps a steady halo. */
+  .book-glow {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    box-shadow: 0 8px 24px -6px rgb(41 29 20 / 0.45), 0 0 16px 3px rgb(236 160 50 / 0.45);
+    animation: book-glow 2.4s ease-in-out 2;
+  }
+  .book-glow::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: -1;
+    width: 45%;
+    background: linear-gradient(90deg, transparent, rgb(255 236 200 / 0.38), transparent);
+    pointer-events: none;
+    /* At rest the band waits past the right edge, clipped. */
+    transform: translateX(220%) skewX(-20deg);
+    animation: book-sheen 2.4s ease-in-out 2;
+  }
+
   /* Account menu, opened from the avatar. Solid, since it hangs below the blurred bar. */
   .menu {
     background: var(--surface);
@@ -541,6 +713,59 @@ body {
   .notice-warning { background: rgb(253 236 234 / 0.85); border-color: rgb(192 57 43 / 0.22); color: var(--stop); }
   .notice-info { background: rgb(255 255 255 / 0.7); border-color: var(--line); color: var(--ink-3); }
   .notice-success { background: var(--live-tint); border-color: rgb(21 127 61 / 0.25); color: var(--live); }
+
+  /* An action's result inside its own card: a quiet line of text with a small icon (components/inline-status.tsx). */
+  .inline-status {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.375rem;
+    min-width: 0;
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    animation: inline-status-in 0.18s ease-out;
+  }
+  .inline-status > svg { flex: none; margin-top: 0.1875rem; }
+  .inline-status-success { color: var(--live); }
+  .inline-status-warning { color: var(--stop); }
+}
+
+@keyframes notice-bubble-in {
+  from { opacity: 0; transform: translateY(-0.25rem) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes book-glow {
+  0% {
+    box-shadow:
+      0 8px 24px -6px rgb(41 29 20 / 0.45),
+      0 0 0 0 rgb(236 160 50 / 0.75),
+      0 0 16px 3px rgb(236 160 50 / 0.45);
+  }
+  55% {
+    box-shadow:
+      0 8px 24px -6px rgb(41 29 20 / 0.45),
+      0 0 0 16px rgb(236 160 50 / 0),
+      0 0 34px 10px rgb(236 160 50 / 0.7);
+  }
+  100% {
+    box-shadow:
+      0 8px 24px -6px rgb(41 29 20 / 0.45),
+      0 0 0 0 rgb(236 160 50 / 0),
+      0 0 16px 3px rgb(236 160 50 / 0.45);
+  }
+}
+
+/* A band of light that crosses the button once at the start of each glow, then rests. */
+@keyframes book-sheen {
+  0% { transform: translateX(-120%) skewX(-20deg); }
+  40%,
+  100% { transform: translateX(220%) skewX(-20deg); }
+}
+
+@keyframes inline-status-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: none; }
 }
 
 dialog[open] {
@@ -754,7 +979,22 @@ dialog[open]::backdrop {
   .skeleton,
   dialog[open],
   dialog[open]::backdrop,
-  .waiting::before {
+  .waiting::before,
+  .inline-status,
+  .notice-bubble {
     animation: none;
   }
+  .notice-badge-chevron { transition: none; }
+  /* No movement: the steady halo only. */
+  .book-glow,
+  .book-glow::after {
+    animation: none;
+  }
+}
+
+/* Keyboard focus on the glowing จองห้อง button: a white ring under the focus outline, so the outline stands clear of the
+   amber halo (WCAG 1.4.11). */
+.book-glow:focus-visible {
+  animation: none;
+  box-shadow: 0 0 0 2px #fff, 0 8px 24px -6px rgb(41 29 20 / 0.45);
 }

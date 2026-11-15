@@ -171,7 +171,7 @@ test("the surgeon is split from the title, and น.พ. / พ.ญ. are normalise
 test("flags: dressing, SCOPE, Tha Chalom, SMC, emergency, and the cleaned values", () => {
   const rows = byId(parsed());
   assert.equal(rows.get("900010")?.dressing, true); // Dressing wound Lt leg
-  assert.equal(rows.get("900004")?.dressing, false); // Debridement
+  assert.equal(rows.get("900004")?.dressing, true); // Debridement: a dressing case since Pong's 15 Nov 2026 rule
   // EGD by a general surgeon who is on no list: the row's GENSX stands in for the team.
   assert.equal(rows.get("900011")?.scope, true);
   assert.equal(rows.get("900011")?.team, "GENSX");

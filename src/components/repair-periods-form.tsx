@@ -4,14 +4,23 @@ import { useEffect, useState, useTransition } from "react";
 import type { RepairResult } from "@/app/admin/actions";
 import type { RepairView } from "@/app/admin/data";
 import { Notice } from "@/components/auth-shell";
+import { InlineStatus } from "@/components/inline-status";
+import { ThaiDateField, type DayState } from "@/components/thai-date-field";
 import { checkRepairPeriods, repairOn, REPAIR_LAYOUTS, shortThaiDate, type RepairDates, type RepairPeriods } from "@/lib/repair";
 
 const HALVES = [1, 2] as const;
 const KEYS = { 1: "half1", 2: "half2" } as const;
 
-/** The date input's own range, as lib/repair.ts checks it: a year outside it is a typing slip. */
+/** The calendar's range, as lib/repair.ts checks it. */
 const MIN_DATE = "2000-01-01";
 const MAX_DATE = "2100-12-31";
+/** Any day can start or end a half, weekends and holidays too. */
+const ANY_DAY = (): DayState => ({ disabled: false });
+
+const ENDS = [
+  ["from", "วันเริ่ม"],
+  ["to", "วันสุดท้าย"],
+] as const;
 
 const UNSAVED = "บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
 
@@ -36,10 +45,7 @@ function operatingRooms(half: 1 | 2): string {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * "14 พ.ย. 2569 – 26 ม.ค. 2570 · 74 วัน", so the admin can check the dates in the Buddhist calendar whatever the phone's
- * date picker shows; "" until both are set and in order (the message on saving says what is wrong).
- */
+/** "14 พ.ย. 2569 – 26 ม.ค. 2570 · 74 วัน", the half at a glance; "" until both are set and in order (the message on saving says what is wrong). */
 function rangeText({ from, to }: RepairDates): string {
   if (!ISO_DATE.test(from) || !ISO_DATE.test(to) || from > to) return "";
   const [fy, fm, fd] = from.split("-").map(Number);
@@ -126,11 +132,6 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
             <p className="text-sm text-muted">{changed ? `แก้ไขล่าสุด ${changed.at} โดย ${changed.by}` : "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข"}</p>
           </div>
           {fallback ? <Notice tone="warning">อ่านวันที่จากระบบไม่ได้ ตอนนี้แสดงวันที่ตามแผนเดิม</Notice> : null}
-          {done ? (
-            <Notice tone="success" role="status">
-              {done}
-            </Notice>
-          ) : null}
         </div>
 
         <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2">
@@ -155,51 +156,51 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
                 <p id={`repair-half-${half}-note`} className="text-xs text-muted">
                   {operatingRooms(half)}
                 </p>
-                <div className="mt-3 grid gap-2.5 min-[420px]:grid-cols-2">
-                  <label className="block min-w-0">
-                    <span className="text-sm font-semibold text-ink">
-                      วันเริ่ม<span className="sr-only"> ช่วงที่ {half}</span>
-                    </span>
-                    <input
-                      type="date"
-                      value={dates.from}
-                      min={MIN_DATE}
-                      max={MAX_DATE}
-                      onChange={(event) => change(half, "from", event.target.value)}
-                      className="field field-text mt-1.5"
-                      required
-                      data-testid={`repair-half-${half}-from`}
-                    />
-                  </label>
-                  <label className="block min-w-0">
-                    <span className="text-sm font-semibold text-ink">
-                      วันสุดท้าย<span className="sr-only"> ช่วงที่ {half}</span>
-                    </span>
-                    <input
-                      type="date"
-                      value={dates.to}
-                      min={MIN_DATE}
-                      max={MAX_DATE}
-                      onChange={(event) => change(half, "to", event.target.value)}
-                      className="field field-text mt-1.5"
-                      required
-                      data-testid={`repair-half-${half}-to`}
-                    />
-                  </label>
+                {/* One under the other: the dates are written out in Thai (Pong, 15 Nov 2026), as in the booking form. */}
+                <div className="mt-3 grid gap-2.5">
+                  {ENDS.map(([end, label]) => {
+                    const id = `repair-half-${half}-${end}`;
+                    return (
+                      <div key={end} className="min-w-0">
+                        <label htmlFor={id} className="text-sm font-semibold text-ink">
+                          {label}
+                          <span className="sr-only"> ช่วงที่ {half}</span>
+                        </label>
+                        <ThaiDateField
+                          id={id}
+                          value={dates[end]}
+                          onChange={(iso) => change(half, end, iso)}
+                          min={MIN_DATE}
+                          max={MAX_DATE}
+                          dayState={ANY_DAY}
+                          testId={id}
+                          today={initial.today}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
                 <p className="mt-2 min-h-5 text-xs text-ink-2">{range}</p>
               </div>
             );
           })}
-          {error ? (
-            <Notice tone="warning" role="alert" className="lg:col-span-2">
-              {error}
-            </Notice>
-          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line p-4 sm:p-5">
-          <p className="basis-full text-xs text-muted sm:mr-auto sm:basis-auto">เมื่อบันทึก ตารางผ่าตัดของทุกคนจะเปลี่ยนทันที</p>
+          {/* The save's result takes the hint's place beside บันทึก while it shows, so the row keeps its shape. */}
+          <div className="flex min-h-5 min-w-0 basis-full items-center sm:mr-auto sm:basis-auto">
+            {error ? (
+              <InlineStatus tone="warning" role="alert">
+                {error}
+              </InlineStatus>
+            ) : done ? (
+              <InlineStatus tone="success" role="status">
+                {done}
+              </InlineStatus>
+            ) : (
+              <p className="text-xs text-muted">เมื่อบันทึก ตารางผ่าตัดของทุกคนจะเปลี่ยนทันที</p>
+            )}
+          </div>
           {dirty ? (
             <button type="button" onClick={reset} disabled={pending} className="btn btn-secondary">
               ยกเลิก

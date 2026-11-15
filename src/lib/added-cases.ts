@@ -1,10 +1,12 @@
-import { allocationFor } from "./allocation.ts";
-import { addDays, workdayIndex } from "./days.ts";
+import type { DeptCode } from "./allocation.ts";
+import { addDays, thaiDate, workdayIndex } from "./days.ts";
 import { checkHn } from "./hn.ts";
-import { holidayIn, type Holiday } from "./holidays.ts";
-import type { RepairPeriods } from "./repair.ts";
-import { openRooms, roomUse } from "./rooms.ts";
+import { holidayIn, nextWorkdayIn, type Holiday } from "./holidays.ts";
+import { placeCase, roomsHeldBy, type RoomChoice } from "./placement.ts";
+import { REPAIR_LAYOUTS, repairOn, type RepairPeriods } from "./repair.ts";
+import { getRoom, roomLabel, roomUse } from "./rooms.ts";
 import type { Operation, Shift } from "./schedule.ts";
+import { isSpecialtyCode } from "./specialties.ts";
 import { subtypeLabel } from "./user-labels.ts";
 import type { DayBoard } from "./week.ts";
 
@@ -14,28 +16,66 @@ export { addDays };
  * Cases a doctor adds on the board: during the ventilation repair, bookings of a room for a patient (by HN), matched
  * with the HOSxP workbook's cases (lib/board-rows.ts). Checked the same way in the form and in the server action.
  * Isomorphic: no server-only imports. The database side is lib/cases.ts.
+ *
+ * A booking is an elective case (Pong, 15 Nov 2026): the doctor picks the day, the HN, the operation, and one of two
+ * rooms, their department's room that day (OR X) or the dressing room (ห้องทำแผล); the app works out which room each
+ * of those is. For the dressing room the doctor also says whether the scrub nurse does the dressing for them. The
+ * operation's name never decides a booking's room (Pong: "let surgeon decide which room to use"); it places only the
+ * HOSxP workbook's cases nobody booked (lib/dressing.ts).
  */
 
 /** Longest operation name, in characters (the cases table checks the same). */
 export const MAX_OPERATION = 300;
 /** How far ahead a case can be added, in days from today. */
 export const BOOK_AHEAD_DAYS = 60;
-/** What a booking shows in place of the operation's name until the workbook gives it. */
+/** What a booking shows in place of the operation's name until the workbook gives it (bookings from before it was required). */
 export const NO_OPERATION_LABEL = "จองห้อง (รอข้อมูล HOSxP)";
+/**
+ * From 15:00 MX uploads the next workday's HOSxP list (lib/board-day.ts), so bookings for that day close then and the
+ * earliest day moves on by one workday.
+ */
+export const BOOKING_CUTOFF_MINUTES = 15 * 60;
+
+/** The doctor's choice of room: their department's room that day, or the dressing room (ห้องทำแผล). */
+export type { RoomChoice };
+
+/** What the dressing room is called in the form and on the board. */
+export const DRESSING_ROOM_NAME = "ห้องทำแผล";
+/** Asked when the doctor picks the dressing room (Pong, 15 Nov 2026), with its two answers. */
+export const SCRUB_QUESTION = "scrub ทำให้แทนไหม ?";
+export const SCRUB_YES = "ใช่ ฝากทำ";
+export const SCRUB_NO = "ไม่ แพทย์ทำเอง";
+/** The answer as a tag, on the board's row and in the doctor's own list. */
+export function scrubTag(scrubDoes: boolean): string {
+  return scrubDoes ? "ฝาก scrub ทำ" : "แพทย์ทำเอง";
+}
 
 export type CaseInput = {
   /** The operation's day in Thailand, YYYY-MM-DD. */
   date: string;
+  /** The room the doctor's choice gives that day (bookingRoom), worked out by the app, never sent by the form. */
   roomId: string;
   /** The patient's HN, normalised (lib/hn.ts). Required for a new booking. */
   hn: string;
-  /** The operation's name, or "" when the doctor left it for the workbook to give (stored as NULL). */
+  /** The operation's name. Required for a new booking; "" only on bookings made before it was (stored as NULL). */
   operation: string;
   shift: Shift;
+  /** The doctor picked the dressing room rather than their department's room. */
+  dressing: boolean;
+  /**
+   * For a dressing-room booking, the doctor's answer to SCRUB_QUESTION: true for ใช่ ฝากทำ (the scrub nurse does the
+   * dressing), false for ไม่ แพทย์ทำเอง (the doctor does); null for a department-room booking.
+   */
+  scrubDoes: boolean | null;
 };
 
 /** A case from the cases table, as the board and the form show it. */
-export type AddedCase = Omit<CaseInput, "hn"> & {
+export type AddedCase = Omit<CaseInput, "hn" | "dressing"> & {
+  /**
+   * The doctor picked the dressing room (true) or their department's room (false); null for a booking made before the
+   * form asked, whose saved room says which (bookedRoom).
+   */
+  dressing: boolean | null;
   id: string;
   /** The patient's HN (normalised), or null for a case saved before bookings carried one. */
   hn: string | null;
@@ -47,7 +87,13 @@ export type AddedCase = Omit<CaseInput, "hn"> & {
   subtype: string | null;
 };
 
-export type CheckedCase = { ok: true; value: CaseInput } | { ok: false; error: string };
+/** The form field an error is about, for the form to mark and focus. */
+export type CaseField = "date" | "hn" | "operation" | "room" | "shift";
+
+/** `earliest` is set when the day was refused for being too soon, so the form can move its calendar on. */
+export type CheckedCase =
+  | { ok: true; value: CaseInput }
+  | { ok: false; error: string; field?: CaseField; earliest?: string };
 
 function isIsoDate(v: unknown): v is string {
   if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
@@ -61,73 +107,195 @@ export function cleanOperation(v: string): string {
   return v.normalize("NFC").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim();
 }
 
-/** The first weekday (Monday to Friday) on or after `iso`. Holidays are not known here; the server checks them. */
-export function nextWorkday(iso: string): string {
-  let day = iso;
-  while (workdayIndex(day) === null) day = addDays(day, 1);
-  return day;
+/** The first workday after `iso`, by `holidays`; should they leave none within two weeks, the next weekday. */
+function workdayAfter(iso: string, holidays: readonly Holiday[]): string {
+  const day = nextWorkdayIn(iso, holidays);
+  if (day) return day;
+  let weekday = addDays(iso, 1);
+  while (workdayIndex(weekday) === null) weekday = addDays(weekday, 1);
+  return weekday;
 }
 
 /**
- * The day the booking form opens on: the board's own day (today until 16:00, then the next workday, both by the Bank
- * of Thailand's holidays, lib/board-day.ts), so after 16:00 on the eve of a holiday the form starts past it, as the
- * board does. With no board (the preview of a closed day), the next weekday after today.
+ * The first day a doctor can book, at `minutes` past midnight on `today` in Bangkok (Pong, 15 Nov 2026): before 15:00
+ * the next workday (tomorrow, or past the weekend and any holiday); from 15:00, when MX is uploading that day's HOSxP
+ * list, the workday after it. Monday 14:00 gives Tuesday, Monday 15:30 Wednesday, Friday 15:30 Tuesday.
  */
-export function firstBookingDay(boardDate: string | null, today: string): string {
-  return boardDate ?? nextWorkday(addDays(today, 1));
+export function earliestBookingDay(today: string, minutes: number, holidays: readonly Holiday[] = []): string {
+  const next = workdayAfter(today, holidays);
+  return minutes >= BOOKING_CUTOFF_MINUTES ? workdayAfter(next, holidays) : next;
 }
 
 /**
- * Checks a new booking against today's date in Thailand (YYYY-MM-DD) and the repair `periods` (only a room open on
- * that day can be booked). `holidays` are the Bank of Thailand's and EXTRA_HOLIDAYS when the caller has them (the
- * server action); the form, which has none, checks weekdays only and leaves holidays to the server.
+ * What the form says about the earliest day, and the error for a day before it: "from 15:00" when the cut-off moved it
+ * past the next workday.
  */
-export function checkCase(input: unknown, today: string, periods: RepairPeriods, holidays: readonly Holiday[] = []): CheckedCase {
+export function earliestText(today: string, earliest: string, holidays: readonly Holiday[]): string {
+  const closed = earliest > workdayAfter(today, holidays);
+  return `${closed ? "หลัง 15:00 น. ปิดรับจองวันทำการถัดไป · " : ""}จองได้ตั้งแต่ ${thaiDate(earliest, "short")}`;
+}
+
+/** Why a day cannot be booked in the calendar, or null when it can (the earliest day and the 60 days aside). */
+export function closedDayNote(iso: string, holidays: readonly Holiday[]): string | null {
+  if (workdayIndex(iso) === null) return "วันเสาร์-อาทิตย์";
+  return holidayIn(holidays, iso)?.name ?? null;
+}
+
+/** Why a booking has no room: the keys of NO_ROOM_TEXT. */
+export type NoRoomReason = keyof typeof NO_ROOM_TEXT;
+
+export type BookingRoom = { ok: true; roomId: string; dressing: boolean } | { ok: false; reason: NoRoomReason; error: string };
+
+const NO_ROOM_TEXT = {
+  "obgyn-building": "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้",
+  "no-department": "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ",
+  "no-room": "สาขาของคุณไม่มีห้องผ่าตัดในวันที่เลือก เลือกวันอื่น",
+  "no-dressing-room": "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น",
+} as const;
+
+/** What a room card the doctor cannot pick says under its name, by the reason (the full reason is under the cards). */
+export const NO_ROOM_NOTE: Readonly<Record<NoRoomReason, string>> = {
+  "obgyn-building": "ผ่าตัดที่อาคารแม่",
+  "no-department": "ไม่ทราบสาขา",
+  "no-room": "ไม่มีในวันที่เลือก",
+  "no-dressing-room": "ไม่มีในวันที่เลือก",
+};
+
+const noRoom = (reason: NoRoomReason): BookingRoom => ({ ok: false, reason, error: NO_ROOM_TEXT[reason] });
+
+/**
+ * The department a doctor's bookings go to: their specialty (the codes the admin list gives doctors), or SCOPE, which
+ * the workbook's placement sends to general surgery. Any other subtype (an anaesthetist's, or a room code such as EMER
+ * that is not a department) has no room of its own and goes to the mixed-department room, so an elective booking never
+ * takes the emergency or dressing room by its subtype; no subtype at all cannot be placed.
+ */
+function bookingDept(subtype: string | null | undefined): DeptCode | null {
+  if (typeof subtype !== "string" || !subtype.trim()) return null;
+  return isSpecialtyCode(subtype) || subtype === "SCOPE" ? subtype : "MIXED";
+}
+
+/**
+ * The room a booking goes to on `date` for the doctor's choice. "dept": the doctor's department's room that day, as the
+ * HOSxP workbook's elective cases are placed (lib/placement.ts placeCase, never the dressing room whatever the
+ * operation's name; during the repair a department without a room of its own uses the mixed-department room). "dressing":
+ * the dressing room that day. Obstetrics-gynaecology during the repair is refused either way: it operates in its own
+ * building. lib/board-rows.ts says which room a matched pair shows in.
+ */
+export function bookingRoom(subtype: string | null | undefined, operation: string, date: string, periods: RepairPeriods, choice: RoomChoice): BookingRoom {
+  const dept = bookingDept(subtype);
+  if (dept === "OBGYN" && repairOn(date, periods) !== null) return noRoom("obgyn-building");
+  if (choice === "dressing") {
+    const rooms = roomsHeldBy("INFECT", date, periods);
+    return rooms.length > 0 ? { ok: true, roomId: rooms[0], dressing: true } : noRoom("no-dressing-room");
+  }
+  const placed = placeCase({ procedure: operation, dept, emergency: false, team: dept, choice: "dept" }, date, periods, new Map());
+  if (!placed.ok) return noRoom(placed.reason);
+  return { ok: true, roomId: placed.roomId, dressing: false };
+}
+
+/**
+ * The rooms that are the dressing room under some layout: OR 1 in the weekly schedule (lib/allocation.ts) and the
+ * dressing room of each half of the repair.
+ */
+const DRESSING_ROOMS_ANY: ReadonlySet<string> = new Set([
+  "or-1",
+  ...Object.values(REPAIR_LAYOUTS).flatMap((layout) =>
+    Object.entries(layout.rooms)
+      .filter(([, code]) => code === "INFECT")
+      .map(([roomId]) => roomId),
+  ),
+]);
+
+/**
+ * The doctor's choice for a saved booking. One made before the form asked counts as a dressing-room booking when it was
+ * saved in the dressing room of its day (the doctor picked it from the rooms). An admin may have moved the repair's dates
+ * since, so a saved room that is closed on its day now still counts when it is a dressing room under some layout (OR 10
+ * in the first half, OR 1 otherwise).
+ */
+export function bookedChoice(booking: Pick<AddedCase, "dressing" | "date" | "roomId">, periods: RepairPeriods): RoomChoice {
+  if (typeof booking.dressing === "boolean") return booking.dressing ? "dressing" : "dept";
+  const { date, roomId } = booking;
+  const dressing =
+    roomsHeldBy("INFECT", date, periods).includes(roomId) || (roomUse(roomId, date, periods) !== "open" && DRESSING_ROOMS_ANY.has(roomId));
+  return dressing ? "dressing" : "dept";
+}
+
+/**
+ * Where a saved booking is now. The app works out the room for the doctor's choice, so it is worked out again whenever
+ * it is read, like the workbook's cases: an admin may move the repair's dates, or correct the doctor's department,
+ * after the booking was made. The room saved with the booking counts only when no room can be worked out now (the
+ * doctor's department has none that day).
+ */
+export function bookedRoom(
+  booking: Pick<AddedCase, "subtype" | "operation" | "date" | "roomId" | "dressing">,
+  periods: RepairPeriods,
+): { roomId: string; dressing: boolean } {
+  const choice = bookedChoice(booking, periods);
+  const room = bookingRoom(booking.subtype, booking.operation ?? "", booking.date, periods, choice);
+  return room.ok ? { roomId: room.roomId, dressing: room.dressing } : { roomId: booking.roomId, dressing: choice === "dressing" };
+}
+
+/** What the form says once a booking is saved: "จอง OR 10 ห้องทำแผล วันอังคารที่ 17 พ.ย. 2569 แล้ว". */
+export function bookedMessage(value: Pick<CaseInput, "roomId" | "date" | "dressing">): string {
+  const room = getRoom(value.roomId);
+  return `จอง ${room ? roomLabel(room) : value.roomId}${value.dressing ? ` ${DRESSING_ROOM_NAME}` : ""} ${thaiDate(value.date, "short")} แล้ว`;
+}
+
+/** What checking a booking needs to know besides the form's fields. */
+export type BookingContext = {
+  /** Today in Thailand, YYYY-MM-DD. */
+  today: string;
+  /** The first day that can be booked (earliestBookingDay), by the server's clock: the form gets it from the page. */
+  earliest: string;
+  periods: RepairPeriods;
+  /** The doctor's subtype code (users.subtype), which picks the room. */
+  subtype: string | null;
+  /** The Bank of Thailand's holidays and EXTRA_HOLIDAYS, from today to 60 days ahead. */
+  holidays: readonly Holiday[];
+};
+
+/**
+ * Checks a new booking ({ date, hn, operation, shift, room, scrubDoes }) and works out its room. `room` is the doctor's
+ * choice, "dept" (the default) or "dressing"; a dressing-room booking needs `scrubDoes`, the answer to SCRUB_QUESTION.
+ * The server action and the form run the same checks with the same holidays (the page passes them to the form); the
+ * server's answer is the one that counts.
+ */
+export function checkCase(input: unknown, context: BookingContext): CheckedCase {
+  const { today, earliest, periods, subtype, holidays } = context;
   const raw = (input ?? {}) as Record<string, unknown>;
+  const refuse = (field: CaseField | undefined, error: string, more: { earliest?: string } = {}): CheckedCase => ({ ok: false, error, field, ...more });
   const date = raw.date;
-  if (!isIsoDate(date)) return { ok: false, error: "เลือกวันที่ผ่าตัด" };
-  if (date < today) return { ok: false, error: "เลือกวันนี้หรือวันถัดไป" };
-  if (date > addDays(today, BOOK_AHEAD_DAYS)) return { ok: false, error: `จองล่วงหน้าได้ไม่เกิน ${BOOK_AHEAD_DAYS} วัน` };
-  if (workdayIndex(date) === null) return { ok: false, error: "วันเสาร์และอาทิตย์ไม่มีตารางผ่าตัด" };
+  if (!isIsoDate(date)) return refuse("date", "เลือกวันที่ผ่าตัด");
+  if (date < earliest) return refuse("date", earliestText(today, earliest, holidays), { earliest });
+  if (date > addDays(today, BOOK_AHEAD_DAYS)) return refuse("date", `จองล่วงหน้าได้ไม่เกิน ${BOOK_AHEAD_DAYS} วัน`);
+  if (workdayIndex(date) === null) return refuse("date", "วันเสาร์และอาทิตย์ไม่มีตารางผ่าตัด");
   const holiday = holidayIn(holidays, date);
-  if (holiday) return { ok: false, error: `วันที่เลือกเป็นวันหยุด (${holiday.name}) ไม่มีตารางผ่าตัด` };
-
-  const roomId = raw.roomId;
-  if (typeof roomId !== "string" || !roomId) return { ok: false, error: "เลือกห้องผ่าตัด" };
-  const use = roomUse(roomId, date, periods);
-  if (use === "recovery") return { ok: false, error: "ห้องนี้ใช้เป็นห้องพักฟื้นในวันที่เลือก เลือกห้องอื่น" };
-  if (use === "instrument") return { ok: false, error: "ห้องนี้ใช้เก็บเครื่องมือในวันที่เลือก เลือกห้องอื่น" };
-  if (use !== "open") return { ok: false, error: "ห้องนี้ปิดในวันที่เลือก เลือกห้องอื่น" };
+  if (holiday) return refuse("date", `วันที่เลือกเป็นวันหยุด (${holiday.name}) ไม่มีตารางผ่าตัด`);
 
   const hn = checkHn(raw.hn);
-  if (!hn.ok) return hn;
+  if (!hn.ok) return refuse("hn", hn.error);
 
-  // The operation's name is optional (the workbook names it), but must be text when given.
   if (raw.operation !== undefined && raw.operation !== null && typeof raw.operation !== "string") {
-    return { ok: false, error: "ชื่อการผ่าตัดไม่ถูกต้อง" };
+    return refuse("operation", "ชื่อการผ่าตัดไม่ถูกต้อง");
   }
   const operation = cleanOperation(typeof raw.operation === "string" ? raw.operation : "");
-  if (operation.length > MAX_OPERATION) return { ok: false, error: `ชื่อการผ่าตัดยาวเกิน ${MAX_OPERATION} ตัวอักษร` };
+  if (!operation) return refuse("operation", "ใส่ชื่อการผ่าตัด");
+  if (operation.length > MAX_OPERATION) return refuse("operation", `ชื่อการผ่าตัดยาวเกิน ${MAX_OPERATION} ตัวอักษร`);
 
   const shift = raw.shift ?? "in";
-  if (shift !== "in" && shift !== "out") return { ok: false, error: "เลือกในเวลาหรือนอกเวลา" };
+  if (shift !== "in" && shift !== "out") return refuse("shift", "เลือกในเวลาหรือนอกเวลา");
 
-  return { ok: true, value: { date, roomId, hn: hn.hn, operation, shift } };
-}
-
-/**
- * The open room the doctor's department holds on `date` (morning or afternoon). During the ventilation repair a
- * department with no room of its own gets the first mixed-department room. Null when there is neither.
- */
-export function roomForSubtype(subtype: string | null | undefined, date: string, periods: RepairPeriods): string | null {
-  if (!subtype) return null;
-  let mixed: string | null = null;
-  for (const room of openRooms(date, periods)) {
-    const allocation = allocationFor(room.id, date, periods);
-    if (allocation?.am?.code === subtype || allocation?.pm?.code === subtype) return room.id;
-    if (!mixed && allocation?.am?.code === "MIXED") mixed = room.id;
+  const choice = raw.room ?? "dept";
+  if (choice !== "dept" && choice !== "dressing") return refuse("room", "เลือกห้องผ่าตัด");
+  let scrubDoes: boolean | null = null;
+  if (choice === "dressing") {
+    if (typeof raw.scrubDoes !== "boolean") return refuse("room", `ห้องทำแผล: ตอบก่อนว่า ${SCRUB_QUESTION}`);
+    scrubDoes = raw.scrubDoes;
   }
-  return mixed;
+  const room = bookingRoom(subtype, operation, date, periods, choice);
+  // No room that day: another day may have one.
+  if (!room.ok) return refuse(room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
+  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes } };
 }
 
 /**

@@ -164,12 +164,31 @@ test("a case in the SCOPE room is always a GENSX surgeon's endoscopic case", () 
   assert.notEqual(rooms[3], "or-3");
 });
 
-test("finds dressing cases by the hospital's keyword algorithm", () => {
-  for (const name of ["Dressing wound OD", "change vac dressing", "Change vac d/s", "D / S wound", "ds wound", "DW", "vacc d", "ทำแผล", "ล้างแผลที่ขา", "เปลี่ยนแผล"]) {
+test("finds dressing cases by the rule bookings use: Pong's words, debridement in, grafts out (15 Nov 2026)", () => {
+  for (const name of [
+    "Dressing wound OD",
+    "change vac dressing",
+    "Change vac d/s",
+    "D / S wound",
+    "ds wound",
+    "DW",
+    "vacc d",
+    "ทำแผล",
+    "ล้างแผลที่ขา",
+    "เปลี่ยนแผล",
+    // the hospital's rule left these out; Pong's words take them in
+    "debridement and dressing",
+    "DB",
+    "d.b. wound",
+    "scrub and dressing",
+    "closure with dressing",
+    "excision lesion dw",
+    "amputation d/s",
+  ]) {
     assert.ok(isDressingCase(name), name);
   }
-  // another procedure in the name, or d/s, ds and dw inside a longer word, is not a dressing case
-  for (const name of ["debridement and dressing", "DB", "d.b. wound", "scrub and dressing", "STSG dressing", "suture wound", "closure with dressing", "excision lesion dw", "amputation d/s", "hernia repair", "adsorb", "midwife dwell"]) {
+  // a graft keeps a case out; d/s, ds and dw inside a longer word are not the words
+  for (const name of ["STSG dressing", "Skin graft + dressing", "suture wound", "hernia repair", "adsorb", "midwife dwell"]) {
     assert.equal(isDressingCase(name), false, name);
   }
 });
@@ -178,7 +197,7 @@ test("OR 1 takes dressing cases from any department and nothing else", () => {
   const data = fixture([
     { dept: "ORTHO", proc: "Dressing wound" },
     { dept: "URO", proc: "change vac dressing", emergency: true }, // dressing is checked before emergency
-    { dept: "GENSX", proc: "debridement and dressing" },
+    { dept: "GENSX", proc: "STSG and dressing" }, // a graft is not a dressing case
   ]);
   const rooms = roomsOf(data);
   assert.equal(rooms[0], "or-1");

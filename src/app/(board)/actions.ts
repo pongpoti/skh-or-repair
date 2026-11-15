@@ -1,21 +1,22 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { checkCase, type AddedCase } from "@/lib/added-cases";
+import { addDays, BOOK_AHEAD_DAYS, bookedMessage, checkCase, earliestBookingDay, type AddedCase } from "@/lib/added-cases";
 import { getUser } from "@/lib/auth/server";
 import { addedToday, DAILY_ADD_LIMIT, doctorFor, insertCase, listCasesBy, removeCase } from "@/lib/cases";
-import { today as todayInBangkok } from "@/lib/clock";
+import { bangkokParts, now, today as todayInBangkok } from "@/lib/clock";
 import { db } from "@/lib/db";
-import { thaiDate } from "@/lib/days";
 import { holidaysBetween } from "@/lib/holidays";
 import { getRepairPeriods } from "@/lib/repair-store";
-import { getRoom, roomLabel } from "@/lib/rooms";
 
 /**
  * Every answer carries the doctor's own bookings from today on, so the form's list stays current. They carry the HN:
  * the list goes only to the doctor who made them.
  */
-export type CaseResult = { ok: true; mine: AddedCase[]; message: string } | { ok: false; error: string; mine?: AddedCase[] };
+export type CaseResult =
+  | { ok: true; mine: AddedCase[]; message: string }
+  /** `earliest` is set when the day had become too soon (15:00 passed while the form was open), for the calendar. */
+  | { ok: false; error: string; mine?: AddedCase[]; earliest?: string };
 
 const NOT_DOCTOR: CaseResult = { ok: false, error: "เฉพาะแพทย์ที่ยืนยันชื่อแล้วเท่านั้น ลองออกจากระบบแล้วเข้าใหม่" };
 const FAILED: CaseResult = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
@@ -39,25 +40,25 @@ function logFailure(what: string, error: unknown) {
 }
 
 /**
- * Books a room for one patient (by HN) on a workday. The form checks the same with weekdays only; here the day is also
- * checked against the holidays (EXTRA_HOLIDAYS and the Bank of Thailand's feed). When the feed cannot be read, a
- * weekday that is not in EXTRA_HOLIDAYS is taken, as on the board: only the workbook upload needs the feed to be sure.
+ * Books a room for one patient (by HN) on a workday, in the room of the doctor's choice (lib/added-cases.ts
+ * bookingRoom: their department's room that day, or the dressing room with their answer to the scrub question). The day is checked against the
+ * earliest day by the app's clock (before 15:00 the next workday, from 15:00 the one after) and the holidays
+ * (EXTRA_HOLIDAYS and the Bank of Thailand's feed). When the feed cannot be read, a weekday that is not in
+ * EXTRA_HOLIDAYS is taken, as on the board: only the workbook upload needs the feed to be sure.
  */
 export async function addCase(input: unknown): Promise<CaseResult> {
   try {
     const signed = await signedInDoctor();
     if (!signed) return NOT_DOCTOR;
     const { user, doctor, pool } = signed;
-    // The app's clock (lib/clock.ts), the same one the page gave the form, so the two agree on what today is.
-    const today = todayInBangkok();
-    const periods = await getRepairPeriods(pool);
-    // Again on the server: the HN (stored normalised), a weekday within 60 days, and a room open that day. Everything
-    // but the holidays first, so the Bank of Thailand's feed is asked only for the booked day's year.
-    const first = checkCase(input, today, periods);
-    if (!first.ok) return { ok: false, error: first.error };
-    const { holidays } = await holidaysBetween(first.value.date, first.value.date);
-    const checked = checkCase(first.value, today, periods, holidays);
-    if (!checked.ok) return { ok: false, error: checked.error };
+    // The app's clock (lib/clock.ts), the same one the page gave the form, so the two agree on today and on 15:00.
+    const { date: today, minutes } = bangkokParts(now());
+    const [periods, { holidays }] = await Promise.all([getRepairPeriods(pool), holidaysBetween(today, addDays(today, BOOK_AHEAD_DAYS))]);
+    // Again on the server: the day, the HN (stored normalised), the operation, the room choice and the scrub answer;
+    // the room itself is worked out from the doctor's own department as the database has it (never from the form).
+    const earliest = earliestBookingDay(today, minutes, holidays);
+    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays });
+    if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
     const value = checked.value;
 
     if ((await addedToday(pool, doctor.id)) >= DAILY_ADD_LIMIT) {
@@ -66,12 +67,7 @@ export async function addCase(input: unknown): Promise<CaseResult> {
 
     await insertCase(pool, doctor.id, user.sub, value);
     revalidatePath("/");
-    const room = getRoom(value.roomId);
-    return {
-      ok: true,
-      mine: await listCasesBy(pool, doctor.id, today),
-      message: `จอง ${room ? roomLabel(room) : value.roomId} ${thaiDate(value.date, "short")} แล้ว`,
-    };
+    return { ok: true, mine: await listCasesBy(pool, doctor.id, today), message: bookedMessage(value) };
   } catch (error) {
     logFailure("Booking a room failed", error);
     return FAILED;

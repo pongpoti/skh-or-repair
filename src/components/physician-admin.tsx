@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { AdminResult } from "@/app/admin/actions";
-import { Notice } from "@/components/auth-shell";
+import { InlineStatus } from "@/components/inline-status";
 import { SPECIALTIES, isSpecialtyCode, specialtyOf, type SpecialtyCode } from "@/lib/specialties";
 import { normaliseName, sortSurgeons, type Surgeon } from "@/lib/surgeons";
 
@@ -172,13 +172,19 @@ export function PhysicianAdmin({
     <section className="card overflow-hidden" aria-labelledby="physician-list-title">
       <div className="flex flex-col gap-3 border-b border-line p-4 sm:p-5">
         <div className="flex items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h2 id="physician-list-title" className="text-base font-bold text-ink sm:text-lg">
               รายชื่อแพทย์
             </h2>
             <p className="text-sm text-muted">
               {shown.length === people.length ? `ทั้งหมด ${people.length} คน` : `แสดง ${shown.length} จาก ${people.length} คน`}
             </p>
+            {/* A saved add, edit or delete is said quietly under the count it changed. */}
+            {done ? (
+              <InlineStatus tone="success" role="status" className="mt-1">
+                {done}
+              </InlineStatus>
+            ) : null}
           </div>
           <button type="button" onClick={() => openEditor(null)} className="btn btn-primary shrink-0 px-4">
             <Icon name="plus" />
@@ -211,11 +217,6 @@ export function PhysicianAdmin({
             </select>
           </label>
         </div>
-        {done ? (
-          <Notice tone="success" role="status">
-            {done}
-          </Notice>
-        ) : null}
       </div>
 
       {shown.length === 0 ? (
@@ -301,19 +302,22 @@ export function PhysicianAdmin({
                 </select>
               </div>
             </label>
-            {error ? (
-              <Notice tone="warning" role="alert">
-                {error}
-              </Notice>
-            ) : null}
           </div>
-          <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button type="button" onClick={() => editRef.current?.close()} disabled={pending} className="btn btn-secondary">
-              ยกเลิก
-            </button>
-            <button type="submit" disabled={pending} aria-busy={pending} className="btn btn-primary">
-              {pending ? "กำลังบันทึก…" : editing ? "บันทึก" : "เพิ่ม"}
-            </button>
+          {/* A check that failed or a save the server refused is said just above the buttons that sent it. */}
+          <div className="mt-6">
+            {error ? (
+              <InlineStatus tone="warning" role="alert" className="mb-2">
+                {error}
+              </InlineStatus>
+            ) : null}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button type="button" onClick={() => editRef.current?.close()} disabled={pending} className="btn btn-secondary">
+                ยกเลิก
+              </button>
+              <button type="submit" disabled={pending} aria-busy={pending} className="btn btn-primary">
+                {pending ? "กำลังบันทึก…" : editing ? "บันทึก" : "เพิ่ม"}
+              </button>
+            </div>
           </div>
         </form>
       </dialog>
@@ -335,19 +339,22 @@ export function PhysicianAdmin({
           </div>
         </dl>
         <p className="mt-4 text-sm leading-6 text-muted">ชื่อนี้จะถูกลบออกจากรายชื่อแพทย์ผ่าตัด ถ้าต้องการคืน ให้เพิ่มใหม่อีกครั้ง</p>
-        {removeError ? (
-          <Notice tone="warning" role="alert" className="mt-3">
-            {removeError}
-          </Notice>
-        ) : null}
-        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" autoFocus onClick={() => removeRef.current?.close()} disabled={pending} className="btn btn-secondary">
-            ยกเลิก
-          </button>
-          <button type="button" onClick={remove} disabled={pending} aria-busy={pending} className="btn btn-danger">
-            <Icon name="trash" />
-            {pending ? "กำลังลบ…" : "ลบ"}
-          </button>
+        {/* A delete the server refused is said just above the buttons that sent it. */}
+        <div className="mt-6">
+          {removeError ? (
+            <InlineStatus tone="warning" role="alert" className="mb-2">
+              {removeError}
+            </InlineStatus>
+          ) : null}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" autoFocus onClick={() => removeRef.current?.close()} disabled={pending} className="btn btn-secondary">
+              ยกเลิก
+            </button>
+            <button type="button" onClick={remove} disabled={pending} aria-busy={pending} className="btn btn-danger">
+              <Icon name="trash" />
+              {pending ? "กำลังลบ…" : "ลบ"}
+            </button>
+          </div>
         </div>
       </dialog>
     </section>

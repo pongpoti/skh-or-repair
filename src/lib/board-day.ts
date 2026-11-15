@@ -74,16 +74,17 @@ export function inUploadWindow(at: Date): boolean {
 }
 
 /**
- * The next moment the board changes by itself: 16:00 or midnight in Bangkok, whichever comes first after `at`. The
- * board page sets its refresh timer by it.
+ * The next moment the board changes by itself: 15:00 (bookings for the next workday close, so the booking form's
+ * earliest day moves on), 16:00 (the turnover) or midnight in Bangkok, whichever comes first after `at`. The board page
+ * sets its refresh timer by it.
  */
 export function nextBoardRefresh(at: Date): Date {
   const { date, minutes } = bangkokParts(at);
   const [y, m, d] = date.split("-").map(Number);
   // Bangkok midnight of `date` in UTC is 17:00 the day before.
   const midnight = Date.UTC(y, m - 1, d) - 7 * 60 * 60 * 1000;
-  const next = minutes < TURNOVER_MINUTES ? midnight + TURNOVER_MINUTES * 60_000 : midnight + 24 * 60 * 60_000;
-  return new Date(next);
+  const next = [UPLOAD_OPENS_MINUTES, TURNOVER_MINUTES].find((point) => minutes < point) ?? 24 * 60;
+  return new Date(midnight + next * 60_000);
 }
 
 /** The board's day with its holidays; `holidaysOk` is false when the BOT feed failed and weekdays stood in. */

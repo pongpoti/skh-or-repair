@@ -1,6 +1,7 @@
 import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
+import { addDays, BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
 import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
@@ -9,6 +10,7 @@ import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
 import { db } from "@/lib/db";
+import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
 import type { RepairPeriods } from "@/lib/repair";
 import { currentRepairPeriods } from "@/lib/repair-store";
@@ -43,16 +45,24 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
       mismatchCount: built.mismatchCount,
       mismatchByRoom: built.mismatchByRoom,
     };
-    const adding: CaseAdding | null = doctor
-      ? {
-          doctor: { name: fullName(doctor), subtype: doctor.subtype },
-          today: day.today,
-          // The doctor's own bookings, HN included: theirs to see.
-          mine: await listCasesBy(pool, doctor.id, day.today),
-          onAdd: addCase,
-          onRemove: deleteCase,
-        }
-      : null;
+    let adding: CaseAdding | null = null;
+    if (doctor) {
+      // The holidays over the 60 days a doctor can book, for the calendar: the same list the server action checks.
+      const [mine, { holidays }] = await Promise.all([
+        // The doctor's own bookings, HN included: theirs to see.
+        listCasesBy(pool, doctor.id, day.today),
+        holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS)),
+      ]);
+      adding = {
+        doctor: { name: fullName(doctor), subtype: doctor.subtype },
+        today: day.today,
+        earliest: earliestBookingDay(day.today, day.minutes, holidays),
+        holidays,
+        mine,
+        onAdd: addCase,
+        onRemove: deleteCase,
+      };
+    }
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
     return { board, adding, canUpload: viewer.allHn, failed: false };
   } catch (error) {

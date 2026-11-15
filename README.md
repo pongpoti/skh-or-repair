@@ -4,6 +4,8 @@ Operating-suite board. Staff sign in with LINE and a one-time code sent by SMS, 
 
 The board shows **one day**, dated in Thai with the Buddhist year (Thailand time). The suite's day turns over at **16:00**, not at midnight (`src/lib/board-day.ts`): until 16:00 on a workday the board shows today; from 16:00 it shows the next workday, whose list MX uploaded between 15:00 and 16:00. At the weekend and on a holiday it already shows the next workday. The line above the date says which: "ตารางผ่าตัดวันนี้" (today) or "ตารางผ่าตัดถัดไป" (the incoming list, whether tomorrow or after a weekend). There is no paging between days. A workday is Monday to Friday and not a Thai public or special holiday. Holidays come from the Bank of Thailand's Financial Institutions' Holidays API (public holidays, substitution days and the special holidays the cabinet announces), fetched again every six hours, plus any dates in `EXTRA_HOLIDAYS` (`src/lib/holidays.ts`). If the API cannot be read, the board carries on with weekdays and `EXTRA_HOLIDAYS`; only the upload stops (see HOSxP upload). The page refreshes itself at 16:00 and at midnight, and when the tab comes back after more than 5 minutes in the background. A board brought back with the browser's Back button refreshes at once if its moment passed meanwhile. In development, `/preview` shows the board without signing in (see Local development).
 
+**Notices above the plan.** A strip of one fixed height sits between the app bar and the plan, with or without notices, so the plan never moves (Pong, 15 Nov 2026; `src/components/board-notices.tsx`, texts in `src/lib/board-notices.ts`). Each notice is a badge in one row that scrolls sideways, with a fade at an end that has more past it. Alone, a badge says the whole message; with others, each says its short form (ยังไม่มี HOSxP, ไม่ตรง {n}, …) and its spoken name keeps the whole one. A tap opens the message as a chat bubble under the badge, with a soft shadow and a tail pointing at the badge: the whole message and a line on what it means. A tap outside, the close button, the badge again or Escape (the badge gets the focus back) closes it. The notices are: a closed day (the preview of a holiday), cases that could not be loaded, no HOSxP file yet, and cases that do not match the bookings. The repair has none: the plan's own zone shows it.
+
 ## Case data
 
 A room's case rows come from two places, merged on the server for the board's day (`src/lib/board-rows.ts`):
@@ -41,7 +43,7 @@ The rules for the workbook (`src/lib/workbook.ts`, `src/lib/placement.ts`):
     - dressing cases go to OR 1, emergency cases to OR 8 (obstetrics-gynaecology stays in its own room);
     - anything else goes to a room its department holds that day, spread across them when it holds several;
     - a case whose department holds no room that day is left off the board.
-- Outside the repair, OR 1 is exclusive to dressing cases from any sub-specialty, checked before everything else (even emergency); during the repair the half's dressing room is. A case is a dressing case when its operation name matches the hospital's keyword regex (dressing, d/s, ds and dw as whole words, ทำแผล, ล้างแผล, เปลี่ยนแผล, change vac, vac d) and does not also name debridement/db, scrub, graft, suture, closure, escharotomy, fasciotomy, excision, incision or amputation. The hospital's last step (every item in the operation-items column must be a dressing) is skipped because the export has no such column, so this is the broader definition.
+- Outside the repair, OR 1 is exclusive to dressing cases from any sub-specialty, checked before everything else (even emergency); during the repair the half's dressing room is. A workbook case is a dressing case by its name (`src/lib/dressing.ts`, Pong, 15 Nov 2026): an operation name holding dress, dressing, ds, d/s, dw, d/w, vac, vacuum, debride, debridement, db or scrub, in any case and any combination ("D/S + VAC", "vacdressing"), I&D (I & D, I/D, I+D, I and D, incision and drainage), or ทำแผล, ล้างแผล, เปลี่ยนแผล, unless it names a graft (graft and its typos, STSG, FTSG, SSKG, SSG) that is not being opened ("open graft", "reopen graft", "open STSG", "เปิด graft" count as dressings; "open graft + re-STSG" and "open graft/STSG" do not; "แผลเปิด STSG", an open wound, opens no graft, nor does an "open" that ends a procedure before a plus, comma, colon or bracket, as in "Fasciotomy (open) + STSG"). Thai ปลูก(ถ่าย)ผิวหนัง always keeps a case out, opened or not. Typos in the longer words still count ("dresing", "vaccum", "vacume", "debridment", "scurb": a small edit distance on whole words starting with the same letter); the short words must be exact, so "DJ stent" is not a dressing. Also read as dressing words: dsg and drsg, "D-S", "D. S.", "D.B.", "V.A.C.", "VACD", "Débridement", a count or re- around a word ("VACx2", "revac", "I&Dx2"), a word glued on by a dot ("Rt.VAC") or joined to Thai by a slash ("VAC/ตัดไหม"), and the Thai words typed with เเ for แ, without the tone mark, or with a space. A vacuum used for something else (aspiration, curettage, extraction, delivery, a biopsy) is not a dressing, nor is a DB (double-barrelled) colostomy or the removal of debris, and the D of I&D never joins the next word ("I&D B/L" is no D/B). This replaced the hospital's keyword rule, which also left out debridement, scrub, suture, closure, escharotomy, fasciotomy, excision, incision and amputation. A doctor's booking does not use this rule: the doctor picks the room (Booking below). The sample's answers sheet predates I&D: its 900003, "I&D abscess Rt thigh", now goes to the dressing room rather than a GENSX room.
 - Outside the repair, the SCOPE room (OR 3) is exclusive (during the repair SCOPE cases go to the คละแผนก room): it takes only cases by a GENSX-labelled surgeon whose operation name matches `egd, gastroscop, esophagoscop, ogd, colono, sigmoido, ercp, endoscop, eus` (case-insensitive, whole word for the short ones) and does not match `remove fb, foreign body, fb`. Such cases go nowhere else; other general-surgery cases use the GENSX rooms. The file has one operation-name column, so only that is matched.
 - Cases are listed by their position in the file, with the shift flagged when it is out of hours.
 - Surgeons are matched to the supplied physician list (`src/lib/physicians.ts`). Who may sign in is a separate list, the `users` table (see Sign-in).
@@ -75,14 +77,15 @@ A booking already saved for a room that does not operate on its day is marked in
 
 ### Room bookings by doctors (with HN)
 
-A signed-in doctor (a current claim on an active `users` row of type `DR`) sees a **จองห้อง** button at the corner of the plan. The form (จองห้องผ่าตัด) asks for:
-- **the day:** today up to 60 days ahead, Monday to Friday, not a holiday. The form opens on the board's day (from 16:00 the next workday, past any holiday);
-- **an open room:** only rooms operating on that day under the repair's dates, each shown with its department; the doctor's own department's room is picked first;
-- **the patient's HN** (required): 1 to 15 letters, digits or dashes. It is saved in its matching form (spaces and dashes removed, upper case, no leading zeros), and the form says so under the box when that differs from what was typed;
-- **the operation name** (optional, up to 300 characters): HOSxP's file gives it later;
+A signed-in doctor (a current claim on an active `users` row of type `DR`) sees a **จองห้อง** button centred under the plan, with a warm glow that breathes, a ring that grows out and a band of light that crosses it every 2.4 seconds, to draw the eye (Pong, 15 Nov 2026; with reduced motion the glow stays still). The plan stops above it, so it never covers a room. The form (จองห้องผ่าตัด, rebuilt 15 Nov 2026 at Pong's request) shows the doctor's name and, on the line under it, their department, then asks for:
+- **the day**, written out and picked in Thai (a calendar with Thai months and the Buddhist year, whatever language the phone is in; `src/components/thai-date-field.tsx`). Only days that can be booked are offered: from the next workday until 15:00, and from 15:00, when MX starts uploading that day's HOSxP list, from the workday after it (Monday 14:00 gives Tuesday, Monday 15:30 Wednesday, Friday 15:30 Tuesday), up to 60 days ahead, Monday to Friday, never a holiday (the calendar names it). The board refreshes itself at 15:00 so the form's first day moves on; if 15:00 passes while the form is open, the server refuses the day and the calendar moves on with a message;
+- **the patient's HN** (required): exactly 7 digits, typed into a row of seven boxes on a card of its own, like a one-time code (`src/components/hn-field.tsx`). It is one real input, so paste, backspace and screen readers work as usual; a pasted longer number is turned away with a line under the boxes, never cut short, while a whole 7-digit HN pasted or put in at once replaces the one in the boxes. The HN is saved in its matching form (no leading zeros) and shown with its 7 digits again;
+- **the operation name** (required, up to 300 characters);
 - **ในเวลา or นอกเวลา.**
 
-The surgeon is always the doctor who books. Under the form the doctor sees their own bookings from today on, with their HN, and can cancel them (only their own; ยกเลิกจอง, then ยืนยันยกเลิก). Nurses, assistants and `ALLOWED_PHONES` numbers see no button. The server actions (`src/app/(board)/actions.ts`) check the doctor again on every call, check the day and room against the repair's dates and the holidays, and never log an HN. A doctor can book at most 60 rooms in 24 hours.
+**The doctor picks one of two rooms** (Pong, 15 Nov 2026: "let surgeon decide which room to use: dept room or dressing room"; dressing cases are rarely booked, so the operation's name never decides or limits a booking's room). The form offers **OR X**, their department's room that day, picked to start with, and **ห้องทำแผล**, the dressing room that day, each named with its room number (`bookingRoom` in `src/lib/added-cases.ts`). OR X follows the HOSxP workbook's rules for elective cases (see placement above) but never the dressing room: the doctor's department's room that day, the mixed-department room for a department without its own during the repair (and for a doctor whose subtype is not one of the specialties, such as an anaesthetist, or is a room code such as EMER). Obstetrics-gynaecology is refused during the repair either way (it operates in its own building). A room the day does not have is greyed out with the reason. Picking ห้องทำแผล opens a second dialog over the form, **"scrub ทำให้แทนไหม ?"**, with **ใช่ ฝากทำ** (the scrub nurse does the dressing) and **ไม่ แพทย์ทำเอง** (the doctor does); closing it without an answer (ย้อนกลับ, Escape, the phone's back gesture) puts the choice back on OR X, and เปลี่ยนคำตอบ asks again. The choice and the answer are saved with the booking (`cases.dressing`, `cases.scrub_does`; the table refuses an answer without the dressing room and the dressing room without an answer) and the answer shows as a tag, ฝาก scrub ทำ or แพทย์ทำเอง, on the board's row and in การจองของฉัน. The server checks the choice (only OR X or ห้องทำแผล, and ห้องทำแผล only with an answer) and works out the room itself, from the department in `users`, never from a room the form sends. Because the app works the room out, it does so again whenever the board is read, like the workbook's cases: if an admin moves the repair's dates, or corrects a doctor's department, the booking moves with its choice (the room saved with it counts only when no room can be worked out now). A booking saved before the form asked counts as a dressing-room booking when it was saved in its day's dressing room.
+
+The surgeon is always the doctor who books. Under the form the doctor sees their own bookings from today on, with their HN, and can cancel them (only their own; ยกเลิกจอง, then ยืนยันยกเลิก). Nurses, assistants and `ALLOWED_PHONES` numbers see no button. The server actions (`src/app/(board)/actions.ts`) check the doctor again on every call, check the day against the 15:00 cut-off, the repair's dates and the holidays, arrange the room, and never log an HN. A doctor can book at most 60 rooms in 24 hours.
 
 Bookings are stored in the `cases` table (`db/schema.sql`, created on first use like the sign-in tables) with the HN and no other patient field. Bookings made before the HN was asked for have none. A cancelled booking keeps its row with `removed_at` set. If the table cannot be read, the board shows a notice ("โหลดเคสไม่สำเร็จ ลองรีเฟรช") and the button is hidden.
 
@@ -109,7 +112,7 @@ The page shows:
 - when it was made and by whom;
 - rows read, kept and placed;
 - the rows left out, by reason;
-- the cases per room, and the cases not placed, with why;
+- the cases per room, and the cases not placed, with why (a case a doctor booked counted in the room the doctor chose, as on the board);
 - how it matches the doctors' bookings: matched; HOSxP cases nobody booked; bookings HOSxP does not list. Each case has its room, surgeon, HN and operation, since only MX and admins see this page.
 
 The rooms and the matching are worked out again on every visit, as the board does, so a booking made after the upload counts, and so does a change of the repair's dates. MX may upload again before 16:00; the latest upload of the day wins.
@@ -118,7 +121,7 @@ The rooms and the matching are worked out again on every visit, as the board doe
 
 An upload belongs to the day it was made (its cycle) and is for the next workday after it. The board shows only **the latest upload made on its cycle day for its own date**. A cycle day is today from 16:00, yesterday before then. So at 16:00 every day the board clears the day's rows and shows the next workday with the upload MX made between 15:00 and 16:00. An admin's upload after 16:00 shows at once.
 
-If MX has not uploaded, every user sees "ยังไม่มีตาราง HOSxP ของ {date}" above the plan, in the repair or not: the board's rows come only from the uploads, so an empty room must not look like a day with no cases. The rooms still open and show the doctors' bookings, with no flags since there is nothing to compare with.
+If MX has not uploaded, every user sees "ยังไม่มีตาราง HOSxP ของ {date}" in the notice strip above the plan, in the repair or not: the board's rows come only from the uploads, so an empty room must not look like a day with no cases. The rooms still open and show the doctors' bookings, with no flags since there is nothing to compare with.
 
 ### Case rows: source and matching
 
@@ -127,13 +130,13 @@ Each row in a room's list carries a small chip, an icon and a word, saying where
 - **จอง** (a calendar with a check): a doctor's booking.
 - **ตรงกัน** (a handshake): a workbook case that matches a booking by HN on the same day.
 
-**Matching.** Matching is one to one by the HN's matching form. Workbook cases are taken in file order, and each takes the earliest booking with its HN that is still free.
-- A matched pair shows once, in the booking's room (the surgeon reserved it), with HOSxP's operation name and status.
+**Matching.** Matching is one to one by the HN's matching form. Workbook cases are taken in file order, and each takes the earliest booking with its HN that is still free. When a patient has several bookings that day, the one whose room fits the case's name goes first: a ห้องทำแผล booking to the case HOSxP names a dressing, an OR X booking to the others.
+- A matched pair shows once, with HOSxP's operation name and status, in the room the workbook's placement gives the HOSxP case: MX's list is the day's schedule, and it spreads a department's cases over its rooms, which a booking alone cannot. The doctor's choice of room takes the place of HOSxP's name, though: a case booked in the dressing room is placed there, and a case booked in the department's room is placed as if its name were no dressing, so it stays out of the dressing room even when HOSxP's name reads like one, and a Stat or Emergency case still goes to the emergency room. HOSxP cases nobody booked are placed by their name.
 - A HOSxP case nobody booked shows in the room placement gave it, with the badge **ไม่มีการจอง** (amber).
 - A booking HOSxP does not list shows in its room with **ไม่พบใน HOSxP** (red), but only once the day has an upload.
-- A booking with no operation name reads "จองห้อง (รอข้อมูล HOSxP)".
+- A booking with no operation name (made before the name was required) reads "จองห้อง (รอข้อมูล HOSxP)".
 
-**Mismatches are shown to all users:** "ไม่ตรงกับการจอง {n} รายการ" above the plan, and an amber triangle with "!" in the corner of each room that has one. The room's spoken name gains "ข้อมูลไม่ตรงกับการจอง".
+**Mismatches are shown to all users:** "ไม่ตรงกับการจอง {n} รายการ" in the notice strip above the plan, and an amber triangle with "!" in the corner of each room that has one. The room's spoken name gains "ข้อมูลไม่ตรงกับการจอง".
 
 **HN is shown only to:**
 - the doctor who made the booking (their own bookings);
@@ -144,7 +147,7 @@ For anyone else the server leaves the HN out of the page's data altogether, not 
 
 ## Design
 
-The look follows the SAKHONMSO P4P dashboard: shadcn/ui's design language with a deep brown primary and a tan accent, frosted-glass panels over a warm gradient, and an OR surgeon in scrub cap, surgical mask and scrubs on a brown tile as the mark (`BrandMark`, the same drawing as `src/app/icon.svg`, `apple-icon.png` and `favicon.ico`). Text is Inter for Latin and Noto Sans Thai Looped for Thai (looped letters keep their heads and read better on a phone), with extra line height for Thai. The layout is kept short: one app bar holds the mark, today's date and the account menu (a popover behind the avatar, with a plain sign-out button where popovers are unsupported), and the floor plan takes the rest. On a desktop the plan fills the full height beside the room's case column, which widens with the screen (26rem, 30rem from 1280px, 34rem from 1536px), and the layout spreads to 120rem. Tokens (colour, surfaces, status, shadows) live at the top of `src/app/globals.css`; shared pieces are `.btn` (`-primary`, `-secondary`, `-ghost`), `.field`, `.card`, `.pill`, `.badge`, `.chip` and `.notice`, plus `AuthShell` and `BrandMark` in `src/components`. The app is built to be usable by everyone:
+The look follows the SAKHONMSO P4P dashboard: shadcn/ui's design language with a deep brown primary and a tan accent, frosted-glass panels over a warm gradient, and an OR surgeon in scrub cap, surgical mask and scrubs on a brown tile as the mark (`BrandMark`, the same drawing as `src/app/icon.svg`, `apple-icon.png` and `favicon.ico`). Text is Inter for Latin and Noto Sans Thai Looped for Thai (looped letters keep their heads and read better on a phone), with extra line height for Thai. The layout is kept short: one app bar holds the mark, today's date and the account menu (a popover behind the avatar, with a plain sign-out button where popovers are unsupported), and the floor plan takes the rest. On a desktop the plan fills the full height beside the room's case column, which widens with the screen (26rem, 30rem from 1280px, 34rem from 1536px), and the layout spreads to 120rem. Tokens (colour, surfaces, status, shadows) live at the top of `src/app/globals.css`; shared pieces are `.btn` (`-primary`, `-secondary`, `-ghost`), `.field`, `.card`, `.pill`, `.badge`, `.chip` and `.notice`, plus `AuthShell` and `BrandMark` in `src/components`. The result of an action (a save, an add, a removal, an upload, a booking) is said quietly inside the card or dialog that ran it, beside its button or under the count it changed: one line of green or red text with a tick or a warning sign, no box (`InlineStatus`, Pong, 15 Nov 2026). The tinted `.notice` box is kept for states that block a whole card, such as a list that cannot be read. The app is built to be usable by everyone:
 
 - Text and status pairs meet WCAG AA (4.5:1); department labels are checked by a test.
 - One blue focus ring on every control, and keyboard focus on a room outlines its wall.
@@ -437,7 +440,7 @@ The ids are the same LINE user ids Auth.js used, so a list set before the switch
 The page (จัดการระบบ) holds three sections:
 
 - **ช่วงปิดซ่อมห้องผ่าตัด**, the repair's dates:
-  - Four date inputs, a start and a last day for each half. Each half shows its operating rooms, the range in Thai dates with its number of days, and "กำลังปิดซ่อม" on the half that includes today.
+  - Four dates, a start and a last day for each half, written out and picked in Thai with the same calendar as the booking form (any day, weekends and holidays too). Each half shows its operating rooms, the range in Thai dates with its number of days, and "กำลังปิดซ่อม" on the half that includes today.
   - The dates are checked in the page and again on the server, with the same Thai messages (see the repair layout).
   - A save changes the board for everyone at once. The section says who saved last and when ("แก้ไขล่าสุด … โดย …"), or that the planned dates are in use.
 - **ผู้จัดการตาราง (MX)**, the users who may upload the HOSxP file:
@@ -485,6 +488,9 @@ Set that cookie for `http://localhost:3000` in the browser. The number must be i
 | `?sample=1` | made-up HOSxP cases and bookings, to see the source chips, flags and room marks; add `&upload=0` for the bookings alone, as before MX uploads |
 | `?mx=1` | the board as MX sees it (every HN, the upload button); without it, as the sample's doctor, who sees the HN of their own bookings |
 | `?admin=1` | the admin button |
+| `?failed=1` | the board as when its cases cannot be read |
+| `?notices=all` | every kind of notice in the strip at once, to see the short badges, the sideways scroll and each bubble |
+| `?book=1` | the booking form, as the sample doctor of `&dept=` (a department code, GENSX unless given) sees it; with `?date=`, `&time=15:30` sets the clock for the first day that can be booked. Bookings stay in the server's memory |
 
 The upload page needs a signed-in MX user or admin. To try it locally, run `node tests/mock-line.mjs &` (it also serves the holidays stub; give the app `BOT_API_TOKEN=mock-bot-token` and `BOT_HOLIDAYS_URL=http://127.0.0.1:4010/financial-institutions-holidays/`), then set the clock inside the window with `APP_FAKE_NOW_FILE`. `tests/fixtures/e2e-or-export.xlsx` is a made-up file for Tue 17 Nov 2026 (made by `python3 -I tests/e2e/make-workbook.py` from `tests/fixtures/sample-or-export.xlsx`, needs openpyxl).
 
@@ -505,7 +511,8 @@ npm run test:e2e    # mock LINE + mock deeSMSX + next build/start + Playwright (
 - the `.xlsx` reader (zip bombs, encrypted and `.xls` files);
 - the workbook rules against the made-up sample and its answers;
 - placement;
-- HN rules;
+- HN rules (7 digits) and the dressing words, typos included;
+- the booking rules: the earliest day by the 15:00 cut-off, the arranged room, the required operation;
 - the merge of uploads and bookings, with the HN filtered by viewer;
 - the upload's storage and its 30-day clean-up;
 - the MX role.
@@ -515,10 +522,10 @@ npm run test:e2e    # mock LINE + mock deeSMSX + next build/start + Playwright (
 The repair-phase tests move the app's clock through `APP_FAKE_NOW_FILE` and read the holidays from the stub in `tests/mock-line.mjs`, through `BOT_HOLIDAYS_URL`; a holiday there, Mon 7 Dec 2026, is stepped over. They cover:
 - the board's day across the 16:00 turnover, a weekend and that holiday, and the no-upload alert after the repair;
 - the board refreshing itself: at 16:00 with no reload, after more than 5 minutes hidden, and at once when Back brings it back after its moment;
-- an admin saving the repair's dates on `/admin`, with the board following at once;
+- an admin saving the repair's dates on `/admin`, picked in the Thai calendar, with the board following at once;
 - an admin granting and taking back MX;
-- doctors booking rooms with an HN, and the form opening on the board's day after 16:00, past a holiday;
-- the no-upload alert, with the bookings still in their rooms;
+- doctors booking with an HN: the จองห้อง button centred, glowing and clear of the plan; the department on its own line; the Thai calendar (weekends, today and holidays closed, Escape closing only the calendar); the 7-digit HN boxes (missing, short and pasted-too-long numbers); the operation required; OR X picked to start with and named with the department's room; ห้องทำแผล opening the scrub question over the form (Escape and ย้อนกลับ putting the choice back on OR X, an answer kept and changeable, the answer saved and shown in the doctor's list and on the board); the 15:00 cut-off, also when it passes with the form open; and the first day past a holiday;
+- the no-upload alert, with the bookings still in their rooms; the notice strip's fixed height, and the badge's chat bubble opening and closing by a tap outside, its close button and Escape;
 - MX's upload: closed before 15:00; an `.xls` refused both by name and by content; a file of other days refused; refused by the server at 16:00; accepted inside the window, with its summary and matching. The file is `tests/fixtures/e2e-or-export.xlsx`;
 - the board from 16:00, with HOSxP, จอง and ตรงกัน rows, flags, room marks and the mismatch alert;
 - the HN appearing in each viewer's page only as allowed;

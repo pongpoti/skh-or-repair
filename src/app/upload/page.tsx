@@ -47,7 +47,7 @@ async function latestOf(pool: Pool, upload: Upload, periods: RepairPeriods): Pro
   try {
     const [cases, bookings] = await Promise.all([casesOf(pool, upload.id), listCasesOn(pool, upload.targetDate)]);
     return {
-      summary: stored ? placedSummary(stored, cases, upload.targetDate, periods) : null,
+      summary: stored ? placedSummary(stored, cases, upload.targetDate, periods, bookings) : null,
       matching: matchBookings({ date: upload.targetDate, periods, cases, bookings }),
     };
   } catch (error) {

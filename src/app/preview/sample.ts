@@ -1,5 +1,6 @@
 import type { AddedCase } from "@/lib/added-cases";
 import { allocationFor } from "@/lib/allocation";
+import { roomsHeldBy } from "@/lib/placement";
 import type { WorkbookCase } from "@/lib/board-rows";
 import type { RepairPeriods } from "@/lib/repair";
 import { openRooms } from "@/lib/rooms";
@@ -14,7 +15,8 @@ export const SAMPLE_DOCTOR_ID = "9001";
  * open rooms, whatever the layout; the workbook cases take their departments from those rooms and are placed by the
  * board's rules (lib/placement.ts), so the one nobody booked, a dressing, goes to the day's dressing room. One workbook
  * HN keeps a leading zero, as HOSxP may write it, to show it still matches the booking (bookings store the HN
- * normalised, lib/hn.ts).
+ * normalised, lib/hn.ts). Two bookings are in the dressing room by the doctor's choice, one for each answer to the
+ * scrub question, so both tags show.
  */
 export function sampleCases(date: string, periods: RepairPeriods): { workbook: WorkbookCase[]; bookings: AddedCase[] } {
   const rooms = openRooms(date, periods).map((room) => room.id);
@@ -28,10 +30,12 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
     return { caseId: `9000${position}`, hn, operation, surgeon, dept: dept(roomId), team: null, urgency: "Elective", shift, status, position };
   };
   let id = 0;
-  const booking = (roomId: string, hn: string, operation: string, surgeonId: string, surgeon: string): AddedCase => {
+  const booking = (roomId: string, hn: string, operation: string, surgeonId: string, surgeon: string, scrubDoes: boolean | null = null): AddedCase => {
     id += 1;
-    return { id: String(id), date, roomId, hn, operation, shift: "in", surgeonId, surgeon, subtype: "GENSX" };
+    const dressing = scrubDoes !== null;
+    return { id: String(id), date, roomId, hn, operation, shift: "in", dressing, scrubDoes, surgeonId, surgeon, subtype: "GENSX" };
   };
+  const dressingRoom = roomsHeldBy("INFECT", date, periods)[0] ?? room(0);
 
   const workbook = [
     hosxp(room(0), "0100001", "Excision of lipoma, back", "นพ. ตัวอย่าง หนึ่ง", "in-progress"),
@@ -45,6 +49,8 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
     booking(room(1), "100004", "ORIF radius", "9002", "ตัวอย่าง สาม"),
     booking(room(2), "100005", "Cholecystectomy", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง"),
     booking(room(2), "100006", "Herniorrhaphy, right", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง"),
+    booking(dressingRoom, "100007", "I&D abscess, right thigh", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง", true),
+    booking(dressingRoom, "100008", "Wound dressing, sacrum", "9002", "ตัวอย่าง สาม", false),
   ];
   return { workbook, bookings };
 }
