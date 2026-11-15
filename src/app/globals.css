@@ -64,10 +64,15 @@
   --fp-muted: var(--ink-3);
   --fp-active: #157f3d;
   --fp-delayed: #d98c00;
-  --fp-closed: #ebe6df;
-  --fp-closed-line: #e0d9cf;
-  /* The repair's closed zone: dark taupe stripes inside a dashed amber-brown edge. */
-  --fp-zone: #483c32;
+  /* Closed rooms during the repair: muted taupe stripes, wall, badge and text, as on the repair plan images. */
+  --fp-closed: #b4a594;
+  --fp-closed-line: #aa9a88;
+  --fp-closed-wall: #7d6b59;
+  --fp-closed-badge: #c8bbac;
+  --fp-closed-ink: #3e3128;
+  /* The repair's closed zone: dark taupe stripes inside a dashed amber-brown edge, as on the repair plan images. */
+  --fp-zone: #9c8a76;
+  --fp-zone-line: #86735f;
   --fp-zone-edge: #7a4700;
 
   --background: var(--canvas);
@@ -645,10 +650,11 @@ dialog[open]::backdrop {
 .fp-or.is-rr .fp-floor,
 .fp-or.is-rr:hover .fp-floor,
 .fp-or.is-rr:active .fp-floor { filter: none; }
-.fp-or.is-closed .fp-wall { stroke: var(--fp-wall-outer); }
-.fp-or.is-closed .fp-badge { stroke: var(--fp-wall-outer); }
-.fp-or.is-closed .fp-label { fill: var(--fp-muted); }
-.fp-closed-text { fill: var(--fp-muted); }
+.fp-or.is-closed .fp-wall,
+.fp-recovery.is-closed .fp-wall { stroke: var(--fp-closed-wall); }
+.fp-or.is-closed .fp-badge { fill: var(--fp-closed-badge); stroke: var(--fp-closed-wall); }
+.fp-or.is-closed .fp-label { fill: var(--fp-closed-ink); }
+.fp-closed-text { fill: var(--fp-closed-ink); }
 /* An OR takes its department's colour from --rf (set per room); tan when the schedule is silent. */
 .fp-or .fp-floor { fill: var(--rf, var(--fp-or)); transition: filter 0.15s ease; }
 /* Hover only where a pointer exists, so a tap does not leave the room tinted. */
@@ -662,8 +668,9 @@ dialog[open]::backdrop {
 .fp-or.is-selected .fp-badge { fill: var(--brand); stroke: #fff; stroke-width: 4; }
 .fp-or.is-selected .fp-label { fill: #fff; }
 .fp-recovery .fp-floor { fill: var(--fp-recovery); }
-/* A recovery-area room closed for the repair takes the closed rooms' stripes (set as --rf). */
-.fp-recovery.is-closed .fp-floor { fill: var(--rf, var(--fp-recovery)); }
+/* A recovery-area room closed for the repair takes the closed rooms' stripes, one it leaves open the RR mint (--rf). */
+.fp-recovery.is-closed .fp-floor,
+.fp-recovery.is-rr .fp-floor { fill: var(--rf, var(--fp-recovery)); }
 /* Keyboard focus lands on the floor path; show it as a blue wall instead of a box around the shape. */
 .fp-floor:focus-visible { outline: none; stroke: #fff; stroke-width: 22; stroke-linejoin: round; }
 .fp-or:has(.fp-floor:focus-visible) .fp-wall,
@@ -709,10 +716,11 @@ dialog[open]::backdrop {
   text-anchor: middle;
   pointer-events: none;
 }
-/* The repair's closed zone: drawn over the closed rooms, thin enough that their numbers still read, never over a room in use. */
-.fp-zone-tint { fill: var(--fp-zone); fill-opacity: 0.1; }
-.fp-zone-stripe { stroke: var(--fp-zone); stroke-opacity: 0.3; }
-.fp-zone-area { fill: url(#fp-zone); stroke: var(--fp-zone-edge); stroke-width: 6; stroke-dasharray: 24 14; stroke-linejoin: round; }
+/* The repair's closed zone: dark stripes under the rooms, the dashed edge and tag over them, as on the repair plan images. */
+.fp-zone-bg { fill: var(--fp-zone); }
+.fp-zone-stripe { stroke: var(--fp-zone-line); }
+.fp-zone-fill { fill: url(#fp-zone); }
+.fp-zone-edge { fill: none; stroke: var(--fp-zone-edge); stroke-width: 10; stroke-dasharray: 30 18; stroke-linejoin: round; }
 .fp-zone-tag { fill: var(--fp-zone-edge); stroke: #fff; stroke-width: 8; }
 .fp-zone-text {
   font-family: var(--font-inter), var(--font-thai), sans-serif;

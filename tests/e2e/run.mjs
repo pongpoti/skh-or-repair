@@ -2255,6 +2255,19 @@ async function main() {
       assert((await board.getAttribute('[data-testid="repair-zone"]', "data-half")) === "2", "the second half's repair zone");
       assert((await board.getAttribute("#or-1 .fp-floor", "role")) === "button", "OR 1 operates in the second half");
       assert((await board.getAttribute("#or-12 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 12 is closed in the second half");
+      // As on the repair plan images: RR 2 stays open as a mint RR, RR 1 is closed, and the dark zone lies under the rooms.
+      assert((await board.getAttribute("#r-2", "class"))?.includes("is-rr"), "RR 2 is a recovery room in the second half");
+      assert((await textOf(board, "#r-2 text")) === "RR", "RR 2 is labelled RR");
+      assert((await board.getAttribute("#r-1", "class"))?.includes("is-closed"), "RR 1 is closed in the second half");
+      assert((await textOf(board, "#r-1 text")) === "ปิด", "RR 1 says ปิด");
+      assert(
+        await board.evaluate(() => {
+          const fill = document.querySelector('[data-testid="repair-zone-fill"]');
+          const rooms = document.querySelector("#fp-rooms");
+          return Boolean(fill && rooms && fill.compareDocumentPosition(rooms) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }),
+        "the zone's stripes are drawn under the rooms",
+      );
 
       // and back to the planned dates
       await save("2026-11-14", "2027-01-26", "2027-01-27", "2027-03-17");
@@ -2262,6 +2275,7 @@ async function main() {
       assert((await board.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "first half again");
       assert((await board.getAttribute("#or-1 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 1 closed again");
       assert((await board.getAttribute("#or-12 .fp-floor", "role")) === "button", "OR 12 operates again");
+      assert((await board.getAttribute("#r-2", "class"))?.includes("is-closed"), "RR 2 is closed in the first half");
       assert((await board.locator('[data-testid="repair-zone"]').count()) === 1, "the repair zone is drawn");
       await nurse.close();
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);

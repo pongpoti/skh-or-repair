@@ -29,12 +29,17 @@ const MISMATCH_LABEL = "ข้อมูลไม่ตรงกับการ�
 
 /**
  * Where the repair zone's tag sits in each half: in a corridor inside the zone, clear of every room's number, so the
- * tag never hides what it explains.
+ * tag never hides what it explains. Large, as on the repair plan images (Pong, 15 Nov 2026), so the closed area reads
+ * at a glance; a label it would cover moves below it (`RecoveryAreaLabel`).
  */
 const ZONE_TAG: Record<1 | 2, { x: number; y: number }> = {
   1: { x: 603.5, y: 360 },
   2: { x: 603.5, y: 1275 },
 };
+const ZONE_TAG_WIDTH = 700;
+const ZONE_TAG_HEIGHT = 150;
+/** The tag's white outline, which adds half its width around the tag. */
+const ZONE_TAG_OUTLINE = 8;
 
 /** Every OR takes the colour of the department the schedule gives it that day, whether or not it has cases. */
 function floorFill(room: Room, allocation: RoomAllocation | null): string | undefined {
@@ -119,9 +124,9 @@ function RoomLabel({
           dy="0.35em"
           // A recovery room is mint with dark green text, the instrument room light tan, on working days; on a
           // closed day both are plain, like every room. The instrument room's Thai label is longer than a code, so it
-          // is fitted to the room.
+          // is drawn at 34px, as on the repair plan images.
           style={{
-            fontSize: text.length > 5 ? fitSize(text, width, DEPT_SIZE, 28) : DEPT_SIZE,
+            fontSize: use === "instrument" ? 34 : text.length > 5 ? fitSize(text, width, DEPT_SIZE, 28) : DEPT_SIZE,
             fill: closed ? undefined : !suiteOpen ? "var(--fp-ink)" : use === "recovery" ? RECOVERY_ROOM.ink : INSTRUMENT_ROOM.ink,
           }}
         >
@@ -187,24 +192,69 @@ function MismatchMark({ cx, cy }: { cx: number; cy: number }) {
 }
 
 /**
- * The area closed for the works in the running half (lib/repair.ts zone): dark taupe stripes thin enough that the
- * closed rooms' numbers still read through them, inside a dashed edge, with a tag saying what it is. It is drawn over
- * the rooms but covers no room in use, and takes no clicks.
+ * The area closed for the works in the running half (lib/repair.ts zone), drawn as on the repair plan images (Pong,
+ * 15 Nov 2026): dark taupe stripes laid under the rooms, so the corridors and service rooms inside it go dark while the
+ * closed rooms sit on top in their own muted stripes (`RepairZoneFill`); then, over the rooms, a dashed edge and a tag
+ * saying what it is (`RepairZone`). Neither covers a room in use or takes clicks.
  */
+function RepairZoneFill({ d }: { d: string }) {
+  return <path className="fp-zone-fill" d={d} pointerEvents="none" aria-hidden="true" data-testid="repair-zone-fill" />;
+}
+
 function RepairZone({ half, d }: { half: 1 | 2; d: string }) {
   const { x, y } = ZONE_TAG[half];
   const text = "พื้นที่ปิดซ่อม";
-  // Large, as on the repair plan images (Pong, 15 Nov 2026), so the closed area reads at a glance.
-  const width = 700;
-  const height = 150;
+  const width = ZONE_TAG_WIDTH;
+  const height = ZONE_TAG_HEIGHT;
   return (
     <g className="fp-zone" pointerEvents="none" aria-hidden="true" data-testid="repair-zone" data-half={half}>
-      <path className="fp-zone-area" d={d} />
+      <path className="fp-zone-edge" d={d} />
       <rect className="fp-zone-tag" x={x - width / 2} y={y - height / 2} width={width} height={height} rx={height / 2} />
       <text className="fp-zone-text" x={x} y={y} dy="0.36em">
         {text}
       </text>
     </g>
+  );
+}
+
+/**
+ * ปิด on a recovery-area room the repair closes, RR on one it leaves open, as on the repair plan images. Where the
+ * zone's tag would cover the label (RR 2 in the first half), the label moves just below the tag, inside the room.
+ */
+function RecoveryAreaLabel({
+  room,
+  closed,
+  suiteOpen,
+  half,
+}: {
+  room: Room;
+  closed: boolean;
+  suiteOpen: boolean;
+  half: 1 | 2;
+}) {
+  const tag = ZONE_TAG[half];
+  const tagLeft = tag.x - ZONE_TAG_WIDTH / 2 - ZONE_TAG_OUTLINE / 2;
+  const tagRight = tag.x + ZONE_TAG_WIDTH / 2 + ZONE_TAG_OUTLINE / 2;
+  const tagTop = tag.y - ZONE_TAG_HEIGHT / 2 - ZONE_TAG_OUTLINE / 2;
+  const tagBottom = tag.y + ZONE_TAG_HEIGHT / 2 + ZONE_TAG_OUTLINE / 2;
+  // The label's glyphs reach about 0.85em above and 0.35em below its middle (Thai vowels sit high).
+  const above = DEPT_SIZE * 0.85;
+  const below = DEPT_SIZE * 0.35;
+  const covered =
+    room.labelX > tagLeft && room.labelX < tagRight && room.labelY - above < tagBottom && room.labelY + below > tagTop;
+  const { maxY } = roomBounds(room);
+  const moved = tagBottom + above + 4;
+  const y = covered && moved + below < maxY ? moved : room.labelY;
+  return (
+    <text
+      className={closed ? "fp-dept fp-closed-text" : "fp-dept"}
+      x={room.labelX}
+      y={y}
+      dy="0.35em"
+      style={{ fontSize: DEPT_SIZE, fill: closed ? undefined : suiteOpen ? RECOVERY_ROOM.ink : "var(--fp-ink)" }}
+    >
+      {closed ? "ปิด" : RECOVERY_USE.label}
+    </text>
   );
 }
 
@@ -247,15 +297,15 @@ export function FloorPlan({
     <svg viewBox="0 0 1207 1706" preserveAspectRatio="xMidYMin meet" className="h-full w-auto max-w-none" role="group" aria-label="แปลนห้องผ่าตัด">
       <FloorScenery />
       <defs>
-        {/* Closed rooms: thin diagonal stripes on a plain floor. */}
+        {/* Closed rooms: muted taupe stripes, as on the repair plan images. */}
         <pattern id="fp-closed" width="28" height="28" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <rect width="28" height="28" fill="var(--fp-closed)" />
           <line x1="0" y1="0" x2="0" y2="28" stroke="var(--fp-closed-line)" strokeWidth="6" />
         </pattern>
-        {/* The repair zone: wider dark stripes the other way, over the closed rooms' own pale ones. */}
-        <pattern id="fp-zone" width="36" height="36" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-          <rect className="fp-zone-tint" width="36" height="36" />
-          <line className="fp-zone-stripe" x1="0" y1="0" x2="0" y2="36" strokeWidth="12" />
+        {/* The repair zone: wider, darker stripes the other way, under the rooms. */}
+        <pattern id="fp-zone" width="40" height="40" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
+          <rect className="fp-zone-bg" width="40" height="40" />
+          <line className="fp-zone-stripe" x1="0" y1="0" x2="0" y2="40" strokeWidth="12" />
         </pattern>
         {ROOMS.map((room) => {
           const allocation = allocations[room.id];
@@ -268,6 +318,7 @@ export function FloorPlan({
           );
         })}
       </defs>
+      {repair ? <RepairZoneFill d={repair.zone} /> : null}
       <g id="fp-rooms">
         {ROOMS.map((room) => {
           const selected = room.id === selectedId;
@@ -277,13 +328,26 @@ export function FloorPlan({
           // A recovery-area room (RR 1, 2) inside the repair zone is closed like an OR, though it never opens anyway.
           const closed = use === "closed" || (room.kind === "recovery" && recoveryAreaClosed(room, day, periods));
           // An OR used as a recovery room during the repair: mint, labelled RR, and nothing to open. The instrument room
-          // behaves the same way, in the repair's brown, labelled เครื่องมือ.
+          // behaves the same way, light tan, labelled เครื่องมือ.
           const recovery = use === "recovery" || use === "instrument";
+          // A recovery-area room the repair leaves open (RR 2 in the second half) is mint and labelled RR too, as on
+          // the repair plan images (Pong, 15 Nov 2026). Outside the repair it keeps the service-area beige.
+          const recoveryArea = room.kind === "recovery" && repair !== null && !closed;
           const allocation = allocations[room.id] ?? null;
           const empty = room.kind === "or" && (cases[room.id] ?? 0) === 0;
           // On a closed day (weekend, holiday) no room takes a colour, a recovery room included.
           const repairFill = use === "recovery" ? RECOVERY_ROOM.color : INSTRUMENT_ROOM.color;
-          const fill = closed ? "url(#fp-closed)" : recovery ? (date ? repairFill : undefined) : floorFill(room, allocation);
+          const fill = closed
+            ? "url(#fp-closed)"
+            : recovery
+              ? date
+                ? repairFill
+                : undefined
+              : recoveryArea
+                ? date
+                  ? RECOVERY_ROOM.color
+                  : undefined
+                : floorFill(room, allocation);
           const bounds = roomBounds(room);
           const parts = [roomLabel(room)];
           if (allocation) parts.push(allocationText(allocation));
@@ -295,14 +359,16 @@ export function FloorPlan({
             ? `${roomLabel(room)} · ปิด`
             : recovery
               ? `${roomLabel(room)} · ${use === "instrument" ? INSTRUMENT_USE.name : RECOVERY_USE.name}`
-              : undefined;
+              : recoveryArea
+                ? `${roomLabel(room)} · ${RECOVERY_USE.name}`
+                : undefined;
           return (
             <g
               key={room.id}
               id={room.id}
               data-zone={room.zone}
               data-use={use}
-              className={`${room.kind === "or" ? "fp-or" : "fp-recovery"}${selected ? " is-selected" : ""}${selectable ? "" : " is-static"}${closed ? " is-closed" : ""}${recovery ? " is-rr" : ""}`}
+              className={`${room.kind === "or" ? "fp-or" : "fp-recovery"}${selected ? " is-selected" : ""}${selectable ? "" : " is-static"}${closed ? " is-closed" : ""}${recovery || recoveryArea ? " is-rr" : ""}`}
               style={fill ? ({ "--rf": fill } as CSSProperties) : undefined}
             >
               <path
@@ -325,8 +391,13 @@ export function FloorPlan({
                     : undefined
                 }
               />
-              <path className={room.kind === "or" ? "fp-wall" : "fp-wall fp-thin"} d={room.d} pointerEvents="none" />
-              {room.kind === "or" ? <RoomLabel room={room} allocation={allocation} use={use} suiteOpen={date !== null} /> : null}
+              {/* A closed recovery-area room takes the full wall, like a closed OR, as on the repair plan images. */}
+              <path className={room.kind === "or" || closed ? "fp-wall" : "fp-wall fp-thin"} d={room.d} pointerEvents="none" />
+              {room.kind === "or" ? (
+                <RoomLabel room={room} allocation={allocation} use={use} suiteOpen={date !== null} />
+              ) : closed || recoveryArea ? (
+                <RecoveryAreaLabel room={room} closed={closed} suiteOpen={date !== null} half={repair?.half ?? 1} />
+              ) : null}
               {mark && selectable ? (
                 <StatusMark
                   kind={mark}
@@ -341,8 +412,8 @@ export function FloorPlan({
           );
         })}
       </g>
-      {repair ? <RepairZone half={repair.half} d={repair.zone} /> : null}
       <rect className="fp-wall fp-outer" x="20" y="20" width="1167" height="1666" pointerEvents="none" />
+      {repair ? <RepairZone half={repair.half} d={repair.zone} /> : null}
     </svg>
   );
 }

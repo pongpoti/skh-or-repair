@@ -68,8 +68,8 @@ The air-ventilation system is repaired in two halves (Pong, 14 Nov 2026). While 
 **How it looks:**
 - Each operating room is drawn in its department's own colour with the department's code as its label, as outside the repair.
 - The recovery rooms are light mint (`RECOVERY_ROOM` in the colour list, `src/lib/allocation.ts`) with dark green text, labelled RR; the instrument room is light tan (`INSTRUMENT_ROOM`, in the same list) with near-black text, labelled เครื่องมือ, as on the repair plan images. Neither can be opened.
-- Closed rooms keep the grey stripes and ปิด.
-- The closed area of the half is drawn as one dark zone with taupe stripes, a dashed edge and a large "พื้นที่ปิดซ่อม" tag, as on the repair plan images. It lies under nothing clickable, the closed rooms' numbers still read through it, and it never covers a room in use, the lifts, the stairs or the lobby. There is no separate note above the plan.
+- Closed rooms have muted taupe stripes, walls and number badges, with ปิด. A recovery-area room the repair closes says ปิด too; one it leaves open (RR 2 in the second half) is mint, labelled RR.
+- The closed area of the half is drawn as one dark zone with taupe stripes laid under the rooms (so its corridors and service rooms go dark), a dashed edge and a large "พื้นที่ปิดซ่อม" tag over them, as on the repair plan images (`repair-plan/` in the project files). It takes no clicks and never covers a room in use, the lifts or the lobby; stairs inside the closed wing are hidden under it, as on the images. There is no separate note above the plan.
 
 A booking already saved for a room that does not operate on its day is marked in the doctor's list and left off the board. In development, `/preview?date=2027-02-01` shows the board as on any date.
 
