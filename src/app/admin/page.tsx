@@ -10,6 +10,8 @@ import { isAdmin } from "@/lib/admin";
 import { displayNameFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
 import { avatarSrc } from "@/lib/avatar";
+import { DEMO_MIN_CASES } from "@/lib/demo-schedule";
+import { shortThaiDate } from "@/lib/repair";
 import { listSurgeons } from "@/lib/surgeon-store";
 import { grantMx, removeSurgeon, revokeMx, saveRepair, saveSurgeon } from "./actions";
 import { loadMxData, loadRepairView } from "./data";
@@ -17,6 +19,8 @@ import { loadMxData, loadRepairView } from "./data";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = { title: "จัดการระบบ · ORSKH.APP" };
+
+const HALF_NAME = { 1: "ครึ่งแรก", 2: "ครึ่งหลัง" } as const;
 
 /**
  * The admin page, saved to the database: the repair's dates and the MX members (who upload the HOSxP workbook) above the
@@ -65,6 +69,40 @@ export default async function AdminPage() {
               </div>
             </section>
           )}
+          {/* The demo schedule (Pong, 15 Nov 2026: "create a dummy OR schedule cases on all rooms, each room has at least
+              10 cases. Do it for first half and second half. Add section on admin setting to select which part to
+              see."): the board picks the day of the half (/?demo=1&half=N, lib/demo-schedule.ts demoDay). */}
+          <section className="card overflow-hidden" aria-labelledby="demo-title" data-testid="demo-section">
+            <div className="flex flex-col gap-3 p-4 sm:p-5">
+              <div className="min-w-0">
+                <h2 id="demo-title" className="text-base font-bold text-ink sm:text-lg">
+                  ตารางตัวอย่าง
+                </h2>
+                <p className="mt-1 text-sm text-ink-2">
+                  เคสสมมติอย่างน้อย {DEMO_MIN_CASES} เคสในทุกห้อง เลือกช่วงที่จะดู ไม่บันทึก และไม่แตะการจองหรือตาราง HOSxP จริง
+                  เห็นเฉพาะผู้ดูแลระบบ
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                {([1, 2] as const).map((half) => {
+                  const { from, to } = half === 1 ? repair.periods.half1 : repair.periods.half2;
+                  const dates = `${shortThaiDate(from)} – ${shortThaiDate(to)}`;
+                  // A half that is over has no day left to show (the board only goes from today on).
+                  return to < repair.today ? (
+                    <span key={half} className="btn btn-secondary cursor-not-allowed flex-col gap-0.5 py-2.5 opacity-55" aria-disabled="true" data-testid={`demo-half-${half}`}>
+                      <span>{HALF_NAME[half]}</span>
+                      <span className="text-xs font-medium">จบแล้ว</span>
+                    </span>
+                  ) : (
+                    <Link key={half} href={`/?demo=1&half=${half}`} className="btn btn-secondary flex-col gap-0.5 py-2.5" data-testid={`demo-half-${half}`}>
+                      <span>{HALF_NAME[half]}</span>
+                      <span className="text-xs font-medium tabular-nums">{dates}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
           {/* Test mode (Pong, 15 Nov 2026): every kind of notice in the board's strip at once, seen by admins only. */}
           <section className="card overflow-hidden" aria-labelledby="test-mode-title">
             <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">

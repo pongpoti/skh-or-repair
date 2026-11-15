@@ -8,6 +8,8 @@ The board shows **one day**, dated in Thai with the Buddhist year (Thailand time
 
 **Notices above the plan.** A strip of one fixed height sits between the app bar and the plan, with or without notices, so the plan never moves (Pong, 15 Nov 2026; `src/components/board-notices.tsx`, texts in `src/lib/board-notices.ts`). Each notice is a badge in one row that scrolls sideways, with a fade at an end that has more past it. Alone, a badge says the whole message; with others, each says its short form (ยังไม่มี HOSxP, ไม่ตรง {n}, …) and its spoken name keeps the whole one. A tap opens the message as a chat bubble under the badge, with a soft shadow and a tail pointing at the badge: the whole message and a line on what it means. A tap outside, the close button, the badge again or Escape (the badge gets the focus back) closes it. The notices are: a closed day (the preview of a holiday), cases that could not be loaded, no HOSxP file yet, and cases that do not match the bookings. The repair has none: the plan's own zone shows it. **Test mode** (Pong, 15 Nov 2026): an admin who opens `/?notices=all` (โหมดทดสอบ on `/admin` links to it) sees every kind at once in the strip, over the real rooms and bookings; anyone else gets the board's own notices.
 
+**Demo schedule** (Pong, 15 Nov 2026: "create a dummy OR schedule cases on all rooms, each room has at least 10 cases. Do it for first half and second half. Add section on admin setting to select which part to see."). ตารางตัวอย่าง on `/admin` has a button for each half of the repair (ครึ่งแรก, ครึ่งหลัง, with their dates; a half that is over says จบแล้ว). It opens `/?demo=1&half=N`, which goes on to the board's own day when it is in that half, else the half's first workday from today on (`/?demo=1&date=…`, `demoDay` in `src/lib/demo-schedule.ts`). There every open operating room, the dressing, emergency and mixed rooms included, has 10 to 12 made-up cases: HNs from 99xxxxx, surgeons ตัวอย่าง หนึ่ง to แปด, common operation names, never a real row. They go through the board's own rules (`buildBoardRows`, placement), so the day looks like a real one: most cases match a booking, every other room has one HOSxP case nobody booked and one booking HOSxP does not list, and every status and the out-of-hours shift show. The strip's first badge says ตารางตัวอย่าง · เคสสมมติ ไม่ใช่ข้อมูลจริง. Nothing is read from or saved to the database, there is no booking form, the date picker moves between days of the demo, and the logo goes back to the real board. Admins only: anyone else gets the real board at the same address.
+
 ## Case data
 
 A room's case rows come from two places, merged on the server for the board's day (`src/lib/board-rows.ts`):
@@ -430,7 +432,7 @@ Checklist for the first deploy of this sign-in:
 
 ## Admin page
 
-Admins (the LINE user ids in `AUTH_ADMIN_LINE_IDS`, compared with the session's `sub`) see a "จัดการระบบ" button in the top bar (an icon on phones, labelled from 768px, left out below 390px so the date keeps its year) and the same link in the account menu, both opening `/admin`. Everyone else gets a not-found page there, and every save is checked against the admin list again on the server. At the bottom, โหมดทดสอบ opens the board with every kind of notice in the strip at once (`/?notices=all`, admins only). An admin still signs in like everyone else (LINE, SMS code, an authorized number); the admin list only adds the page.
+Admins (the LINE user ids in `AUTH_ADMIN_LINE_IDS`, compared with the session's `sub`) see a "จัดการระบบ" button in the top bar (an icon on phones, labelled from 768px, left out below 390px so the date keeps its year) and the same link in the account menu, both opening `/admin`. Everyone else gets a not-found page there, and every save is checked against the admin list again on the server. At the bottom, ตารางตัวอย่าง opens the demo schedule of either half (made-up cases in every room, see the board above) and โหมดทดสอบ the board with every kind of notice in the strip at once (`/?notices=all`, admins only). An admin still signs in like everyone else (LINE, SMS code, an authorized number); the admin list only adds the page.
 
 To find someone's LINE user id, have them sign in once, then look it up in the Neon SQL editor and add it to `AUTH_ADMIN_LINE_IDS` (comma-separated, redeploy to apply):
 
@@ -517,6 +519,7 @@ npm run test:e2e    # mock LINE + mock deeSMSX + next build/start + Playwright (
 - HN rules (7 digits) and the dressing words, typos included;
 - the booking rules: the earliest day by the 15:00 cut-off, the arranged room, the required operation;
 - the merge of uploads and bookings, with the HN filtered by viewer;
+- the demo schedule: 10 to 12 made-up cases in every open room on every weekday of both halves, under the planned and moved dates, and the day each half opens on;
 - the upload's storage and its 30-day clean-up;
 - the MX role.
 
@@ -533,6 +536,7 @@ The repair-phase tests move the app's clock through `APP_FAKE_NOW_FILE` and read
 - MX's upload: closed before 15:00; an `.xls` refused both by name and by content; a file of other days refused; refused by the server at 16:00; accepted inside the window, with its summary and matching. The file is `tests/fixtures/e2e-or-export.xlsx`;
 - the board from 16:00, with HOSxP, จอง and ตรงกัน rows, flags, room marks and the mismatch alert;
 - the HN appearing in each viewer's page only as allowed;
+- the demo schedule from `/admin`: each half's button and dates, at least 10 made-up cases in every room of either half's day, its badge first in the strip, the date picker staying in it and the logo leaving it, nothing saved, and the real board for anyone but an admin;
 - no HN or workbook row in the server logs.
 
 It saves screenshots of the sign-in pages and the board at 360 and 1280 px wide (the claim steps and the request form also at 320 px), and of the repair-phase pages on a 390 px phone. Playwright is pinned to the version whose Chromium is installed.

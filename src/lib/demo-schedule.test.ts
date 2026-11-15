@@ -1,0 +1,121 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { buildBoardRows } from "./board-rows.ts";
+import { addDays } from "./days.ts";
+import { DEMO_MIN_CASES, demoDay, demoSchedule } from "./demo-schedule.ts";
+import { isDressingOperation } from "./dressing.ts";
+import { isWorkday } from "./holidays.ts";
+import { DEFAULT_REPAIR_PERIODS, REPAIR_LAYOUTS, type RepairPeriods } from "./repair.ts";
+import { openRooms, roomUse } from "./rooms.ts";
+
+const MX = { allHn: true, userId: null };
+// The dates an admin might move the halves to, besides the planned ones.
+const MOVED: RepairPeriods = { half1: { from: "2026-12-01", to: "2026-12-30" }, half2: { from: "2027-01-04", to: "2027-02-26" } };
+
+/** Workdays (weekdays) from `from` to `to`, every `step` days. */
+function weekdays(from: string, to: string, step = 1): string[] {
+  const days: string[] = [];
+  for (let day = from; day <= to; day = addDays(day, step)) if (isWorkday(day, [])) days.push(day);
+  return days;
+}
+
+function board(date: string, periods: RepairPeriods) {
+  const { workbook, bookings } = demoSchedule(date, periods);
+  return { workbook, bookings, built: buildBoardRows({ date, periods, workbook, bookings, viewer: MX }) };
+}
+
+test("the demo puts 10 to 12 cases in every open room, on every weekday of both halves, under any dates", () => {
+  for (const periods of [DEFAULT_REPAIR_PERIODS, MOVED]) {
+    for (const [half, { from, to }] of [[1, periods.half1], [2, periods.half2]] as const) {
+      const days = weekdays(from, to);
+      assert.ok(days.length > 20, `${half}: ${days.length} days`);
+      for (const date of days) {
+        const { built } = board(date, periods);
+        const open = openRooms(date, periods).map((room) => room.id);
+        // Every OR the half operates in: its department rooms, the dressing room, the emergency and the mixed room.
+        const layout = Object.entries(REPAIR_LAYOUTS[half].rooms).filter(([, use]) => use !== "RR" && use !== "INSTR");
+        assert.deepEqual(open.toSorted(), layout.map(([id]) => id).toSorted(), `${date}: the half's rooms`);
+        for (const room of open) {
+          const count = built.countByRoom[room] ?? 0;
+          assert.ok(count >= DEMO_MIN_CASES && count <= DEMO_MIN_CASES + 2, `${date} ${room}: ${count} cases`);
+        }
+        // Nothing in a recovery room, the instrument room or a closed room.
+        for (const row of built.rows) assert.equal(roomUse(row.roomId, date, periods), "open", `${date}: ${row.roomId}`);
+        assert.equal(Object.keys(built.countByRoom).length, open.length, `${date}: rooms with cases`);
+      }
+    }
+  }
+});
+
+test("the demo looks like a real day: matched, unbooked and booking-only rows, every status, the out-of-hours shift", () => {
+  for (const date of ["2026-11-17", "2027-02-02"]) {
+    const { built, bookings } = board(date, DEFAULT_REPAIR_PERIODS);
+    const sources = new Set(built.rows.map((row) => row.source));
+    assert.deepEqual([...sources].toSorted(), ["booking", "hosxp", "matched"], `${date}: sources`);
+    assert.ok(built.uploaded, "as after MX's upload");
+    // The ! marks show in some rooms, not all.
+    const flagged = Object.keys(built.mismatchByRoom);
+    const open = openRooms(date, DEFAULT_REPAIR_PERIODS);
+    assert.ok(flagged.length > 0 && flagged.length < open.length, `${date}: flagged rooms ${flagged}`);
+    assert.ok(built.rows.filter((row) => row.source === "matched").length > built.rows.length * 0.7, "most rows match a booking");
+    const statuses = new Set(built.rows.map((row) => row.status));
+    for (const status of ["scheduled", "in-progress", "recovery", "delayed", "done", "cancelled"] as const) {
+      assert.ok(statuses.has(status), `${date}: a ${status} case`);
+    }
+    assert.ok(built.rows.some((row) => row.shift === "out"), `${date}: an out-of-hours case`);
+    // The dressing room: dressing names only, and both answers to the scrub question.
+    const dressingRoom = open.find((room) => built.rows.some((row) => row.roomId === room.id && row.scrubDoes !== undefined));
+    assert.ok(dressingRoom, `${date}: the dressing room's bookings carry the scrub answer`);
+    const dressings = built.rows.filter((row) => row.roomId === dressingRoom.id);
+    assert.ok(dressings.every((row) => isDressingOperation(row.procedure)), `${date}: dressing names in ${dressingRoom.id}`);
+    assert.deepEqual(new Set(dressings.flatMap((row) => (row.scrubDoes === undefined ? [] : [row.scrubDoes]))), new Set([true, false]));
+    // Only dressing-room bookings carry an answer.
+    assert.ok(bookings.every((booking) => (booking.scrubDoes === null) === !booking.dressing));
+  }
+});
+
+test("every case is made up: HNs in the 99 range, ตัวอย่าง surgeons, no obstetrics, the same cases on every reload", () => {
+  const date = "2026-11-18";
+  const { workbook, bookings } = demoSchedule(date, DEFAULT_REPAIR_PERIODS);
+  for (const item of workbook) {
+    assert.match(item.hn, /^99\d{5}$/);
+    assert.match(item.surgeon, /^(นพ\.|พญ\.) ตัวอย่าง \S+$/);
+    assert.notEqual(item.dept, "OBGYN");
+  }
+  for (const booking of bookings) {
+    assert.match(booking.hn ?? "", /^99\d{5}$/);
+    assert.match(booking.surgeon, /^ตัวอย่าง \S+$/);
+    assert.equal(booking.date, date);
+  }
+  const ids = [...workbook.map((item) => item.caseId), ...bookings.map((booking) => `bk-${booking.id}`)];
+  assert.equal(new Set(workbook.map((item) => item.caseId)).size, workbook.length, "unique case ids");
+  assert.equal(new Set(bookings.map((booking) => booking.id)).size, bookings.length, "unique booking ids");
+  assert.ok(ids.length > 0);
+  assert.deepEqual(demoSchedule(date, DEFAULT_REPAIR_PERIODS), { workbook, bookings }, "stable");
+  // Another day has its own mix.
+  const other = demoSchedule("2026-11-19", DEFAULT_REPAIR_PERIODS);
+  assert.notDeepEqual(other.workbook.map((item) => item.operation), workbook.map((item) => item.operation));
+  // A weekend has no open room, so no cases.
+  assert.deepEqual(demoSchedule("2026-11-21", DEFAULT_REPAIR_PERIODS), { workbook: [], bookings: [] });
+});
+
+test("demoDay: the board's own day in its half, else the half's first workday from today on, within the picker", () => {
+  const periods = DEFAULT_REPAIR_PERIODS; // 14 Nov 2026 – 26 Jan 2027, then 27 Jan – 17 Mar 2027
+  const holidays = [{ date: "2027-01-27", name: "วันหยุดทดสอบ" }];
+  const max = periods.half2.to;
+  // Sunday 15 Nov: the board shows Monday 16 Nov, in the first half.
+  const sunday = { today: "2026-11-15", boardDate: "2026-11-16", max, periods, holidays };
+  assert.equal(demoDay(1, sunday), "2026-11-16");
+  // The second half starts on a (made-up) holiday Wednesday: its first workday is Thursday.
+  assert.equal(demoDay(2, sunday), "2027-01-28");
+  // In the second half, the first half is over.
+  const late = { today: "2027-02-01", boardDate: "2027-02-01", max, periods, holidays: [] };
+  assert.equal(demoDay(1, late), null);
+  assert.equal(demoDay(2, late), "2027-02-01");
+  // Not past the picker's last day.
+  assert.equal(demoDay(2, { ...sunday, max: "2027-01-27" }), null);
+  // From 16:00 on the last day of the first half, the board shows the second half: today is still the first half's.
+  const turnover = { today: "2027-01-26", boardDate: "2027-01-28", max, periods, holidays };
+  assert.equal(demoDay(1, turnover), "2027-01-26");
+  assert.equal(demoDay(2, turnover), "2027-01-28");
+});

@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
@@ -6,11 +7,12 @@ import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickedDay, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
-import { everyNotice } from "@/lib/board-notices";
+import { boardNotices, DEMO_NOTICE, everyNotice, type BoardNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
 import { db } from "@/lib/db";
+import { demoDay, demoSchedule } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
 import type { RepairPeriods } from "@/lib/repair";
@@ -75,10 +77,29 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
   }
 }
 
+/**
+ * The demo schedule's board (lib/demo-schedule.ts): made-up cases in every open room of the day, through the board's own
+ * rules, seen as an admin sees a day (every HN). Nothing is read from or written to the database, and there is no
+ * booking form, so a booking can never be made from made-up rows. Its badge comes first in the strip.
+ */
+function demoBoard(day: BoardDay, periods: RepairPeriods): { board: BoardView; notices: BoardNotice[] } {
+  const { workbook, bookings } = demoSchedule(day.boardDate, periods);
+  const built = buildBoardRows({ date: day.boardDate, periods, workbook, bookings, viewer: { allHn: true, userId: null } });
+  const board: BoardView = {
+    date: day.boardDate,
+    rows: built.rows,
+    uploaded: built.uploaded,
+    mismatchCount: built.mismatchCount,
+    mismatchByRoom: built.mismatchByRoom,
+  };
+  const own = boardNotices({ closed: false, holiday: null, failed: false, missingUpload: null, mismatches: built.mismatchCount });
+  return { board, notices: [DEMO_NOTICE, ...own] };
+}
+
 export default async function BoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ room?: string; notices?: string; date?: string | string[] }>;
+  searchParams: Promise<{ room?: string; notices?: string; demo?: string | string[]; half?: string | string[]; date?: string | string[] }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
@@ -100,12 +121,24 @@ export default async function BoardPage({
   // Another day picked on the board (?date=YYYY-MM-DD, Pong, 15 Nov 2026), when it is one the picker offers; else the
   // board's own day. Picking the board's own day is the same as picking none.
   const picked = pickedDay(params.date, day.today, periods, closed);
+  const admin = isAdmin(user.sub);
+  // /admin opens the demo schedule for a half (?half=1 or 2): it goes on as the day of that half the board shows, so the
+  // address holds only the day from then on, and the date picker moves between days of the demo as on the board.
+  if (params.demo === "1" && admin && (params.half === "1" || params.half === "2")) {
+    const shown = demoDay(params.half === "1" ? 1 : 2, { today: day.today, boardDate: day.boardDate, max: range.max, periods, holidays: closed });
+    redirect(shown && shown !== day.boardDate ? `/?demo=1&date=${shown}` : "/?demo=1");
+  }
   const view: BoardDay =
     picked && picked !== day.boardDate ? { ...day, boardDate: picked, relation: relationTo(picked, day.today) } : day;
-  const { board, adding, canUpload, failed } = await loadBoard(user, view, periods, view !== day);
+  // The demo schedule, for admins only (Pong, 15 Nov 2026): /?demo=1 fills every room of the day shown with made-up
+  // cases (/admin opens it on a day of either half; the date picker keeps it on). Anyone else gets the real board.
+  const demo = params.demo === "1" && admin ? demoBoard(view, periods) : null;
+  const { board, adding, canUpload, failed } = demo
+    ? { board: demo.board, adding: null, canUpload: true, failed: false }
+    : await loadBoard(user, view, periods, view !== day);
   // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
   // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
-  const testNotices = params.notices === "all" && isAdmin(user.sub) ? everyNotice(view.boardDate) : undefined;
+  const testNotices = params.notices === "all" && admin ? everyNotice(view.boardDate) : demo?.notices;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -120,7 +153,7 @@ export default async function BoardPage({
         phone={user.phone ? formatPhone(user.phone) : undefined}
         image={user.picture}
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
-        adminHref={isAdmin(user.sub) ? "/admin" : null}
+        adminHref={admin ? "/admin" : null}
         uploadHref={canUpload ? "/upload" : null}
         datePick={{ today: day.today, current: day.boardDate, ...range, holidays: closed, unlisted }}
       />

@@ -5,7 +5,7 @@ import { badgeText, bubblePlace, type BoardNotice, type NoticeIcon } from "@/lib
 
 /**
  * The icons are Lucide's (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): calendar-x, database,
- * triangle-alert, chevron-down and x.
+ * triangle-alert, flask-conical, chevron-down and x.
  */
 function Glyph({ size = 16, children }: { size?: number; children: ReactNode }) {
   return (
@@ -38,6 +38,13 @@ const ICON_PATHS: Record<NoticeIcon, ReactNode> = {
       <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
+    </>
+  ),
+  flask: (
+    <>
+      <path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" />
+      <path d="M6.453 15h11.094" />
+      <path d="M8.5 2h7" />
     </>
   ),
 };
