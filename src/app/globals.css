@@ -722,11 +722,12 @@ dialog[open]::backdrop {
 .fp-zone-fill { fill: url(#fp-zone); }
 .fp-zone-edge { fill: none; stroke: var(--fp-zone-edge); stroke-width: 10; stroke-dasharray: 30 18; stroke-linejoin: round; }
 .fp-zone-tag { fill: var(--fp-zone-edge); stroke: #fff; stroke-width: 8; }
+/* No letter-spacing on Thai SVG text: iPhone (WebKit) spaces every code point, which pulls the vowels and tone marks
+   off their letters ("พื้นที่" drew as "พ ื้ น ที", Pong, 15 Nov 2026). */
 .fp-zone-text {
   font-family: var(--font-inter), var(--font-thai), sans-serif;
-  font-size: 76px;
+  font-size: 80px;
   font-weight: 700;
-  letter-spacing: 0.06em;
   fill: #fff;
   text-anchor: middle;
 }
