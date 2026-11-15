@@ -81,8 +81,13 @@ test("the feed says why there are no holidays: no token, a refused token, or no 
   await botHolidayFeed(2026, { token: "wrong-key" });
   assert.equal(warned.at(-1), "BOT holidays API answered 403 for 2026: (no body)");
 
-  answer = async () => new Response("not json");
-  assert.deepEqual(await botHolidayFeed(2026, { token: "token-123" }), { state: "failed", status: null });
+  // A 200 without a list is not a year without holidays: the BOT answered 2027 with an empty body on 15 Nov 2026.
+  answer = async () => new Response("");
+  assert.deepEqual(await botHolidayFeed(2027, { token: "token-123" }), { state: "failed", status: 200 });
+  assert.equal(warned.at(-1), "BOT holidays API answered 200 for 2027 without a holiday list: (no body)");
+  answer = async () => new Response("<html>token-123 maintenance</html>");
+  assert.deepEqual(await botHolidayFeed(2026, { token: "token-123" }), { state: "failed", status: 200 });
+  assert.equal(warned.at(-1), "BOT holidays API answered 200 for 2026 without a holiday list: <html>*** maintenance</html>");
 
   answer = async () => {
     throw new TypeError("fetch failed");
