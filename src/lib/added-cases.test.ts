@@ -11,6 +11,8 @@ import {
   closedDayNote,
   earliestBookingDay,
   earliestText,
+  bookableFrom,
+  BOOKING_CUTOFF_RULE,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
@@ -54,7 +56,9 @@ test("the earliest day: the next workday before 15:00, the one after from 15:00 
 
 test("what the form says about the earliest day", () => {
   assert.equal(earliestText("2026-11-16", "2026-11-17", []), "จองได้ตั้งแต่ วันอังคารที่ 17 พ.ย. 2569");
-  assert.equal(earliestText("2026-11-16", "2026-11-18", []), "หลัง 15:00 น. ปิดรับจองวันทำการถัดไป · จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569");
+  assert.equal(earliestText("2026-11-16", "2026-11-18", []), "หลังเวลา 15.00 น. ระบบจะปิดรับการจอง ของวันทำการถัดไป · จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569");
+  assert.equal(bookableFrom("2026-11-18"), "จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569");
+  assert.equal(BOOKING_CUTOFF_RULE, "หลังเวลา 15.00 น. ระบบจะปิดรับการจอง ของวันทำการถัดไป", "Pong's words");
   assert.equal(earliestText("2026-12-04", "2026-12-08", DECEMBER), "จองได้ตั้งแต่ วันอังคารที่ 8 ธ.ค. 2569", "a holiday is not the cut-off");
 });
 
@@ -213,7 +217,7 @@ test("dates: from the earliest day up to 60 days ahead, weekdays only, not a hol
   assert.deepEqual(error("2026-11-16", { earliest: earliestBookingDay(TODAY, at(15, 30)) }), {
     ok: false,
     field: "date",
-    error: "หลัง 15:00 น. ปิดรับจองวันทำการถัดไป · จองได้ตั้งแต่ วันอังคารที่ 17 พ.ย. 2569",
+    error: "หลังเวลา 15.00 น. ระบบจะปิดรับการจอง ของวันทำการถัดไป · จองได้ตั้งแต่ วันอังคารที่ 17 พ.ย. 2569",
     earliest: "2026-11-17",
   });
   assert.equal(error("2026-11-17", { earliest: "2026-11-17" }), "ok");

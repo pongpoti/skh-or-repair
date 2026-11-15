@@ -89,7 +89,7 @@ export default async function PreviewPage({
 
   let adding: CaseAdding | null = null;
   if (params.book) {
-    const { holidays } = await holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS));
+    const { holidays, unlisted } = await holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS));
     const name = "ตัวอย่าง หนึ่ง";
     const subtype = params.dept?.trim() || "GENSX";
     const earliest = earliestBookingDay(day.today, day.minutes, holidays);
@@ -98,6 +98,7 @@ export default async function PreviewPage({
       today: day.today,
       earliest,
       holidays,
+      unlisted,
       mine: await previewMine(),
       onAdd: previewAddCase.bind(null, { today: day.today, earliest, periods, subtype, holidays, name }),
       onRemove: previewRemoveCase,

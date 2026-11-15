@@ -61,12 +61,13 @@ export function holidayIn(holidays: readonly Holiday[], iso: string): Holiday | 
 export type HolidayFeed =
   | { state: "ok"; holidays: Holiday[] }
   | { state: "no-token" }
-  /** `status` is the HTTP status the API answered with, or null when it could not be reached or read. */
+  /** `status` is the HTTP status the API answered with (200 when it gave no holiday list), or null when it could not be reached. */
   | { state: "failed"; status: number | null };
 
 /**
  * One year's holidays from the BOT API, kept for six hours. Only 200 answers are cached, so a refused token is asked
- * about again on the next request.
+ * about again on the next request; a 200 without a list (a year not announced yet) is kept too, so the year's list can
+ * take up to six hours to show once the BOT has it.
  */
 export async function botHolidayFeed(year: number, options: { token?: string } = {}): Promise<HolidayFeed> {
   // A token pasted into Vercel can pick up a stray space or line break.
@@ -77,15 +78,46 @@ export async function botHolidayFeed(year: number, options: { token?: string } =
       headers: { Authorization: token, Accept: "application/json" },
       next: { revalidate: REVALIDATE_SECONDS },
     } as RequestInit);
+    const body = await response.text();
     if (!response.ok) {
-      console.warn(`BOT holidays API answered ${response.status} for ${year}`);
+      console.warn(`BOT holidays API answered ${response.status} for ${year}: ${oneLine(body, token)}`);
       return { state: "failed", status: response.status };
     }
-    return { state: "ok", holidays: parseBotHolidays(await response.json()) };
+    const json = readJson(body);
+    if (json === undefined) {
+      // Seen in production for a year the BOT has not announced yet (2027, on 15 Nov 2026): a 200 with an empty body.
+      console.warn(`BOT holidays API answered ${response.status} for ${year} without a holiday list: ${oneLine(body, token)}`);
+      return { state: "failed", status: response.status };
+    }
+    return { state: "ok", holidays: parseBotHolidays(json) };
   } catch (error) {
-    console.warn("BOT holidays API could not be reached", error);
+    // fetch quotes a header value it refuses (a token with a line break inside), so the token is blanked here too.
+    console.warn(`BOT holidays API could not be reached: ${blank(String(error), token)}`);
     return { state: "failed", status: null };
   }
+}
+
+/**
+ * The BOT's answer for the log: its start on one line (its gateway says why a key is refused), with the token blanked
+ * should it ever be echoed back.
+ */
+function oneLine(body: string, token: string): string {
+  const line = blank(body, token).replace(/\s+/g, " ").trim();
+  return line ? line.slice(0, 200) : "(no body)";
+}
+
+/** The JSON in `body`, or undefined when it is not JSON (an empty body included). */
+function readJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
+/** `text` with every copy of the token replaced by ***, for the log. */
+function blank(text: string, token: string): string {
+  return text.split(token).join("***");
 }
 
 /** The holiday on a YYYY-MM-DD date in Thailand, from EXTRA_HOLIDAYS first, then the BOT API. */
@@ -110,27 +142,34 @@ export function nextWorkdayIn(iso: string, holidays: readonly Holiday[], maxDays
   return null;
 }
 
-/** Holidays over a span of days, or why the BOT feed could not give them (with what could be had). */
+/**
+ * Holidays over a span of days, or why the BOT feed could not give them (with what could be had). `unlisted` holds the
+ * years (Gregorian) the BOT gave no holidays for: its feed failed, or it answered with an empty list, as for a year it
+ * has not announced yet (every year has holidays). The calendars say so under the grid.
+ */
 export type HolidayList =
-  | { ok: true; holidays: Holiday[] }
-  | { ok: false; reason: "no-token" | "failed"; holidays: Holiday[] };
+  | { ok: true; holidays: Holiday[]; unlisted: number[] }
+  | { ok: false; reason: "no-token" | "failed"; holidays: Holiday[]; unlisted: number[] };
 
 /**
  * The holidays from `from` to `to` (YYYY-MM-DD): EXTRA_HOLIDAYS and the BOT feed of every year in between. When a
  * year's feed is not "ok" (no token, refused, unreachable) the answer says why, and still carries EXTRA_HOLIDAYS and
- * the years that did load, so the board can fall back to weekdays while the upload refuses (lib/board-day.ts).
+ * the years that did load, so the board can fall back to weekdays while the upload refuses (lib/board-day.ts). An
+ * empty list is still "ok": only the calendars' note (`unlisted`) tells it apart.
  */
 export async function holidaysBetween(from: string, to: string): Promise<HolidayList> {
   const holidays = parseExtraHolidays(process.env.EXTRA_HOLIDAYS);
   const first = Number(from.slice(0, 4));
   const last = Number(to.slice(0, 4));
   let reason: "no-token" | "failed" | null = null;
+  const unlisted: number[] = [];
   for (let year = first; year <= last; year += 1) {
     const feed = await botHolidayFeed(year);
     if (feed.state === "ok") holidays.push(...feed.holidays);
     else reason ??= feed.state;
+    if (feed.state !== "ok" || feed.holidays.length === 0) unlisted.push(year);
   }
-  return reason ? { ok: false, reason, holidays } : { ok: true, holidays };
+  return reason ? { ok: false, reason, holidays, unlisted } : { ok: true, holidays, unlisted };
 }
 
 /** The next workday after `iso`, or why it cannot be known. */

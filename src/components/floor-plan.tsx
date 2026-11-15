@@ -13,7 +13,7 @@ import {
   type RoomAllocation,
 } from "@/lib/allocation";
 import { INSTRUMENT_USE, RECOVERY_USE, repairOn, type RepairPeriods } from "@/lib/repair";
-import { recoveryAreaClosed, roomBounds, roomLabel, ROOMS, roomUse, type Room, type RoomUse } from "@/lib/rooms";
+import { recoveryAreaClosed, roomBounds, roomLabel, roomOutline, ROOMS, roomUse, type Room, type RoomUse } from "@/lib/rooms";
 import type { RoomMark } from "@/lib/schedule";
 
 /** A room the schedule gives to no department: the list's "unknown department" gray. */
@@ -349,6 +349,8 @@ export function FloorPlan({
                   : undefined
                 : floorFill(room, allocation);
           const bounds = roomBounds(room);
+          // An OR's corners are rounded (lib/rooms.ts roomOutline); the floor and its wall share the outline.
+          const outline = roomOutline(room);
           const parts = [roomLabel(room)];
           if (allocation) parts.push(allocationText(allocation));
           if (empty) parts.push("ไม่มีเคส");
@@ -373,7 +375,7 @@ export function FloorPlan({
             >
               <path
                 className="fp-floor"
-                d={room.d}
+                d={outline}
                 tabIndex={selectable ? 0 : undefined}
                 aria-pressed={selectable ? selected : undefined}
                 aria-label={selectable ? parts.join(" · ") : staticLabel}
@@ -392,7 +394,7 @@ export function FloorPlan({
                 }
               />
               {/* A closed recovery-area room takes the full wall, like a closed OR, as on the repair plan images. */}
-              <path className={room.kind === "or" || closed ? "fp-wall" : "fp-wall fp-thin"} d={room.d} pointerEvents="none" />
+              <path className={room.kind === "or" || closed ? "fp-wall" : "fp-wall fp-thin"} d={outline} pointerEvents="none" />
               {room.kind === "or" ? (
                 <RoomLabel room={room} allocation={allocation} use={use} suiteOpen={date !== null} />
               ) : closed || recoveryArea ? (

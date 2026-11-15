@@ -51,7 +51,8 @@ test("the feed says why there are no holidays: no token, a refused token, or no 
     calls.push({ url, auth: new Headers(init?.headers).get("Authorization"), cache: init?.cache ?? null, revalidate: next?.revalidate ?? null });
     return answer();
   });
-  t.mock.method(console, "warn", () => {});
+  const warned: string[] = [];
+  t.mock.method(console, "warn", (...args: unknown[]) => void warned.push(args.map(String).join(" ")));
 
   // An explicit empty token, so the test does not read BOT_API_TOKEN from the shell.
   assert.deepEqual(await botHolidayFeed(2026, { token: "" }), { state: "no-token" });
@@ -68,14 +69,38 @@ test("the feed says why there are no holidays: no token, a refused token, or no 
 
   answer = async () => new Response("unauthorised", { status: 401 });
   assert.deepEqual(await botHolidayFeed(2026, { token: "wrong" }), { state: "failed", status: 401 });
+  assert.equal(warned.at(-1), "BOT holidays API answered 401 for 2026: unauthorised", "the log says why");
 
-  answer = async () => new Response("not json");
-  assert.deepEqual(await botHolidayFeed(2026, { token: "token-123" }), { state: "failed", status: null });
+  // The gateway's reason on one line, cut short, and never the token even if it is echoed back.
+  answer = async () => new Response(`{"message":\n  "Forbidden for key wrong-key"}${"x".repeat(400)}`, { status: 403 });
+  assert.deepEqual(await botHolidayFeed(2026, { token: "wrong-key" }), { state: "failed", status: 403 });
+  const refused = warned.at(-1) ?? "";
+  assert.ok(refused.startsWith('BOT holidays API answered 403 for 2026: {"message": "Forbidden for key ***"}xxx'), refused);
+  assert.ok(!refused.includes("wrong-key") && refused.length < 260, refused);
+  answer = async () => new Response("", { status: 403 });
+  await botHolidayFeed(2026, { token: "wrong-key" });
+  assert.equal(warned.at(-1), "BOT holidays API answered 403 for 2026: (no body)");
+
+  // A 200 without a list is not a year without holidays: the BOT answered 2027 with an empty body on 15 Nov 2026.
+  answer = async () => new Response("");
+  assert.deepEqual(await botHolidayFeed(2027, { token: "token-123" }), { state: "failed", status: 200 });
+  assert.equal(warned.at(-1), "BOT holidays API answered 200 for 2027 without a holiday list: (no body)");
+  answer = async () => new Response("<html>token-123 maintenance</html>");
+  assert.deepEqual(await botHolidayFeed(2026, { token: "token-123" }), { state: "failed", status: 200 });
+  assert.equal(warned.at(-1), "BOT holidays API answered 200 for 2026 without a holiday list: <html>*** maintenance</html>");
 
   answer = async () => {
     throw new TypeError("fetch failed");
   };
   assert.deepEqual(await botHolidayFeed(2026, { token: "token-123" }), { state: "failed", status: null });
+  assert.equal(warned.at(-1), "BOT holidays API could not be reached: TypeError: fetch failed");
+
+  // fetch quotes a refused header value in its error: a token with a line break inside never reaches the log
+  answer = async () => {
+    throw new TypeError('Headers.append: "abc\ndef" is an invalid header value.');
+  };
+  assert.deepEqual(await botHolidayFeed(2026, { token: "abc\ndef" }), { state: "failed", status: null });
+  assert.ok(!(warned.at(-1) ?? "").includes("abc\ndef") && (warned.at(-1) ?? "").includes('"***"'), warned.at(-1));
 });
 
 test("a workday is a weekday that is not a holiday; the next one is found within two weeks", () => {
@@ -99,10 +124,12 @@ test("the holidays between two days, and the next workday after one, say why whe
   t.mock.method(console, "warn", () => {});
   const urls: string[] = [];
   let down = new Set<string>();
+  let empty = new Set<string>();
   t.mock.method(globalThis, "fetch", async (url: string) => {
     urls.push(url);
     const year = new URL(url).searchParams.get("year") ?? "";
     if (down.has(year)) return new Response("down", { status: 503 });
+    if (empty.has(year)) return new Response(JSON.stringify({ result: { data: [] } }));
     const data = year === "2027" ? [{ Date: "2027-01-01", HolidayDescriptionThai: "วันขึ้นปีใหม่" }] : [{ Date: "2026-12-31", HolidayDescriptionThai: "วันสิ้นปี" }];
     return new Response(JSON.stringify({ result: { data } }));
   });
@@ -113,7 +140,11 @@ test("the holidays between two days, and the next workday after one, say why whe
   process.env.BOT_API_TOKEN = "";
   assert.deepEqual(await nextWorkdayAfter("2026-12-29"), { ok: false, reason: "no-token" });
   const none = await holidaysBetween("2026-12-29", "2027-01-12");
-  assert.deepEqual(none, { ok: false, reason: "no-token", holidays: [{ date: "2026-12-30", name: "ปิดปรับปรุง" }] }, "EXTRA_HOLIDAYS still");
+  assert.deepEqual(
+    none,
+    { ok: false, reason: "no-token", holidays: [{ date: "2026-12-30", name: "ปิดปรับปรุง" }], unlisted: [2026, 2027] },
+    "EXTRA_HOLIDAYS still, and neither year listed by the BOT",
+  );
 
   process.env.BOT_API_TOKEN = "token";
   // 30 Dec closed (EXTRA_HOLIDAYS), 31 Dec and 1 Jan holidays, then the weekend: Monday 4 Jan 2027.
@@ -121,13 +152,21 @@ test("the holidays between two days, and the next workday after one, say why whe
   const both = await holidaysBetween("2026-12-29", "2027-01-12");
   assert.equal(both.ok, true);
   assert.deepEqual(both.holidays.map((h) => h.date).sort(), ["2026-12-30", "2026-12-31", "2027-01-01"]);
+  assert.deepEqual(both.unlisted, [], "both years listed");
 
   // The next year's list failing is a failure too, with what did come.
   down = new Set(["2028"]);
   const partial = await holidaysBetween("2027-12-25", "2028-01-08");
   assert.equal(partial.ok, false);
   assert.ok(!partial.ok && partial.reason === "failed");
+  assert.deepEqual(partial.unlisted, [2028], "only the year that failed");
   assert.deepEqual(await nextWorkdayAfter("2027-12-25"), { ok: false, reason: "failed" });
+
+  // A year the BOT answers with an empty list (not announced yet) is still ok, but unlisted.
+  down = new Set();
+  empty = new Set(["2029"]);
+  const unannounced = await holidaysBetween("2028-12-20", "2029-01-20");
+  assert.deepEqual(unannounced, { ok: true, holidays: [{ date: "2026-12-30", name: "ปิดปรับปรุง" }, { date: "2026-12-31", name: "วันสิ้นปี" }], unlisted: [2029] });
 
   // Off Vercel a local stand-in for the BOT may be named; on Vercel it is ignored.
   process.env.BOT_HOLIDAYS_URL = "http://localhost:4010/holidays?x=1";

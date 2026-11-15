@@ -12,7 +12,7 @@ import {
   weekOfMonth,
 } from "./allocation.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
-import { ROOMS, roomBounds } from "./rooms.ts";
+import { ROOM_CORNER_RADIUS, ROOMS, roomBounds, roomOutline } from "./rooms.ts";
 
 // October 2026 is before the ventilation repair, so the weekly schedule applies (lib/repair.test.ts covers the repair).
 const REPAIR = DEFAULT_REPAIR_PERIODS;
@@ -188,6 +188,25 @@ test("every department label is white and meets 4.5:1 on its colour", () => {
   assert.equal(INSTRUMENT_ROOM.color, "#D9C7AE");
   assert.equal(readableTextOn(INSTRUMENT_ROOM.color), INK, "white would not read on light tan");
   assert.ok(contrast(INSTRUMENT_ROOM.ink, INSTRUMENT_ROOM.color) >= 7, `${INSTRUMENT_ROOM.ink} on ${INSTRUMENT_ROOM.color}`);
+});
+
+test("an OR is drawn with rounded corners over the box of its cut-corner shape (Pong, 15 Nov 2026)", () => {
+  for (const room of ROOMS) {
+    const { minX, minY, maxX, maxY } = roomBounds(room);
+    if (room.kind !== "or") {
+      assert.equal(roomOutline(room), room.d, `${room.id} keeps its square corners`);
+      continue;
+    }
+    // The shape it replaces: the box with 22-unit cut corners, so the rounded outline covers the same room.
+    const c = 22;
+    const cut = `M${minX} ${maxY - c}L${minX} ${minY + c}L${minX + c} ${minY}L${maxX - c} ${minY}L${maxX} ${minY + c}L${maxX} ${maxY - c}L${maxX - c} ${maxY}L${minX + c} ${maxY}Z`;
+    assert.equal(room.d, cut, `${room.id} is a box with cut corners`);
+    const r = ROOM_CORNER_RADIUS;
+    assert.ok(r > c && r * 2 < Math.min(maxX - minX, maxY - minY), `${room.id}: a little rounder than the cut, still with straight sides`);
+    const outline = roomOutline(room);
+    assert.ok(outline.startsWith(`M${minX + r} ${minY}H${maxX - r}`), outline);
+    assert.equal(outline.match(new RegExp(`A${r} ${r} 0 0 1 `, "g"))?.length, 4, `${room.id}: four round corners`);
+  }
 });
 
 test("room outlines enclose their label point", () => {

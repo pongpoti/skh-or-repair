@@ -7,10 +7,10 @@ import { shortThaiDate } from "./repair.ts";
  */
 
 export type NoticeTone = "neutral" | "warning" | "danger";
-export type NoticeIcon = "calendar" | "database" | "alert";
+export type NoticeIcon = "calendar" | "database" | "alert" | "flask";
 
 export type BoardNotice = {
-  id: "holiday" | "failed" | "no-upload" | "mismatch";
+  id: "demo" | "holiday" | "failed" | "no-upload" | "mismatch";
   tone: NoticeTone;
   icon: NoticeIcon;
   /** The whole message in one line: the badge's text when it is alone, and the bubble's title. */
@@ -94,6 +94,21 @@ export function boardNotices({
 export function everyNotice(date: string, holiday = "วันปิยมหาราช"): BoardNotice[] {
   return boardNotices({ closed: true, holiday, failed: true, missingUpload: date, mismatches: 3 });
 }
+
+/**
+ * The first badge of the demo schedule (lib/demo-schedule.ts), an admin's /?demo=1, so the made-up cases are never
+ * taken for the day's real list.
+ */
+export const DEMO_NOTICE: BoardNotice = {
+  id: "demo",
+  tone: "neutral",
+  icon: "flask",
+  text: "ตารางตัวอย่าง · เคสสมมติ ไม่ใช่ข้อมูลจริง",
+  short: "ตารางตัวอย่าง",
+  detail:
+    "เคสทุกห้องในหน้านี้สร้างขึ้นเพื่อดูหน้าตาตารางเท่านั้น ไม่ได้บันทึก และไม่แตะการจองหรือตาราง HOSxP จริง เห็นเฉพาะผู้ดูแลระบบ แตะโลโก้ด้านบนเพื่อกลับไปตารางจริง",
+  testId: "demo-notice",
+};
 
 /** A badge's text: the whole message when it is alone in the strip, its short form when there are several. */
 export function badgeText(notice: BoardNotice, count: number): string {

@@ -157,3 +157,22 @@ export function roomBounds(room: Room): RoomBounds {
   boundsCache.set(room.id, bounds);
   return bounds;
 }
+
+/**
+ * How round an operating room's corners are on the plan (Pong, 15 Nov 2026: "slight rounder of each OR room"): its
+ * outline is drawn as a rounded rectangle over its bounds instead of `d`'s 22-unit cut corners. `d` stays the room's
+ * shape for its bounds and the repair zone's tests.
+ */
+export const ROOM_CORNER_RADIUS = 30;
+
+/** The outline the plan draws for a room: an OR as a rounded rectangle over its bounds, a recovery-area room as `d`. */
+export function roomOutline(room: Room): string {
+  if (room.kind !== "or") return room.d;
+  const { minX, minY, maxX, maxY } = roomBounds(room);
+  const r = ROOM_CORNER_RADIUS;
+  const arc = (x: number, y: number) => `A${r} ${r} 0 0 1 ${x} ${y}`;
+  return (
+    `M${minX + r} ${minY}H${maxX - r}${arc(maxX, minY + r)}V${maxY - r}${arc(maxX - r, maxY)}` +
+    `H${minX + r}${arc(minX, maxY - r)}V${minY + r}${arc(minX + r, minY)}Z`
+  );
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
+import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
 import { HnField } from "@/components/hn-field";
 import { InlineStatus } from "@/components/inline-status";
@@ -9,6 +9,8 @@ import { ThaiDateField, type DayState } from "@/components/thai-date-field";
 import {
   addDays,
   BOOK_AHEAD_DAYS,
+  BOOKING_CUTOFF_PHRASES,
+  bookableFrom,
   bookedRoom,
   bookingRoom,
   checkCase,
@@ -89,6 +91,7 @@ export function AddCase({
   today,
   earliest,
   holidays,
+  unlisted,
   periods,
   initialMine,
   onAdd,
@@ -104,6 +107,8 @@ export function AddCase({
   earliest: string;
   /** The holidays from today to 60 days ahead, closed in the calendar as on the server. */
   holidays: readonly Holiday[];
+  /** The years in those 60 days the BOT gave no holidays for, named under the calendar. */
+  unlisted: readonly number[];
   /** The repair's dates (lib/repair-store.ts), which decide the rooms open on each day. */
   periods: RepairPeriods;
   initialMine: readonly AddedCase[];
@@ -366,7 +371,7 @@ export function AddCase({
             </p>
             {/* The department on a line of its own (Pong, 15 Nov 2026): it picks the room. */}
             {specialty ? (
-              <p className="text-sm text-ink-3" data-testid="case-dept">
+              <p className="text-sm text-muted" data-testid="case-dept">
                 {specialty}
               </p>
             ) : null}
@@ -409,9 +414,19 @@ export function AddCase({
               describedBy={describe("date", "case-date-hint")}
               testId="case-date"
               today={today}
+              unlisted={unlisted}
             />
-            <p id="case-date-hint" className="mt-1 text-xs text-ink-3" data-testid="case-date-hint">
-              {earliestText(today, first, holidays)}
+            {/* The 15:00 rule always, in Pong's words, a little larger than a hint (Pong, 15 Nov 2026), then the first day. */}
+            <p id="case-date-hint" className="mt-1.5 text-[0.8125rem] leading-5 text-muted" data-testid="case-date-hint">
+              <span className="block">
+                {BOOKING_CUTOFF_PHRASES.map((phrase, index) => (
+                  <Fragment key={phrase}>
+                    {index > 0 ? " " : null}
+                    <span className="whitespace-nowrap">{phrase}</span>
+                  </Fragment>
+                ))}
+              </span>{" "}
+              <span className="block">{bookableFrom(first)}</span>
             </p>
           </div>
 
@@ -514,17 +529,22 @@ export function AddCase({
                   data-testid="case-room-dressing"
                 />
                 <span className="text-[0.9375rem] font-bold">{DRESSING_ROOM_NAME}</span>
-                <span className="text-xs text-ink-3">{dressingRoom.ok ? label(dressingRoom.roomId) : NO_ROOM_NOTE[dressingRoom.reason]}</span>
+                <span className="text-xs text-muted">{dressingRoom.ok ? label(dressingRoom.roomId) : NO_ROOM_NOTE[dressingRoom.reason]}</span>
               </label>
             </div>
-            <div id="case-room-why" className="mt-1.5 flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1" aria-live="polite">
+            {/* Empty for the department's room (Pong, 15 Nov 2026: "remove ห้องของสาขาคุณ..."), so it takes no room then. */}
+            <div
+              id="case-room-why"
+              className="mt-1.5 flex min-h-11 flex-wrap items-center gap-x-2 gap-y-1 empty:mt-0 empty:min-h-0"
+              aria-live="polite"
+            >
               {!room.ok ? (
                 <span className="text-sm font-semibold text-[var(--stop)]" data-testid="case-room-why">
                   {room.error}
                 </span>
               ) : choice === "dressing" && scrubDoes !== null ? (
                 <>
-                  <span className="text-xs text-ink-3" data-testid="case-room-why">
+                  <span className="text-xs text-muted" data-testid="case-room-why">
                     {SCRUB_QUESTION} <span className="font-semibold text-ink">{scrubDoes ? SCRUB_YES : SCRUB_NO}</span>
                   </span>
                   <button
@@ -536,11 +556,11 @@ export function AddCase({
                     เปลี่ยนคำตอบ
                   </button>
                 </>
-              ) : (
-                <span className="text-xs text-ink-3" data-testid="case-room-why">
-                  {choice === "dressing" ? `ตอบคำถาม ${SCRUB_QUESTION}` : "ห้องของสาขาคุณในวันที่เลือก (เคสนัด)"}
+              ) : choice === "dressing" ? (
+                <span className="text-xs text-muted" data-testid="case-room-why">
+                  ตอบคำถาม {SCRUB_QUESTION}
                 </span>
-              )}
+              ) : null}
             </div>
           </fieldset>
         </fieldset>
