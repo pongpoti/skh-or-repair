@@ -87,6 +87,14 @@ export function boardNotices({
   return notices;
 }
 
+/**
+ * Every kind of notice at once, for seeing how the strip looks with all of them (Pong, 15 Nov 2026: "Test mode: show me
+ * all possible notification badges stacked within noti bar"): an admin's /?notices=all, and the preview's.
+ */
+export function everyNotice(date: string, holiday = "วันปิยมหาราช"): BoardNotice[] {
+  return boardNotices({ closed: true, holiday, failed: true, missingUpload: date, mismatches: 3 });
+}
+
 /** A badge's text: the whole message when it is alone in the strip, its short form when there are several. */
 export function badgeText(notice: BoardNotice, count: number): string {
   return count > 1 ? notice.short : notice.text;

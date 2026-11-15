@@ -6,6 +6,7 @@ import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, type BoardDay } from "@/lib/board-day";
+import { everyNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
@@ -75,7 +76,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
 export default async function BoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ room?: string }>;
+  searchParams: Promise<{ room?: string; notices?: string }>;
 }) {
   const user = await requireUser();
   const params = await searchParams;
@@ -91,6 +92,9 @@ export default async function BoardPage({
     currentRepairPeriods(),
   ]);
   const { board, adding, canUpload, failed } = await loadBoard(user, day, periods);
+  // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
+  // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
+  const testNotices = params.notices === "all" && isAdmin(user.sub) ? everyNotice(day.boardDate) : undefined;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -115,6 +119,7 @@ export default async function BoardPage({
         roomId={params.room ?? null}
         adding={adding}
         casesUnavailable={failed}
+        notices={testNotices}
       />
     </div>
   );

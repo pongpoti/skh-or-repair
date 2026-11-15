@@ -33,7 +33,6 @@ import { displayHn } from "@/lib/hn";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, roomLabel, roomUse } from "@/lib/rooms";
-import type { Shift } from "@/lib/schedule";
 import { subtypeLabel } from "@/lib/user-labels";
 
 const DIALOG_LOOK =
@@ -54,10 +53,11 @@ const ANSWER =
 export type Doctor = { name: string; subtype: string | null };
 
 function DeptTag({ dept }: { dept: Department | null }) {
-  if (!dept) return <span className="text-[0.6875rem] leading-5 text-muted">ไม่จัดสรร</span>;
+  // A little larger than the board's chips (Pong, 15 Nov 2026: "slight increase txt size of dept badge").
+  if (!dept) return <span className="text-xs leading-6 text-muted">ไม่จัดสรร</span>;
   return (
     <span
-      className="chip min-h-0 px-1 py-0 text-[0.625rem] leading-5 min-[400px]:px-1.5 min-[400px]:text-[0.6875rem]"
+      className="chip min-h-0 px-1.5 py-0 text-xs leading-6 min-[400px]:px-2 min-[400px]:text-[0.8125rem]"
       style={{ "--chip": dept.color, color: readableTextOn(dept.color) } as CSSProperties}
       title={dept.name}
     >
@@ -128,7 +128,6 @@ export function AddCase({
   const [date, setDate] = useState(first);
   const [hn, setHn] = useState("");
   const [operation, setOperation] = useState("");
-  const [shift, setShift] = useState<Shift>("in");
   const [choice, setChoice] = useState<RoomChoice>("dept");
   // The answer to the scrub question, for the dressing room only; null until asked.
   const [scrubDoes, setScrubDoes] = useState<boolean | null>(null);
@@ -171,7 +170,6 @@ export function AddCase({
       setDate(first);
       setHn("");
       setOperation("");
-      setShift("in");
       setChoice("dept");
       setScrubDoes(null);
       setInvalid(null);
@@ -265,7 +263,9 @@ export function AddCase({
 
   function save(event: React.FormEvent) {
     event.preventDefault();
-    const input = { date, hn, operation, shift, room: choice, scrubDoes };
+    // No ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026): a booking is saved as ในเวลา, and a HOSxP case it matches keeps
+    // its own เวร on the board.
+    const input = { date, hn, operation, room: choice, scrubDoes };
     const checked = checkCase(input, { today, earliest: first, periods, subtype: doctor.subtype, holidays });
     if (!checked.ok) {
       refuse(checked.error, checked.field);
@@ -482,19 +482,21 @@ export function AddCase({
                   className="sr-only"
                   data-testid="case-room-dept"
                 />
-                <span className="text-[0.9375rem] font-bold">{deptRoom.ok ? label(deptRoom.roomId) : "ห้องของสาขา"}</span>
-                <span className="flex flex-wrap justify-center gap-1">
-                  {allocation?.split ? (
-                    <>
+                {/* The department above the room number (Pong, 15 Nov 2026) */}
+                {allocation ? (
+                  <span className="flex flex-wrap justify-center gap-1">
+                    {allocation.split ? (
+                      <>
+                        <DeptTag dept={allocation.am} />
+                        <DeptTag dept={allocation.pm} />
+                      </>
+                    ) : (
                       <DeptTag dept={allocation.am} />
-                      <DeptTag dept={allocation.pm} />
-                    </>
-                  ) : allocation ? (
-                    <DeptTag dept={allocation.am} />
-                  ) : (
-                    <span className="text-xs">{deptRoom.ok ? "" : NO_ROOM_NOTE[deptRoom.reason]}</span>
-                  )}
-                </span>
+                    )}
+                  </span>
+                ) : null}
+                <span className="text-[0.9375rem] font-bold">{deptRoom.ok ? label(deptRoom.roomId) : "ห้องของสาขา"}</span>
+                {!allocation && !deptRoom.ok ? <span className="text-xs">{NO_ROOM_NOTE[deptRoom.reason]}</span> : null}
               </label>
               <label className={`${OPTION} min-h-16`}>
                 <input
@@ -537,30 +539,6 @@ export function AddCase({
                   {choice === "dressing" ? `ตอบคำถาม ${SCRUB_QUESTION}` : "ห้องของสาขาคุณในวันที่เลือก (เคสนัด)"}
                 </span>
               )}
-            </div>
-          </fieldset>
-
-          <fieldset>
-            <legend className="text-sm font-semibold text-ink">เวลา</legend>
-            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-              {(
-                [
-                  ["in", "ในเวลา"],
-                  ["out", "นอกเวลา"],
-                ] as const
-              ).map(([value, label]) => (
-                <label key={value} className={`${OPTION} min-h-11 flex-row`}>
-                  <input
-                    type="radio"
-                    name="shift"
-                    value={value}
-                    checked={shift === value}
-                    onChange={() => setShift(value)}
-                    className="sr-only"
-                  />
-                  <span className="text-sm font-semibold">{label}</span>
-                </label>
-              ))}
             </div>
           </fieldset>
         </fieldset>

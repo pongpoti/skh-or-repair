@@ -1806,6 +1806,9 @@ async function main() {
         assert(!body.includes("จัดการระบบ") && !body.includes("รายชื่อแพทย์"), "no admin page or loading screen for a non-admin");
         const html = await (await fetch(`${APP}/`, { headers: { cookie: `session=${token}` } })).text();
         assert(!html.includes('href="/admin"'), "no admin link on a non-admin's board");
+        // the test notices are for admins only: anyone else gets the board's own
+        const test = await (await fetch(`${APP}/?notices=all`, { headers: { cookie: `session=${token}` } })).text();
+        assert(!test.includes("วันปิยมหาราช") && !test.includes("โหลดไม่สำเร็จ"), "no test notices for a non-admin");
       }
       // an admin sub with a number that is not authorized gets no session at all
       const unlisted = await rawRequest("/admin", headers(await sessionToken("0899999999", SESSION_SECRET, ADMIN_SUB)));
@@ -1842,6 +1845,22 @@ async function main() {
         shots.push(file);
         await page.keyboard.press("Escape");
         await menu.waitFor({ state: "hidden" });
+      }
+      // Test mode (Pong, 15 Nov 2026): the admin page links to the board with every kind of notice in the strip at once
+      assert(adminHtml.includes('href="/?notices=all"'), "the admin page links to the test notices");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${APP}/?notices=all`, { waitUntil: "networkidle" });
+      const kinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
+      assert(JSON.stringify(kinds) === JSON.stringify(["holiday", "failed", "no-upload", "mismatch"]), `every notice: ${JSON.stringify(kinds)}`);
+      await noSideScroll(page, "the test notices at 390px");
+      for (const [file, open] of [["board-test-notices.png", null], ["board-test-notices-open.png", "failed"]]) {
+        if (open) {
+          await page.click(`[data-notice-id="${open}"]`);
+          await page.waitForSelector('[data-testid="notice-bubble"]');
+          await page.waitForTimeout(400);
+        }
+        await page.screenshot({ path: join(SCREENS, file) });
+        shots.push(file);
       }
       await ctx.close();
     });
@@ -2670,7 +2689,8 @@ async function main() {
         if (shot) await shot();
         await page.click('[data-testid="case-submit"]');
         const day = { "2026-11-16": "วันจันทร์ที่ 16", "2026-11-17": "วันอังคารที่ 17" }[date];
-        const expected = `จอง OR ${room.slice(3)}${dressing ? " ห้องทำแผล" : ""} ${day} พ.ย. 2569 แล้ว`;
+        // simply the room and the day, for the dressing room too (Pong, 15 Nov 2026)
+        const expected = `จอง OR ${room.slice(3)} ${day} พ.ย. 2569 แล้ว`;
         await page.waitForFunction(
           (want) => document.querySelector('[data-testid="add-case-dialog"] .inline-status-success')?.textContent?.trim() === want,
           expected,
@@ -2726,7 +2746,11 @@ async function main() {
       // two rooms to pick from, each named with the room it is that day: the nephrologist's department has no room of its
       // own during the repair, so OR X is the mixed-department room OR 11; the dressing room is OR 10
       assert((await choiceOf(page)) === "dept", "OR X picked to start with");
-      assert((await textOf(page, 'label:has([data-testid="case-room-dept"])')).startsWith("OR 11"), `OR X: ${await textOf(page, 'label:has([data-testid="case-room-dept"])')}`);
+      // the department above the room number (Pong, 15 Nov 2026)
+      const orX = await textOf(page, 'label:has([data-testid="case-room-dept"])');
+      assert(orX.endsWith("OR 11") && orX.length > "OR 11".length, `OR X: the department, then the room: ${orX}`);
+      // no ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026)
+      assert((await page.$$(`${dialog} input[name="shift"]`)).length === 0, "no ในเวลา/นอกเวลา choice");
       assert((await textOf(page, 'label:has([data-testid="case-room-dressing"])')) === "ห้องทำแผลOR 10", `the dressing room: ${await textOf(page, 'label:has([data-testid="case-room-dressing"])')}`);
       assert((await dateValue(page, "case-date")) === "2026-11-16", "the form starts on Monday");
       assert((await textOf(page, '[data-testid="case-date"]')).includes("วันจันทร์ที่ 16 พฤศจิกายน 2569"), "the day written out in Thai");
@@ -2755,19 +2779,23 @@ async function main() {
       await page.fill(`${dialog} input[data-testid="case-hn"]`, "123456");
       await page.click('[data-testid="case-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === "HN ต้องเป็นตัวเลข 7 หลัก");
-      // a pasted longer number is turned away, never cut short
+      // an eighth digit typed, or a pasted longer number, is quietly left out: never cut short, and no warning
+      // (Pong, 15 Nov 2026)
       await page.fill(`${dialog} input[data-testid="case-hn"]`, "1234567");
       await page.locator(`${dialog} input[data-testid="case-hn"]`).evaluate((input) => {
         input.focus();
-        input.select();
+        input.setSelectionRange(7, 7);
       });
+      await page.keyboard.type("8");
+      assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "1234567", "an eighth digit is left out");
+      await page.locator(`${dialog} input[data-testid="case-hn"]`).evaluate((input) => input.select());
       await page.keyboard.insertText("12345678");
       assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "1234567", "the HN kept as it was");
-      assert((await textOf(page, '[data-testid="add-case-dialog"] [role="alert"]')).includes("HN มี 7 หลัก"), "the long number is refused with a line");
+      assert((await page.locator(`${dialog} [role="alert"]`).count()) === 0, "nothing is said about it");
+      assert((await page.getAttribute(`${dialog} input[data-testid="case-hn"]`, "aria-invalid")) === null, "and the boxes are not marked");
       // a whole HN put in at once (a keyboard's clipboard suggestion) replaces the one in the full boxes
       await page.keyboard.insertText("7654321");
       assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7654321", "a whole new HN replaces the old");
-      assert((await page.locator('[data-testid="case-hn-too-long"]').count()) === 0, "and the refusal line goes");
       await page.click('[data-testid="case-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === "ใส่ชื่อการผ่าตัด");
       assert((await page.getAttribute('[data-testid="case-operation"]', "aria-invalid")) === "true", "the operation box is marked");

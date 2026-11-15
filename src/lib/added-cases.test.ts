@@ -193,9 +193,9 @@ test("a saved booking: the doctor's choice, or for one saved before the form ask
   assert.deepEqual(bookedRoom(saved({ subtype: null, roomId: "or-12", dressing: false }), REPAIR), { roomId: "or-12", dressing: false });
 });
 
-test("the saved booking's message names the dressing room", () => {
-  assert.equal(bookedMessage({ roomId: "or-12", date: "2026-11-17", dressing: false }), "จอง OR 12 วันอังคารที่ 17 พ.ย. 2569 แล้ว");
-  assert.equal(bookedMessage({ roomId: "or-10", date: "2026-11-17", dressing: true }), "จอง OR 10 ห้องทำแผล วันอังคารที่ 17 พ.ย. 2569 แล้ว");
+test("the saved booking's message is simply the room and the day, for the dressing room too", () => {
+  assert.equal(bookedMessage({ roomId: "or-12", date: "2026-11-17" }), "จอง OR 12 วันอังคารที่ 17 พ.ย. 2569 แล้ว");
+  assert.equal(bookedMessage({ roomId: "or-10", date: "2026-11-17" }), "จอง OR 10 วันอังคารที่ 17 พ.ย. 2569 แล้ว");
 });
 
 test("dates: from the earliest day up to 60 days ahead, weekdays only, not a holiday", () => {

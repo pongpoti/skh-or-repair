@@ -235,10 +235,13 @@ export function bookedRoom(
   return room.ok ? { roomId: room.roomId, dressing: room.dressing } : { roomId: booking.roomId, dressing: choice === "dressing" };
 }
 
-/** What the form says once a booking is saved: "จอง OR 10 ห้องทำแผล วันอังคารที่ 17 พ.ย. 2569 แล้ว". */
-export function bookedMessage(value: Pick<CaseInput, "roomId" | "date" | "dressing">): string {
+/**
+ * What the form says once a booking is saved, simply the room and the day (Pong, 15 Nov 2026: "simply state จอง OR XX
+ * วันอังคารที่ … แล้ว"): "จอง OR 10 วันอังคารที่ 17 พ.ย. 2569 แล้ว", for the dressing room too.
+ */
+export function bookedMessage(value: Pick<CaseInput, "roomId" | "date">): string {
   const room = getRoom(value.roomId);
-  return `จอง ${room ? roomLabel(room) : value.roomId}${value.dressing ? ` ${DRESSING_ROOM_NAME}` : ""} ${thaiDate(value.date, "short")} แล้ว`;
+  return `จอง ${room ? roomLabel(room) : value.roomId} ${thaiDate(value.date, "short")} แล้ว`;
 }
 
 /** What checking a booking needs to know besides the form's fields. */
