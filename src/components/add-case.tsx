@@ -53,7 +53,8 @@ const ANSWER =
 export type Doctor = { name: string; subtype: string | null };
 
 function DeptTag({ dept }: { dept: Department | null }) {
-  // A little larger than the board's chips (Pong, 15 Nov 2026: "slight increase txt size of dept badge").
+  // A little larger than it was, 12px and 13px from 400px wide (Pong, 15 Nov 2026: "slight increase txt size of dept
+  // badge").
   if (!dept) return <span className="text-xs leading-6 text-muted">ไม่จัดสรร</span>;
   return (
     <span
@@ -75,7 +76,8 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
  * 60 days ahead, never a weekend or holiday); the patient's 7-digit HN on its own card (the HOSxP workbook's case is
  * matched by it); the operation's name, required; the room, the doctor's own choice between their department's room
  * that day (OR X, picked to start with) and the dressing room (ห้องทำแผล; Pong, 15 Nov 2026: "let surgeon decide which
- * room to use"), each named with the room it is that day; and in or out of hours. Picking the dressing room asks, in
+ * room to use"), each named with the room it is that day. There is no in or out of hours choice: a booking is saved as
+ * ในเวลา (Pong, 15 Nov 2026). Picking the dressing room asks, in
  * a dialog over the form, whether the scrub nurse does the dressing for the doctor (Pong's "scrub ทำให้แทนไหม ?");
  * closing it unanswered puts the choice back on the department's room. The surgeon is always the signed-in doctor.
  * Below it, the doctor's own bookings from today on, with their HN, each one cancellable. `request` opens it.
