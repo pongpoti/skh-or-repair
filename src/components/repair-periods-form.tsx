@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import type { RepairResult } from "@/app/admin/actions";
 import type { RepairView } from "@/app/admin/data";
 import { Notice } from "@/components/auth-shell";
+import { InlineStatus } from "@/components/inline-status";
 import { checkRepairPeriods, repairOn, REPAIR_LAYOUTS, shortThaiDate, type RepairDates, type RepairPeriods } from "@/lib/repair";
 
 const HALVES = [1, 2] as const;
@@ -126,11 +127,6 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
             <p className="text-sm text-muted">{changed ? `แก้ไขล่าสุด ${changed.at} โดย ${changed.by}` : "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข"}</p>
           </div>
           {fallback ? <Notice tone="warning">อ่านวันที่จากระบบไม่ได้ ตอนนี้แสดงวันที่ตามแผนเดิม</Notice> : null}
-          {done ? (
-            <Notice tone="success" role="status">
-              {done}
-            </Notice>
-          ) : null}
         </div>
 
         <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2">
@@ -191,15 +187,23 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
               </div>
             );
           })}
-          {error ? (
-            <Notice tone="warning" role="alert" className="lg:col-span-2">
-              {error}
-            </Notice>
-          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line p-4 sm:p-5">
-          <p className="basis-full text-xs text-muted sm:mr-auto sm:basis-auto">เมื่อบันทึก ตารางผ่าตัดของทุกคนจะเปลี่ยนทันที</p>
+          {/* The save's result takes the hint's place beside บันทึก while it shows, so the row keeps its shape. */}
+          <div className="flex min-h-5 min-w-0 basis-full items-center sm:mr-auto sm:basis-auto">
+            {error ? (
+              <InlineStatus tone="warning" role="alert">
+                {error}
+              </InlineStatus>
+            ) : done ? (
+              <InlineStatus tone="success" role="status">
+                {done}
+              </InlineStatus>
+            ) : (
+              <p className="text-xs text-muted">เมื่อบันทึก ตารางผ่าตัดของทุกคนจะเปลี่ยนทันที</p>
+            )}
+          </div>
           {dirty ? (
             <button type="button" onClick={reset} disabled={pending} className="btn btn-secondary">
               ยกเลิก

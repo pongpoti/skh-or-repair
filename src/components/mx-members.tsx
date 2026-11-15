@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { MxResult } from "@/app/admin/actions";
 import type { MxData, MxView, PickView } from "@/app/admin/data";
 import { Notice } from "@/components/auth-shell";
+import { InlineStatus } from "@/components/inline-status";
 import { searchKey } from "@/lib/user-labels";
 
 const icon = {
@@ -163,17 +164,17 @@ export function MxMembers({
               ผู้จัดการตาราง (MX)
             </h2>
             <p className="text-sm text-muted">อัปโหลดตาราง HOSxP ได้ · {members.length} คน</p>
+            {done ? (
+              <InlineStatus tone="success" role="status" className="mt-1">
+                {done}
+              </InlineStatus>
+            ) : null}
           </div>
           <button type="button" onClick={openPicker} className="btn btn-primary shrink-0 px-4" data-testid="mx-add">
             <Icon name="plus" />
             เพิ่ม MX
           </button>
         </div>
-        {done ? (
-          <Notice tone="success" role="status">
-            {done}
-          </Notice>
-        ) : null}
       </div>
 
       {members.length === 0 ? (
@@ -269,19 +270,22 @@ export function MxMembers({
             })}
           </ul>
         ) : null}
-        {pickError ? (
-          <Notice tone="warning" role="alert" className="mt-3">
-            {pickError}
-          </Notice>
-        ) : null}
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" onClick={() => pickRef.current?.close()} disabled={pending} className="btn btn-secondary">
-            ยกเลิก
-          </button>
-          <button type="button" onClick={add} disabled={!picked || pending} aria-busy={pending} className="btn btn-primary" data-testid="mx-confirm">
-            <Icon name="plus" />
-            {pending ? "กำลังเพิ่ม…" : picked ? `เพิ่ม ${picked.name}` : "เลือกชื่อก่อน"}
-          </button>
+        {/* A failed add is said just above the buttons that sent it. */}
+        <div className="mt-5">
+          {pickError ? (
+            <InlineStatus tone="warning" role="alert" className="mb-2">
+              {pickError}
+            </InlineStatus>
+          ) : null}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" onClick={() => pickRef.current?.close()} disabled={pending} className="btn btn-secondary">
+              ยกเลิก
+            </button>
+            <button type="button" onClick={add} disabled={!picked || pending} aria-busy={pending} className="btn btn-primary" data-testid="mx-confirm">
+              <Icon name="plus" />
+              {pending ? "กำลังเพิ่ม…" : picked ? `เพิ่ม ${picked.name}` : "เลือกชื่อก่อน"}
+            </button>
+          </div>
         </div>
       </dialog>
 
@@ -300,19 +304,21 @@ export function MxMembers({
           </div>
         </dl>
         <p className="mt-4 text-sm leading-6 text-muted">คนนี้จะอัปโหลดตาราง HOSxP ไม่ได้อีก ถ้าต้องการคืนสิทธิ์ ให้เพิ่มใหม่อีกครั้ง</p>
-        {removeError ? (
-          <Notice tone="warning" role="alert" className="mt-3">
-            {removeError}
-          </Notice>
-        ) : null}
-        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" autoFocus onClick={() => removeRef.current?.close()} disabled={pending} className="btn btn-secondary">
-            ยกเลิก
-          </button>
-          <button type="button" onClick={remove} disabled={pending} aria-busy={pending} className="btn btn-danger">
-            <Icon name="remove" />
-            {pending ? "กำลังถอดสิทธิ์…" : "ถอดสิทธิ์"}
-          </button>
+        <div className="mt-6">
+          {removeError ? (
+            <InlineStatus tone="warning" role="alert" className="mb-2">
+              {removeError}
+            </InlineStatus>
+          ) : null}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <button type="button" autoFocus onClick={() => removeRef.current?.close()} disabled={pending} className="btn btn-secondary">
+              ยกเลิก
+            </button>
+            <button type="button" onClick={remove} disabled={pending} aria-busy={pending} className="btn btn-danger">
+              <Icon name="remove" />
+              {pending ? "กำลังถอดสิทธิ์…" : "ถอดสิทธิ์"}
+            </button>
+          </div>
         </div>
       </dialog>
     </section>

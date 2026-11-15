@@ -2503,6 +2503,8 @@ async function main() {
       await page.click('[data-testid="repair-save"]');
       await page.waitForSelector('[aria-labelledby="repair-periods-title"] [role="alert"]');
       assert((await textOf(page, '[aria-labelledby="repair-periods-title"] [role="alert"]')) === "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1", "order message");
+      // the refusal is said quietly beside บันทึก, inside the card (Pong, 15 Nov 2026)
+      await ownerShot(page, "admin-repair-error.png", { tall: true, upTo: 'section[aria-labelledby="repair-periods-title"]' });
       const stored = async () =>
         (await db.query("SELECT half, from_date::text AS f, to_date::text AS t, updated_by FROM repair_periods ORDER BY half")).rows;
       assert((await stored()).every((r) => r.updated_by === null), "nothing saved");
@@ -2518,6 +2520,7 @@ async function main() {
         await page.waitForSelector('[aria-labelledby="repair-periods-title"] [role="status"]');
       };
       await save("2026-11-01", "2026-11-10", "2026-11-11", "2027-03-17");
+      await ownerShot(page, "admin-repair-saved.png", { tall: true, upTo: 'section[aria-labelledby="repair-periods-title"]' });
       assert((await stored()).every((r) => r.updated_by === ADMIN_SUB), "saved by the admin's LINE id");
       assert(/^แก้ไขล่าสุด .+ โดย วิไล แสงทอง$/.test(await textOf(page, "#repair-periods-title + p")), `who saved: ${await textOf(page, "#repair-periods-title + p")}`);
       const nurse = await contextAs(RP.nurse);
@@ -2665,6 +2668,8 @@ async function main() {
           await ownerShot(page, "booking-form.png");
         },
       });
+      // the booking's answer, said quietly beside จองห้อง
+      await ownerShot(page, "booking-saved.png");
       const mine = await page.$$eval('[data-testid="my-case-hn"]', (els) => els.map((e) => e.textContent.trim()));
       assert(JSON.stringify(mine) === JSON.stringify([`HN ${HN_TODAY}`, `HN ${HN_X_MISSING}`, "HN 71000002"]), `the doctor's bookings: ${JSON.stringify(mine)}`);
       const rows = await db.query(

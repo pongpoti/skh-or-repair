@@ -5,6 +5,7 @@ import type { UploadResult } from "@/app/upload/actions";
 import { fileProblem, megabytes, XLSX_ACCEPT, type FileRules } from "@/app/upload/file-check";
 import { Notice } from "@/components/auth-shell";
 import { useTimedRefresh } from "@/components/board-refresh";
+import { InlineStatus } from "@/components/inline-status";
 import type { WindowState } from "@/lib/upload-flow";
 
 const UNSENT = "อัปโหลดไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
@@ -117,57 +118,63 @@ export function UploadForm({
 
       <form onSubmit={submit} noValidate className="mt-4 space-y-3">
         {target ? <input type="hidden" name="target" value={target.date} /> : null}
-        <label className="block">
-          <span className="text-sm font-semibold text-ink">ไฟล์ตารางผ่าตัดจาก HOSxP</span>
-          <span id="upload-file-hint" className="block text-xs text-muted">
-            ไฟล์ .xlsx ไม่เกิน {megabytes(rules.maxBytes)}
-          </span>
-          <input
-            ref={input}
-            type="file"
-            name="file"
-            accept={XLSX_ACCEPT}
-            onChange={choose}
-            disabled={pending || target === null}
-            aria-invalid={problem ? true : undefined}
-            aria-describedby={problem ? "upload-file-hint upload-file-problem" : "upload-file-hint"}
-            className="field field-text mt-1.5 cursor-pointer py-1.5 text-sm file:mr-3 file:min-h-8 file:cursor-pointer file:rounded-lg file:border file:border-[rgb(124_96_66/0.28)] file:bg-[var(--tan-fill)] file:px-3 file:text-sm file:font-semibold file:text-brand"
-            data-testid="upload-file"
-          />
-        </label>
-        {problem ? (
-          <div id="upload-file-problem">
-            <Notice tone="warning" role="alert">
-              {problem}
-            </Notice>
-          </div>
-        ) : null}
-        <button
-          type="submit"
-          disabled={pending || !canSend}
-          aria-busy={pending}
-          aria-describedby={canSend ? undefined : "upload-window"}
-          className="btn btn-primary w-full sm:w-auto"
-          data-testid="upload-submit"
-        >
-          {UPLOAD_ICON}
-          {pending ? "กำลังอัปโหลด…" : "อัปโหลด"}
-        </button>
-      </form>
-
-      {result ? (
-        <div className="mt-4" data-testid="upload-result">
-          {result.ok ? (
-            <Notice tone="success" role="status">
-              {result.message}
-            </Notice>
-          ) : (
-            <Notice tone="warning" role="alert">
-              {result.error}
-            </Notice>
-          )}
+        <div>
+          <label className="block">
+            <span className="text-sm font-semibold text-ink">ไฟล์ตารางผ่าตัดจาก HOSxP</span>
+            <span id="upload-file-hint" className="block text-xs text-muted">
+              ไฟล์ .xlsx ไม่เกิน {megabytes(rules.maxBytes)}
+            </span>
+            <input
+              ref={input}
+              type="file"
+              name="file"
+              accept={XLSX_ACCEPT}
+              onChange={choose}
+              disabled={pending || target === null}
+              aria-invalid={problem ? true : undefined}
+              aria-describedby={problem ? "upload-file-hint upload-file-problem" : "upload-file-hint"}
+              className="field field-text mt-1.5 cursor-pointer py-1.5 text-sm file:mr-3 file:min-h-8 file:cursor-pointer file:rounded-lg file:border file:border-[rgb(124_96_66/0.28)] file:bg-[var(--tan-fill)] file:px-3 file:text-sm file:font-semibold file:text-brand"
+              data-testid="upload-file"
+            />
+          </label>
+          {/* What is wrong with the chosen file, said on the line under the file input. */}
+          {problem ? (
+            <div id="upload-file-problem" className="mt-1.5">
+              <InlineStatus tone="warning" role="alert">
+                {problem}
+              </InlineStatus>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+        {/* The upload's answer sits beside อัปโหลด: to its right on wider screens (the button stays put), on its own
+            line above it on phones. It is shown only once there is an answer, so the tests wait for this one. */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <button
+            type="submit"
+            disabled={pending || !canSend}
+            aria-busy={pending}
+            aria-describedby={canSend ? undefined : "upload-window"}
+            className="btn btn-primary w-full sm:w-auto"
+            data-testid="upload-submit"
+          >
+            {UPLOAD_ICON}
+            {pending ? "กำลังอัปโหลด…" : "อัปโหลด"}
+          </button>
+          {result ? (
+            <div className="order-first flex min-w-0 basis-full items-center sm:order-none sm:flex-1 sm:basis-0" data-testid="upload-result">
+              {result.ok ? (
+                <InlineStatus tone="success" role="status">
+                  {result.message}
+                </InlineStatus>
+              ) : (
+                <InlineStatus tone="warning" role="alert">
+                  {result.error}
+                </InlineStatus>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </form>
     </section>
   );
 }

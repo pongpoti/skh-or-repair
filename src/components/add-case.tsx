@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
-import { Notice } from "@/components/auth-shell";
+import { InlineStatus } from "@/components/inline-status";
 import {
   addDays,
   BOOK_AHEAD_DAYS,
@@ -92,6 +92,8 @@ export function AddCase({
   const [shift, setShift] = useState<Shift>("in");
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
+  // Which action the shown answer is about: a save's is said beside จองห้อง, a cancel's under the list it changed.
+  const [about, setAbout] = useState<"save" | "remove">("save");
   const [mine, setMine] = useState<AddedCase[]>(() => [...initialMine]);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -133,7 +135,8 @@ export function AddCase({
     setDone("");
   }
 
-  function apply(result: CaseResult) {
+  function apply(result: CaseResult, from: "save" | "remove") {
+    setAbout(from);
     if (result.mine) setMine(result.mine);
     if (result.ok) {
       setDone(result.message);
@@ -150,6 +153,7 @@ export function AddCase({
     const input = { date, roomId, hn, operation, shift };
     const checked = checkCase(input, today, periods);
     if (!checked.ok) {
+      setAbout("save");
       setError(checked.error);
       setDone("");
       // The day and room come from pickers, so a missing or mistyped HN is the usual problem: back to its box.
@@ -164,7 +168,7 @@ export function AddCase({
       try {
         // The checked value carries the HN normalised; the server checks it all again.
         const result = await onAdd(checked.value);
-        apply(result);
+        apply(result, "save");
         if (result.ok) {
           // Ready for the next patient on the same day and room.
           setHn("");
@@ -172,6 +176,7 @@ export function AddCase({
           hnRef.current?.focus();
         }
       } catch {
+        setAbout("save");
         setError(UNSAVED);
         setDone("");
       }
@@ -185,8 +190,9 @@ export function AddCase({
     }
     startTransition(async () => {
       try {
-        apply(await onRemove(id));
+        apply(await onRemove(id), "remove");
       } catch {
+        setAbout("remove");
         setError("ยกเลิกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง");
         setDone("");
       } finally {
@@ -388,26 +394,27 @@ export function AddCase({
               ))}
             </div>
           </fieldset>
-
-          {error ? (
-            <Notice tone="warning" role="alert">
-              {error}
-            </Notice>
-          ) : null}
-          {done ? (
-            <Notice tone="success" role="status">
-              {done}
-            </Notice>
-          ) : null}
         </div>
 
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" onClick={() => ref.current?.close()} disabled={pending} className="btn btn-secondary">
-            ปิด
-          </button>
-          <button type="submit" disabled={pending} aria-busy={pending} className="btn btn-primary" data-testid="case-submit">
-            {pending ? "กำลังบันทึก…" : "จองห้อง"}
-          </button>
+        {/* A save's answer is said quietly beside จองห้อง: left of the buttons, or on its own line above them on a phone. */}
+        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
+          {about === "save" && error ? (
+            <InlineStatus tone="warning" role="alert" className="sm:flex-1">
+              {error}
+            </InlineStatus>
+          ) : about === "save" && done ? (
+            <InlineStatus tone="success" role="status" className="sm:flex-1">
+              {done}
+            </InlineStatus>
+          ) : null}
+          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+            <button type="button" onClick={() => ref.current?.close()} disabled={pending} className="btn btn-secondary">
+              ปิด
+            </button>
+            <button type="submit" disabled={pending} aria-busy={pending} className="btn btn-primary" data-testid="case-submit">
+              {pending ? "กำลังบันทึก…" : "จองห้อง"}
+            </button>
+          </div>
         </div>
       </form>
 
@@ -418,6 +425,16 @@ export function AddCase({
             <span className="tabular-nums">{mine.length}</span> รายการ
           </span>
         </h3>
+        {/* A cancel's answer is said quietly under the count it changed (the booking itself may be gone from the list). */}
+        {about === "remove" && error ? (
+          <InlineStatus tone="warning" role="alert" className="mt-1">
+            {error}
+          </InlineStatus>
+        ) : about === "remove" && done ? (
+          <InlineStatus tone="success" role="status" className="mt-1">
+            {done}
+          </InlineStatus>
+        ) : null}
         {mine.length === 0 ? (
           <p className="mt-2 text-sm text-muted">ยังไม่มีการจองตั้งแต่วันนี้</p>
         ) : (
