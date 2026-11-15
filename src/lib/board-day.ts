@@ -63,7 +63,8 @@ export function boardDayAt(at: Date, holidays: readonly Holiday[]): BoardDay {
 
 /** The top bar's line above the date. */
 export function boardEyebrow(relation: BoardDayRelation): string {
-  return relation === "today" ? "ตารางผ่าตัดวันนี้" : relation === "tomorrow" ? "ตารางผ่าตัดพรุ่งนี้" : "ตารางผ่าตัด";
+  // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026).
+  return relation === "today" ? "ตารางผ่าตัดวันนี้" : "ตารางผ่าตัดถัดไป";
 }
 
 /** Inside MX's upload window: Bangkok 15:00:00 ≤ t < 16:00:00, every day. Admins may upload at any time. */

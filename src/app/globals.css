@@ -713,11 +713,12 @@ dialog[open]::backdrop {
 .fp-zone-tint { fill: var(--fp-zone); fill-opacity: 0.1; }
 .fp-zone-stripe { stroke: var(--fp-zone); stroke-opacity: 0.3; }
 .fp-zone-area { fill: url(#fp-zone); stroke: var(--fp-zone-edge); stroke-width: 6; stroke-dasharray: 24 14; stroke-linejoin: round; }
-.fp-zone-tag { fill: var(--fp-zone); stroke: #fff; stroke-width: 3; }
+.fp-zone-tag { fill: var(--fp-zone-edge); stroke: #fff; stroke-width: 8; }
 .fp-zone-text {
   font-family: var(--font-inter), var(--font-thai), sans-serif;
-  font-size: 34px;
+  font-size: 76px;
   font-weight: 700;
+  letter-spacing: 0.06em;
   fill: #fff;
   text-anchor: middle;
 }

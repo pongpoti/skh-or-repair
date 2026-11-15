@@ -1,5 +1,5 @@
 import { DATABASE_ICON } from "@/components/case-source";
-import { repairNote, shortThaiDate, type RepairHalf } from "@/lib/repair";
+import { shortThaiDate } from "@/lib/repair";
 
 /** Lucide "triangle-alert" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */
 const ALERT_ICON = (
@@ -12,9 +12,9 @@ const ALERT_ICON = (
 
 /**
  * The one-line notes above the plan, for everyone: the suite closed for a holiday, the cases that could not be loaded,
- * no HOSxP file yet for the board's day, cases that do not match the bookings, and the repair's note. Each note says
- * what it means in words (with an icon for the warnings), never by colour alone. Renders nothing when there is nothing
- * to say.
+ * no HOSxP file yet for the board's day, and cases that do not match the bookings. Each note says what it means in
+ * words (with an icon for the warnings), never by colour alone. Renders nothing when there is nothing to say. The
+ * repair needs no note: the plan's own "พื้นที่ปิดซ่อม" zone shows it (Pong asked to drop the note, 15 Nov 2026).
  */
 export function BoardAlerts({
   closed,
@@ -22,7 +22,6 @@ export function BoardAlerts({
   failed,
   missingUpload,
   mismatches,
-  repair,
 }: {
   /** The suite runs no list on the day shown (a weekend or holiday). */
   closed: boolean;
@@ -34,9 +33,8 @@ export function BoardAlerts({
   missingUpload: string | null;
   /** Case rows that do not match a booking, or a booking HOSxP does not list. */
   mismatches: number;
-  repair: RepairHalf | null;
 }) {
-  if (!closed && !failed && !missingUpload && mismatches === 0 && !repair) return null;
+  if (!closed && !failed && !missingUpload && mismatches === 0) return null;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 pt-3 pb-1 lg:px-0 lg:pt-0 lg:pb-3">
       {closed ? <p className="pill px-4">{holiday ? `วันหยุด ${holiday} · ไม่มีตารางผ่าตัด` : "วันนี้เป็นวันหยุด ไม่มีตารางผ่าตัด"}</p> : null}
@@ -54,11 +52,6 @@ export function BoardAlerts({
           <span>
             ไม่ตรงกับการจอง <span className="tabular-nums">{mismatches}</span> รายการ
           </span>
-        </p>
-      ) : null}
-      {repair ? (
-        <p className="pill px-4" data-testid="repair-note">
-          {repairNote(repair)}
         </p>
       ) : null}
     </div>

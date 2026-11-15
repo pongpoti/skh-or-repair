@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { FloorScenery } from "@/components/floor-scenery";
-import { allocationFor, allocationText, DEPARTMENTS, readableTextOn, type Department, type RoomAllocation } from "@/lib/allocation";
+import { allocationFor, allocationText, DEPARTMENTS, readableTextOn, RECOVERY_ROOM, type Department, type RoomAllocation } from "@/lib/allocation";
 import { INSTRUMENT_USE, RECOVERY_USE, REPAIR_COLOR, repairOn, type RepairPeriods } from "@/lib/repair";
 import { recoveryAreaClosed, roomBounds, roomLabel, ROOMS, roomUse, type Room, type RoomUse } from "@/lib/rooms";
 import type { RoomMark } from "@/lib/schedule";
@@ -23,8 +23,8 @@ const MISMATCH_LABEL = "ข้อมูลไม่ตรงกับการ�
  * tag never hides what it explains.
  */
 const ZONE_TAG: Record<1 | 2, { x: number; y: number }> = {
-  1: { x: 620, y: 305 },
-  2: { x: 610, y: 1376 },
+  1: { x: 603.5, y: 360 },
+  2: { x: 603.5, y: 1275 },
 };
 
 /** Every OR takes the colour of the department the schedule gives it that day, whether or not it has cases. */
@@ -108,11 +108,12 @@ function RoomLabel({
           x={x}
           y={y + (short ? 44 : 54)}
           dy="0.35em"
-          // A recovery or instrument room is in the repair's colour on working days; on a closed day it is plain, like
-          // every room. The instrument room's Thai label is longer than a code, so it is fitted to the room.
+          // A recovery room is mint with dark green text, the instrument room the repair's brown, on working days; on a
+          // closed day both are plain, like every room. The instrument room's Thai label is longer than a code, so it
+          // is fitted to the room.
           style={{
             fontSize: text.length > 5 ? fitSize(text, width, DEPT_SIZE, 28) : DEPT_SIZE,
-            fill: closed ? undefined : suiteOpen ? readableTextOn(REPAIR_COLOR) : "var(--fp-ink)",
+            fill: closed ? undefined : !suiteOpen ? "var(--fp-ink)" : use === "recovery" ? RECOVERY_ROOM.ink : readableTextOn(REPAIR_COLOR),
           }}
         >
           {text}
@@ -184,12 +185,14 @@ function MismatchMark({ cx, cy }: { cx: number; cy: number }) {
 function RepairZone({ half, d }: { half: 1 | 2; d: string }) {
   const { x, y } = ZONE_TAG[half];
   const text = "พื้นที่ปิดซ่อม";
-  const width = 300;
+  // Large, as on the repair plan images (Pong, 15 Nov 2026), so the closed area reads at a glance.
+  const width = 700;
+  const height = 150;
   return (
-    <g className="fp-zone" pointerEvents="none" aria-hidden="true" data-testid="repair-zone">
+    <g className="fp-zone" pointerEvents="none" aria-hidden="true" data-testid="repair-zone" data-half={half}>
       <path className="fp-zone-area" d={d} />
-      <rect className="fp-zone-tag" x={x - width / 2} y={y - 30} width={width} height={60} rx={30} />
-      <text className="fp-zone-text" x={x} y={y} dy="0.35em">
+      <rect className="fp-zone-tag" x={x - width / 2} y={y - height / 2} width={width} height={height} rx={height / 2} />
+      <text className="fp-zone-text" x={x} y={y} dy="0.36em">
         {text}
       </text>
     </g>
@@ -264,13 +267,14 @@ export function FloorPlan({
           const selectable = use === "open";
           // A recovery-area room (RR 1, 2) inside the repair zone is closed like an OR, though it never opens anyway.
           const closed = use === "closed" || (room.kind === "recovery" && recoveryAreaClosed(room, day, periods));
-          // An OR used as a recovery room during the repair: the repair's colour, labelled RR, and nothing to open. The
-          // instrument room looks and behaves the same way, labelled เครื่องมือ.
+          // An OR used as a recovery room during the repair: mint, labelled RR, and nothing to open. The instrument room
+          // behaves the same way, in the repair's brown, labelled เครื่องมือ.
           const recovery = use === "recovery" || use === "instrument";
           const allocation = allocations[room.id] ?? null;
           const empty = room.kind === "or" && (cases[room.id] ?? 0) === 0;
           // On a closed day (weekend, holiday) no room takes a colour, a recovery room included.
-          const fill = closed ? "url(#fp-closed)" : recovery ? (date ? REPAIR_COLOR : undefined) : floorFill(room, allocation);
+          const repairFill = use === "recovery" ? RECOVERY_ROOM.color : REPAIR_COLOR;
+          const fill = closed ? "url(#fp-closed)" : recovery ? (date ? repairFill : undefined) : floorFill(room, allocation);
           const bounds = roomBounds(room);
           const parts = [roomLabel(room)];
           if (allocation) parts.push(allocationText(allocation));
