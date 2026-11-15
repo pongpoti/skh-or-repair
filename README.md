@@ -4,6 +4,8 @@ Operating-suite board. Staff sign in with LINE and a one-time code sent by SMS, 
 
 The board shows **one day**, dated in Thai with the Buddhist year (Thailand time). The suite's day turns over at **16:00**, not at midnight (`src/lib/board-day.ts`): until 16:00 on a workday the board shows today; from 16:00 it shows the next workday, whose list MX uploaded between 15:00 and 16:00. At the weekend and on a holiday it already shows the next workday. The line above the date says which: "ตารางผ่าตัดวันนี้" (today) or "ตารางผ่าตัดถัดไป" (the incoming list, whether tomorrow or after a weekend). There is no paging between days. A workday is Monday to Friday and not a Thai public or special holiday. Holidays come from the Bank of Thailand's Financial Institutions' Holidays API (public holidays, substitution days and the special holidays the cabinet announces), fetched again every six hours, plus any dates in `EXTRA_HOLIDAYS` (`src/lib/holidays.ts`). If the API cannot be read, the board carries on with weekdays and `EXTRA_HOLIDAYS`; only the upload stops (see HOSxP upload). The page refreshes itself at 16:00 and at midnight, and when the tab comes back after more than 5 minutes in the background. A board brought back with the browser's Back button refreshes at once if its moment passed meanwhile. In development, `/preview` shows the board without signing in (see Local development).
 
+**Notices above the plan.** A strip of one fixed height sits between the app bar and the plan, with or without notices, so the plan never moves (Pong, 15 Nov 2026; `src/components/board-notices.tsx`, texts in `src/lib/board-notices.ts`). Each notice is a badge in one row that scrolls sideways, with a fade at an end that has more past it. Alone, a badge says the whole message; with others, each says its short form (ยังไม่มี HOSxP, ไม่ตรง {n}, …) and its spoken name keeps the whole one. A tap opens the message as a chat bubble under the badge, with a soft shadow and a tail pointing at the badge: the whole message and a line on what it means. A tap outside, the close button, the badge again or Escape (the badge gets the focus back) closes it. The notices are: a closed day (the preview of a holiday), cases that could not be loaded, no HOSxP file yet, and cases that do not match the bookings. The repair has none: the plan's own zone shows it.
+
 ## Case data
 
 A room's case rows come from two places, merged on the server for the board's day (`src/lib/board-rows.ts`):
@@ -75,7 +77,7 @@ A booking already saved for a room that does not operate on its day is marked in
 
 ### Room bookings by doctors (with HN)
 
-A signed-in doctor (a current claim on an active `users` row of type `DR`) sees a **จองห้อง** button at the corner of the plan. The form (จองห้องผ่าตัด) asks for:
+A signed-in doctor (a current claim on an active `users` row of type `DR`) sees a **จองห้อง** button centred under the plan, with a warm glow that breathes, a ring that grows out and a band of light that crosses it every 2.4 seconds, to draw the eye (Pong, 15 Nov 2026; with reduced motion the glow stays still). The plan stops above it, so it never covers a room. The form (จองห้องผ่าตัด) asks for:
 - **the day:** today up to 60 days ahead, Monday to Friday, not a holiday. The form opens on the board's day (from 16:00 the next workday, past any holiday);
 - **an open room:** only rooms operating on that day under the repair's dates, each shown with its department; the doctor's own department's room is picked first;
 - **the patient's HN** (required): 1 to 15 letters, digits or dashes. It is saved in its matching form (spaces and dashes removed, upper case, no leading zeros), and the form says so under the box when that differs from what was typed;
@@ -118,7 +120,7 @@ The rooms and the matching are worked out again on every visit, as the board doe
 
 An upload belongs to the day it was made (its cycle) and is for the next workday after it. The board shows only **the latest upload made on its cycle day for its own date**. A cycle day is today from 16:00, yesterday before then. So at 16:00 every day the board clears the day's rows and shows the next workday with the upload MX made between 15:00 and 16:00. An admin's upload after 16:00 shows at once.
 
-If MX has not uploaded, every user sees "ยังไม่มีตาราง HOSxP ของ {date}" above the plan, in the repair or not: the board's rows come only from the uploads, so an empty room must not look like a day with no cases. The rooms still open and show the doctors' bookings, with no flags since there is nothing to compare with.
+If MX has not uploaded, every user sees "ยังไม่มีตาราง HOSxP ของ {date}" in the notice strip above the plan, in the repair or not: the board's rows come only from the uploads, so an empty room must not look like a day with no cases. The rooms still open and show the doctors' bookings, with no flags since there is nothing to compare with.
 
 ### Case rows: source and matching
 
@@ -133,7 +135,7 @@ Each row in a room's list carries a small chip, an icon and a word, saying where
 - A booking HOSxP does not list shows in its room with **ไม่พบใน HOSxP** (red), but only once the day has an upload.
 - A booking with no operation name reads "จองห้อง (รอข้อมูล HOSxP)".
 
-**Mismatches are shown to all users:** "ไม่ตรงกับการจอง {n} รายการ" above the plan, and an amber triangle with "!" in the corner of each room that has one. The room's spoken name gains "ข้อมูลไม่ตรงกับการจอง".
+**Mismatches are shown to all users:** "ไม่ตรงกับการจอง {n} รายการ" in the notice strip above the plan, and an amber triangle with "!" in the corner of each room that has one. The room's spoken name gains "ข้อมูลไม่ตรงกับการจอง".
 
 **HN is shown only to:**
 - the doctor who made the booking (their own bookings);
@@ -485,6 +487,8 @@ Set that cookie for `http://localhost:3000` in the browser. The number must be i
 | `?sample=1` | made-up HOSxP cases and bookings, to see the source chips, flags and room marks; add `&upload=0` for the bookings alone, as before MX uploads |
 | `?mx=1` | the board as MX sees it (every HN, the upload button); without it, as the sample's doctor, who sees the HN of their own bookings |
 | `?admin=1` | the admin button |
+| `?failed=1` | the board as when its cases cannot be read |
+| `?notices=all` | every kind of notice in the strip at once, to see the short badges, the sideways scroll and each bubble |
 
 The upload page needs a signed-in MX user or admin. To try it locally, run `node tests/mock-line.mjs &` (it also serves the holidays stub; give the app `BOT_API_TOKEN=mock-bot-token` and `BOT_HOLIDAYS_URL=http://127.0.0.1:4010/financial-institutions-holidays/`), then set the clock inside the window with `APP_FAKE_NOW_FILE`. `tests/fixtures/e2e-or-export.xlsx` is a made-up file for Tue 17 Nov 2026 (made by `python3 -I tests/e2e/make-workbook.py` from `tests/fixtures/sample-or-export.xlsx`, needs openpyxl).
 
@@ -517,8 +521,8 @@ The repair-phase tests move the app's clock through `APP_FAKE_NOW_FILE` and read
 - the board refreshing itself: at 16:00 with no reload, after more than 5 minutes hidden, and at once when Back brings it back after its moment;
 - an admin saving the repair's dates on `/admin`, with the board following at once;
 - an admin granting and taking back MX;
-- doctors booking rooms with an HN, and the form opening on the board's day after 16:00, past a holiday;
-- the no-upload alert, with the bookings still in their rooms;
+- doctors booking rooms with an HN, the จองห้อง button centred, glowing and clear of the plan, and the form opening on the board's day after 16:00, past a holiday;
+- the no-upload alert, with the bookings still in their rooms; the notice strip's fixed height, and the badge's chat bubble opening and closing by a tap outside, its close button and Escape;
 - MX's upload: closed before 15:00; an `.xls` refused both by name and by content; a file of other days refused; refused by the server at 16:00; accepted inside the window, with its summary and matching. The file is `tests/fixtures/e2e-or-export.xlsx`;
 - the board from 16:00, with HOSxP, จอง and ตรงกัน rows, flags, room marks and the mismatch alert;
 - the HN appearing in each viewer's page only as allowed;

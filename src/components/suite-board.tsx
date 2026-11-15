@@ -4,10 +4,11 @@ import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
 import { AddCase, type Doctor } from "@/components/add-case";
-import { BoardAlerts } from "@/components/board-alerts";
+import { BoardNotices, noticeBadge } from "@/components/board-notices";
 import { CaseFlag, CaseSource } from "@/components/case-source";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
 import { firstBookingDay, type AddedCase } from "@/lib/added-cases";
+import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
 import { boardHref } from "@/lib/days";
@@ -95,6 +96,7 @@ export function SuiteBoard({
   pathname = "/",
   adding = null,
   casesUnavailable = false,
+  notices: givenNotices,
 }: {
   /** The board's day, or null when the suite is closed (the preview of a weekend or holiday). */
   board: BoardView | null;
@@ -110,6 +112,8 @@ export function SuiteBoard({
   adding?: CaseAdding | null;
   /** The bookings and the HOSxP cases could not be loaded, so the rooms show none. */
   casesUnavailable?: boolean;
+  /** The notices above the plan, when the page sets them itself (the preview's ?notices=all); else the board's own. */
+  notices?: readonly BoardNotice[];
 }) {
   const router = useRouter();
   // The day whose rooms are shown: the board's own date, or today when the suite is closed.
@@ -120,6 +124,8 @@ export function SuiteBoard({
   const [prevUrl, setPrevUrl] = useState(urlRoom);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [addRequest, setAddRequest] = useState<{ roomId: string | null } | null>(null);
+  // The notice whose chat bubble is open (BoardNotices).
+  const [noticeId, setNoticeId] = useState<string | null>(null);
   const menuWasOpen = useRef(false);
 
   if (prevUrl !== urlRoom) {
@@ -128,6 +134,16 @@ export function SuiteBoard({
   }
 
   const operations = board?.rows ?? NONE;
+  const mismatchCount = board?.mismatchCount ?? 0;
+  const missingUpload = missingUploadDay(board, casesUnavailable);
+  const ownNotices = useMemo(
+    () => boardNotices({ closed: board === null, holiday, failed: casesUnavailable, missingUpload, mismatches: mismatchCount }),
+    [board, holiday, casesUnavailable, missingUpload, mismatchCount],
+  );
+  const notices = givenNotices ?? ownNotices;
+  // A notice can go while its bubble is open (the 16:00 refresh, an upload): forget it, so its bubble does not open
+  // again by itself when the notice comes back, and the next Escape is not spent on it.
+  if (noticeId !== null && !notices.some((notice) => notice.id === noticeId)) setNoticeId(null);
   const room = getRoom(selectedId);
   const open = room !== null;
 
@@ -170,6 +186,14 @@ export function SuiteBoard({
       if (addRequest) return;
       // Escape belongs to an open popover (the account menu) first.
       if (isPopoverOpen()) return;
+      // Then to an open notice bubble. Its badge gets the focus back only when the focus was in the strip or the
+      // bubble, so a person in the room's list stays there.
+      if (noticeId) {
+        const id = noticeId;
+        setNoticeId(null);
+        if (document.activeElement?.closest("[data-notice-strip]")) noticeBadge(id)?.focus();
+        return;
+      }
       choose(null);
     }
     window.addEventListener("keydown", onKey);
@@ -190,18 +214,14 @@ export function SuiteBoard({
   return (
     <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="relative mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col overflow-hidden sm:px-3 lg:flex-row lg:gap-6 lg:px-6 lg:pt-3 lg:pb-4">
-        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          <BoardAlerts
-            closed={board === null}
-            holiday={holiday}
-            failed={casesUnavailable}
-            missingUpload={missingUploadDay(board, casesUnavailable)}
-            mismatches={board?.mismatchCount ?? 0}
-          />
-          {/* On phones the plan stops above the จองห้อง button, so the button never covers a room, however many notes
-              push the plan down (Pong, 15 Nov 2026). */}
+        {/* From 1024px the column lets the booking button's glow spill into the padding below it instead of cutting it off
+            flat; the plan keeps its own clipping. */}
+        <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:overflow-visible">
+          <BoardNotices notices={notices} openId={noticeId} onOpenChange={setNoticeId} />
+          {/* The plan stops above the จองห้อง button and its glow, so the button never covers a room (Pong, 15 Nov
+              2026). */}
           <div
-            className={`flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0 ${adding ? "max-lg:pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.5rem)]" : ""}`}
+            className={`flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0 ${adding ? "pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.75rem)] lg:pb-[4.5rem]" : ""}`}
           >
             <FloorPlan
               selectedId={selectedId}
@@ -215,16 +235,19 @@ export function SuiteBoard({
             />
           </div>
           {adding ? (
-            // Below the plan's corner on every screen; on phones the room sheet covers it and carries its own button.
-            <button
-              type="button"
-              className="btn btn-primary absolute right-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[5] rounded-full px-5 shadow-[0_8px_24px_-6px_rgb(41_29_20/0.45)] lg:right-0 lg:bottom-0"
-              onClick={() => setAddRequest({ roomId: null })}
-              data-testid="add-case-button"
-            >
-              {PLUS}
-              จองห้อง
-            </button>
+            // Centred under the plan on every screen, with a slow glow that draws the eye (Pong, 15 Nov 2026); on phones
+            // the room sheet covers it. The wrapper centres it, so the button's own press transform stays free.
+            <div className="pointer-events-none absolute inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[5] flex justify-center lg:bottom-0">
+              <button
+                type="button"
+                className="btn btn-primary book-glow pointer-events-auto rounded-full px-6"
+                onClick={() => setAddRequest({ roomId: null })}
+                data-testid="add-case-button"
+              >
+                {PLUS}
+                จองห้อง
+              </button>
+            </div>
           ) : null}
         </div>
 

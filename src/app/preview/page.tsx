@@ -3,6 +3,7 @@ import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, type BoardDay } from "@/lib/board-day";
+import { boardNotices } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { addDays, parseDay, todayIso, weekDates } from "@/lib/days";
 import { currentRepairPeriods } from "@/lib/repair-store";
@@ -29,6 +30,8 @@ function fixedDay(date: string): BoardDay {
  *   with ?upload=0 the bookings alone, as before MX uploads.
  * - ?mx=1 shows the board as MX sees it (every HN, the upload button); otherwise as the sample's doctor, who sees the
  *   HN of their own bookings. ?admin=1 adds the admin button.
+ * - ?failed=1 shows the board as when its cases cannot be read; ?notices=all puts every kind of notice in the strip at
+ *   once, to see the short badges, the sideways scroll and each bubble.
  */
 export default async function PreviewPage({
   searchParams,
@@ -43,6 +46,8 @@ export default async function PreviewPage({
     mx?: string;
     sample?: string;
     upload?: string;
+    failed?: string;
+    notices?: string;
   }>;
 }) {
   if (process.env.NODE_ENV !== "development") notFound();
@@ -91,6 +96,12 @@ export default async function PreviewPage({
         holiday={holiday}
         roomId={params.room ?? null}
         pathname="/preview"
+        casesUnavailable={Boolean(params.failed)}
+        notices={
+          params.notices === "all"
+            ? boardNotices({ closed: true, holiday: holiday ?? "วันปิยมหาราช", failed: true, missingUpload: day.boardDate, mismatches: 3 })
+            : undefined
+        }
       />
     </div>
   );

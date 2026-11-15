@@ -2354,6 +2354,16 @@ async function main() {
         return main ? main.scrollHeight - main.clientHeight : 0;
       }) : 0;
       if (extra > 0) await page.setViewportSize({ width: size.width, height: size.height + extra });
+      // Let the short entrance animations (a status line fading in, a bubble popping up) end, so the shot shows their
+      // final look; the booking button's glow loops for ever and is left running.
+      await page.evaluate(() =>
+        Promise.all(
+          document
+            .getAnimations()
+            .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+            .map((a) => a.finished.catch(() => null)),
+        ),
+      );
       const box = upTo ? await page.locator(upTo).boundingBox() : null;
       const clip = box ? { x: 0, y: 0, width: size.width, height: Math.ceil(box.y + box.height + 16) } : undefined;
       await page.screenshot({ path: join(SCREENS, file), clip });
@@ -2643,10 +2653,18 @@ async function main() {
           const svg = document.querySelector('svg[aria-label="แปลนห้องผ่าตัด"]').getBoundingClientRect();
           const button = document.querySelector('[data-testid="add-case-button"]').getBoundingClientRect();
           // The drawing is top-aligned in its box (xMidYMin meet) at the plan's own aspect ratio.
-          return { planBottom: svg.top + Math.min(svg.height, (svg.width * 1706) / 1207), buttonTop: button.top };
+          return {
+            planBottom: svg.top + Math.min(svg.height, (svg.width * 1706) / 1207),
+            buttonTop: button.top,
+            buttonCentre: button.left + button.width / 2,
+            glow: getComputedStyle(document.querySelector('[data-testid="add-case-button"]')).animationName,
+          };
         });
         assert(await page.isVisible('[data-testid="no-upload-alert"]'), `${width}x${height}: the no-upload note shows`);
         assert(r.buttonTop >= r.planBottom - 0.5, `${width}x${height}: the booking button clears the plan (${r.buttonTop} < ${r.planBottom})`);
+        // centred, and glowing to draw the eye (Pong, 15 Nov 2026)
+        assert(Math.abs(r.buttonCentre - width / 2) < 1, `${width}x${height}: the booking button is centred (${r.buttonCentre})`);
+        assert(r.glow === "book-glow", `${width}x${height}: the booking button glows (${r.glow})`);
       }
       await page.setViewportSize({ width: 390, height: 844 });
       await ownerShot(page, "board-doctor.png");
@@ -2715,6 +2733,35 @@ async function main() {
       assert((await textOf(board, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569", "no-upload alert");
       assert((await board.locator('[data-testid="mismatch-alert"]').count()) === 0, "nothing to compare yet");
       await ownerShot(board, "board-no-upload.png");
+      // The strip above the plan keeps one height (Pong, 15 Nov 2026); a tap on the badge opens its message as a chat
+      // bubble, and a tap outside, Escape (the badge gets the focus back) or the close button shuts it.
+      assert((await board.evaluate(() => document.querySelector('[data-testid="notice-strip"]').getBoundingClientRect().height)) === 60, "the strip's fixed height");
+      await board.click('[data-testid="no-upload-alert"]');
+      await board.waitForSelector('[data-testid="notice-bubble"]');
+      assert((await board.getAttribute('[data-testid="no-upload-alert"]', "aria-expanded")) === "true", "the badge says its bubble is open");
+      assert((await textOf(board, "#board-notice-bubble-title")) === "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569", "the bubble's title");
+      assert((await textOf(board, "#board-notice-bubble-detail")).includes("15:00–16:00"), "the bubble says when MX uploads");
+      await ownerShot(board, "board-notice-open.png");
+      // from inside the bubble, so the check fails if the focus is not moved back
+      await board.focus('#board-notice-bubble [aria-label="ปิด"]');
+      await board.keyboard.press("Escape");
+      await board.waitForSelector('[data-testid="notice-bubble"]', { state: "detached" });
+      assert(await board.evaluate(() => document.activeElement?.dataset.testid === "no-upload-alert"), "Escape gives the badge the focus back");
+      await board.click('[data-testid="no-upload-alert"]');
+      await board.waitForSelector('[data-testid="notice-bubble"]');
+      await board.click('#board-notice-bubble [aria-label="ปิด"]');
+      await board.waitForSelector('[data-testid="notice-bubble"]', { state: "detached" });
+      assert(await board.evaluate(() => document.activeElement?.dataset.testid === "no-upload-alert"), "the close button gives the badge the focus back");
+      // keyboard focus moving on past the strip closes the bubble
+      await board.click('[data-testid="no-upload-alert"]');
+      await board.waitForSelector('[data-testid="notice-bubble"]');
+      await board.focus("#or-11 .fp-floor");
+      await board.waitForSelector('[data-testid="notice-bubble"]', { state: "detached" });
+      await board.click('[data-testid="no-upload-alert"]');
+      await board.waitForSelector('[data-testid="notice-bubble"]');
+      await board.mouse.click(8, 830);
+      await board.waitForSelector('[data-testid="notice-bubble"]', { state: "detached" });
+      assert((await board.getAttribute('[data-testid="no-upload-alert"]', "aria-expanded")) === "false", "closed by a tap outside");
       await board.click("#or-11 .fp-floor");
       await board.waitForSelector(".case-row");
       assert(JSON.stringify(await sheetRows(board)) === JSON.stringify([["booking", null, null]]), `OR 11: ${JSON.stringify(await sheetRows(board))}`);
