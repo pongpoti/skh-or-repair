@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkCase, roomForSubtype, withAddedCases, type AddedCase } from "./added-cases.ts";
+import { bookingRoom, withAddedCases, type AddedCase } from "./added-cases.ts";
 import { allocationFor, DEPARTMENTS } from "./allocation.ts";
 import {
   checkRepairPeriods,
@@ -180,35 +180,30 @@ test("each half's repair zone covers its closed rooms and none of the rooms in u
   }
 });
 
-test("bookings only go to rooms that operate on the chosen day", () => {
-  const ok = { hn: "123", operation: "ORIF radius", shift: "in" };
-  const today = "2027-01-15";
-  assert.equal(checkCase({ ...ok, date: FIRST_LAST, roomId: "or-12" }, today, REPAIR).ok, true);
-  assert.equal(checkCase({ ...ok, date: FIRST_LAST, roomId: "or-2" }, today, REPAIR).ok, false);
-  assert.equal(checkCase({ ...ok, date: SECOND_DAY, roomId: "or-2" }, today, REPAIR).ok, true);
-  assert.equal(checkCase({ ...ok, date: SECOND_DAY, roomId: "or-12" }, today, REPAIR).ok, false);
-
-  const recovery = checkCase({ ...ok, date: FIRST_LAST, roomId: "or-7" }, today, REPAIR);
-  assert.ok(!recovery.ok);
-  assert.match(recovery.error, /ห้องพักฟื้น/);
-  const instrument = checkCase({ ...ok, date: SECOND_DAY, roomId: "or-6" }, today, REPAIR);
-  assert.ok(!instrument.ok);
-  assert.match(instrument.error, /เครื่องมือ/);
-  const closed = checkCase({ ...ok, date: SECOND_DAY, roomId: "or-9" }, today, REPAIR);
-  assert.ok(!closed.ok);
-  assert.match(closed.error, /ปิด/);
-});
-
-test("a doctor's room follows the repair: own department's room, else the mixed-department room", () => {
-  assert.equal(roomForSubtype("GENSX", FIRST_MONDAY, REPAIR), "or-12");
-  assert.equal(roomForSubtype("ORTHO", FIRST_MONDAY, REPAIR), "or-13");
-  assert.equal(roomForSubtype("URO", FIRST_MONDAY, REPAIR), "or-11");
-  assert.equal(roomForSubtype("NEURO", FIRST_MONDAY, REPAIR), "or-11");
-  assert.equal(roomForSubtype("GENSX", SECOND_DAY, REPAIR), "or-5");
-  assert.equal(roomForSubtype("ORTHO", SECOND_DAY, REPAIR), "or-2");
-  assert.equal(roomForSubtype("EYE", SECOND_DAY, REPAIR), "or-4");
-  assert.equal(roomForSubtype(null, SECOND_DAY, REPAIR), null);
-  assert.equal(roomForSubtype("URO", "2026-11-11", REPAIR), "or-7", "before the repair, the weekly schedule's room");
+test("a booking's room follows the repair: own department's room, else the mixed-department room", () => {
+  const room = (subtype: string | null, date: string) => {
+    const placed = bookingRoom(subtype, "Operation", date, REPAIR);
+    return placed.ok ? placed.roomId : null;
+  };
+  assert.equal(room("GENSX", FIRST_MONDAY), "or-12");
+  assert.equal(room("ORTHO", FIRST_MONDAY), "or-13");
+  assert.equal(room("URO", FIRST_MONDAY), "or-11");
+  assert.equal(room("NEURO", FIRST_MONDAY), "or-11");
+  assert.equal(room("GENSX", FIRST_LAST), "or-12", "the first half's last day");
+  assert.equal(room("GENSX", SECOND_DAY), "or-5");
+  assert.equal(room("ORTHO", SECOND_DAY), "or-2");
+  assert.equal(room("EYE", SECOND_DAY), "or-4");
+  assert.equal(room(null, SECOND_DAY), null);
+  // Room codes that are not departments go to the mixed room: an elective booking never takes the emergency room.
+  for (const code of ["EMER", "INFECT", "MINOR", "MIXED", "UNK", "ANES"]) assert.equal(room(code, FIRST_MONDAY), "or-11", code);
+  assert.equal(room("URO", "2026-11-11"), "or-7", "before the repair, the weekly schedule's room");
+  // never a recovery, instrument or closed room
+  for (const date of [FIRST_MONDAY, SECOND_DAY]) {
+    for (const subtype of Object.keys(DEPARTMENTS)) {
+      const id = room(subtype, date);
+      if (id) assert.equal(roomUse(id, date, REPAIR), "open", `${subtype} on ${date}: ${id}`);
+    }
+  }
 });
 
 test("an added case in a room not operating that day stays off the board", () => {

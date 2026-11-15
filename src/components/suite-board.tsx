@@ -7,11 +7,13 @@ import { AddCase, type Doctor } from "@/components/add-case";
 import { BoardNotices, noticeBadge } from "@/components/board-notices";
 import { CaseFlag, CaseSource } from "@/components/case-source";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
-import { firstBookingDay, type AddedCase } from "@/lib/added-cases";
+import type { AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
 import { boardHref } from "@/lib/days";
+import { displayHn } from "@/lib/hn";
+import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, isSelectableRoom, roomLabel } from "@/lib/rooms";
 import { roomMark, type CaseStatus } from "@/lib/schedule";
@@ -48,6 +50,10 @@ export type CaseAdding = {
   doctor: Doctor;
   /** Today in Thailand, YYYY-MM-DD. */
   today: string;
+  /** The first day the doctor can book (lib/added-cases.ts earliestBookingDay), by the server's clock. */
+  earliest: string;
+  /** The holidays from today to 60 days ahead, which the calendar closes. */
+  holidays: readonly Holiday[];
   mine: readonly AddedCase[];
   onAdd: (input: unknown) => Promise<CaseResult>;
   onRemove: (id: string) => Promise<CaseResult>;
@@ -123,7 +129,7 @@ export function SuiteBoard({
   const [selectedId, setSelectedId] = useState<string | null>(urlRoom);
   const [prevUrl, setPrevUrl] = useState(urlRoom);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const [addRequest, setAddRequest] = useState<{ roomId: string | null } | null>(null);
+  const [addRequest, setAddRequest] = useState<object | null>(null);
   // The notice whose chat bubble is open (BoardNotices).
   const [noticeId, setNoticeId] = useState<string | null>(null);
   const menuWasOpen = useRef(false);
@@ -132,6 +138,9 @@ export function SuiteBoard({
     setPrevUrl(urlRoom);
     setSelectedId(urlRoom);
   }
+  // The booking form can go while open (a refresh that could not read the bookings): a dialog taken off the page says
+  // nothing on its way out, so the request is dropped here, or the form would open by itself when it comes back.
+  if (!adding && addRequest) setAddRequest(null);
 
   const operations = board?.rows ?? NONE;
   const mismatchCount = board?.mismatchCount ?? 0;
@@ -241,7 +250,7 @@ export function SuiteBoard({
               <button
                 type="button"
                 className="btn btn-primary book-glow pointer-events-auto rounded-full px-6"
-                onClick={() => setAddRequest({ roomId: null })}
+                onClick={() => setAddRequest({})}
                 data-testid="add-case-button"
               >
                 {PLUS}
@@ -339,7 +348,7 @@ export function SuiteBoard({
                           {item.shift === "out" ? <span className="badge badge-warning">นอกเวลา</span> : null}
                           {item.hn ? (
                             <span className="text-xs font-semibold text-ink-2 tabular-nums" data-testid="row-hn">
-                              HN {item.hn}
+                              HN {displayHn(item.hn)}
                             </span>
                           ) : null}
                         </p>
@@ -367,10 +376,9 @@ export function SuiteBoard({
           onClosed={() => setAddRequest(null)}
           doctor={adding.doctor}
           today={adding.today}
+          earliest={adding.earliest}
+          holidays={adding.holidays}
           periods={periods}
-          // The form starts on the board's day: the next workday (holidays stepped over) once today's list has closed
-          // at 16:00.
-          firstDay={firstBookingDay(board?.date ?? null, today)}
           initialMine={adding.mine}
           onAdd={adding.onAdd}
           onRemove={adding.onRemove}

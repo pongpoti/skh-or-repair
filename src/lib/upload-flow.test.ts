@@ -347,7 +347,8 @@ test("matching: a booking with the case's HN pairs with it; the rest are unbooke
   const bookings = [
     // Bookings hold the HN normalised (lib/hn.ts): this is 900001's patient.
     booking({ hn: "99000001", roomId: "or-5" }),
-    booking({ hn: "55555", roomId: "or-4", surgeon: "สมหญิง ใจงาม", operation: "Tonsillectomy" }),
+    // No department: the booking keeps the room saved with it (the app cannot pick one), here OR 4.
+    booking({ hn: "55555", roomId: "or-4", subtype: null, surgeon: "สมหญิง ใจงาม", operation: "Tonsillectomy" }),
     booking({ hn: "66666", date: "2026-11-06" }),
   ];
   const result = runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: WEEKLY, bookings });
@@ -373,13 +374,13 @@ test("matching: a booking with no operation name and no HN reads as such; no boo
   const cases = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY)).cases;
   const none = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [] });
   assert.deepEqual([none.bookings, none.matched, none.unbooked.length, none.notInHosxp.length], [0, 0, 7, 0]);
-  const old = booking({ hn: null, roomId: "or-3" });
+  const old = booking({ hn: null, roomId: "or-3", subtype: null });
   const result = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [old] });
   assert.deepEqual(result.notInHosxp, [
     { key: `bk-${old.id}`, roomId: "or-3", room: "OR 3", surgeon: "สมชาย ใจดี", hn: null, operation: "จองห้อง (รอข้อมูล HOSxP)" },
   ]);
   // A booking in a room that does not operate that day is not on the board, so it is not listed either.
-  const closed = matchBookings({ date: THURSDAY, periods: FIRST_HALF, cases: [], bookings: [booking({ roomId: "or-2" })] });
+  const closed = matchBookings({ date: THURSDAY, periods: FIRST_HALF, cases: [], bookings: [booking({ roomId: "or-2", subtype: null })] });
   assert.deepEqual(closed.notInHosxp, []);
 });
 

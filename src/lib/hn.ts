@@ -4,9 +4,6 @@
  * compared in one normalised form. Isomorphic: the booking form checks it too. Never log an HN.
  */
 
-/** Longest HN a booking takes, in characters, before normalising. */
-export const MAX_HN = 15;
-
 const THAI_DIGITS = /[๐-๙]/g;
 
 /**
@@ -27,22 +24,30 @@ export function normalizeHn(raw: string | number | null | undefined): string {
 
 export type CheckedHn = { ok: true; hn: string } | { ok: false; error: string };
 
+/** Hospital numbers at รพ.สมุทรสาคร have 7 digits (Pong, 15 Nov 2026). */
+export const HN_LENGTH = 7;
+
 /**
- * A booking's HN, required: up to 15 letters, digits and dashes once trimmed (Thai and full-width digits count as
- * digits). Returns the normalised form to store.
+ * A booking's HN, required: exactly 7 digits once spaces and dashes are taken out (Thai and full-width digits count as
+ * digits). Returns the normalised form to store and match (normalizeHn: no leading zeros).
  */
 export function checkHn(raw: unknown): CheckedHn {
   const text =
     typeof raw === "string"
       ? raw
-          .trim()
           .normalize("NFKC")
           .replace(THAI_DIGITS, (digit) => String(digit.charCodeAt(0) - 0x0e50))
+          .replace(/[\s-]+/g, "")
       : "";
   if (!text) return { ok: false, error: "ใส่ HN ของผู้ป่วย" };
-  if (text.length > MAX_HN || !/^[0-9A-Za-z-]+$/.test(text)) {
-    return { ok: false, error: `HN ใช้ได้เฉพาะตัวเลข ตัวอักษรอังกฤษ และ - ไม่เกิน ${MAX_HN} ตัว` };
-  }
-  const hn = normalizeHn(text);
-  return hn ? { ok: true, hn } : { ok: false, error: "ใส่ HN ของผู้ป่วย" };
+  if (!/^\d+$/.test(text) || text.length !== HN_LENGTH) return { ok: false, error: `HN ต้องเป็นตัวเลข ${HN_LENGTH} หลัก` };
+  return { ok: true, hn: normalizeHn(text) };
+}
+
+/**
+ * An HN as people read it: a number of digits only is shown with its leading zeros back, as 7 digits ("0123456" is
+ * stored as "123456"); anything else as it is.
+ */
+export function displayHn(hn: string): string {
+  return /^\d{1,6}$/.test(hn) ? hn.padStart(HN_LENGTH, "0") : hn;
 }

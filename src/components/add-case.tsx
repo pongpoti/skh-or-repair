@@ -3,26 +3,34 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
+import { HnField } from "@/components/hn-field";
 import { InlineStatus } from "@/components/inline-status";
+import { ThaiDateField, type DayState } from "@/components/thai-date-field";
 import {
   addDays,
   BOOK_AHEAD_DAYS,
+  bookedRoom,
+  bookingRoom,
   checkCase,
+  cleanOperation,
+  closedDayNote,
+  earliestText,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
-  roomForSubtype,
   type AddedCase,
+  type CaseField,
 } from "@/lib/added-cases";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
-import { thaiDate, workdayIndex } from "@/lib/days";
-import { checkHn } from "@/lib/hn";
-import { repairOn, type RepairPeriods } from "@/lib/repair";
-import { getRoom, isOpenRoom, openRooms, roomLabel, roomUse, unusedRoomsText } from "@/lib/rooms";
+import { thaiDate } from "@/lib/days";
+import { displayHn } from "@/lib/hn";
+import type { Holiday } from "@/lib/holidays";
+import type { RepairPeriods } from "@/lib/repair";
+import { getRoom, roomLabel, roomUse } from "@/lib/rooms";
 import type { Shift } from "@/lib/schedule";
 import { subtypeLabel } from "@/lib/user-labels";
 
 const DIALOG =
-  "m-auto max-h-[calc(100dvh-1.5rem)] w-[min(32rem,calc(100%-1.5rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-surface p-5 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px] sm:p-6";
+  "m-auto max-h-[calc(100dvh-1.5rem)] w-[min(32rem,calc(100%-1.5rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-surface p-4 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px] min-[360px]:p-5 sm:p-6";
 
 const UNSAVED = "บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
 
@@ -45,36 +53,42 @@ function DeptTag({ dept }: { dept: Department | null }) {
   );
 }
 
-const ISO = /^\d{4}-\d{2}-\d{2}$/;
+/** The later of two YYYY-MM-DD days. */
+const later = (a: string, b: string | null) => (b && b > a ? b : a);
 
 /**
- * The doctor's booking of a room, in a dialog: day, room (rooms open that day only under the repair's dates, each with
- * its department), the patient's HN (required: the HOSxP workbook's case is matched by it), the operation's name
- * (optional: the workbook gives it), and in or out of hours. The surgeon is always the signed-in doctor. Below it, the
- * doctor's own bookings from today on, with their HN, each one cancellable. `request` opens it (with a room picked when
- * it came from a room's list).
+ * The doctor's booking of a room for one patient, in a dialog (Pong, 15 Nov 2026): the day, in Thai with a calendar
+ * that offers only the days that can be booked (from the next workday, or the one after once 15:00 has passed, up to
+ * 60 days ahead, never a weekend or holiday); the patient's 7-digit HN on its own card (the HOSxP workbook's case is
+ * matched by it); the operation's name, required; and in or out of hours. A booking is an elective case, so the room
+ * is not asked: the app arranges it from the doctor's department, or the dressing room for a dressing case, and the
+ * form shows which before it is saved. The surgeon is always the signed-in doctor. Below it, the doctor's own bookings
+ * from today on, with their HN, each one cancellable. `request` opens it.
  */
 export function AddCase({
   request,
   onClosed,
   doctor,
   today,
+  earliest,
+  holidays,
   periods,
-  firstDay,
   initialMine,
   onAdd,
   onRemove,
 }: {
-  /** Set to open the dialog; `roomId` preselects a room. */
-  request: { roomId: string | null } | null;
+  /** Set to a new object to open the dialog. */
+  request: object | null;
   onClosed: () => void;
   doctor: Doctor;
   /** Today in Thailand, YYYY-MM-DD. */
   today: string;
+  /** The first day that can be booked, by the server's clock (lib/added-cases.ts earliestBookingDay). */
+  earliest: string;
+  /** The holidays from today to 60 days ahead, closed in the calendar as on the server. */
+  holidays: readonly Holiday[];
   /** The repair's dates (lib/repair-store.ts), which decide the rooms open on each day. */
   periods: RepairPeriods;
-  /** The day the form opens on (lib/added-cases.ts firstBookingDay): the board's own day, past any holiday. */
-  firstDay: string;
   initialMine: readonly AddedCase[];
   onAdd: (input: unknown) => Promise<CaseResult>;
   onRemove: (id: string) => Promise<CaseResult>;
@@ -82,14 +96,24 @@ export function AddCase({
   const router = useRouter();
   const ref = useRef<HTMLDialogElement>(null);
   const hnRef = useRef<HTMLInputElement>(null);
-  const [date, setDate] = useState(firstDay);
-  // The room the doctor chose (from a room's list or in the grid), or null to follow their department's room.
-  const [picked, setPicked] = useState<string | null>(null);
+  const operationRef = useRef<HTMLInputElement>(null);
+  const dateRef = useRef<HTMLDivElement>(null);
+  // A later first day the server gave when 15:00 passed while the form was open, until the page brings its own.
+  const [movedOn, setMovedOn] = useState<string | null>(null);
+  // The page's own first day replaces it: after midnight, say, the first day can be earlier than the one the server
+  // gave the evening before (Friday 15:00 gives Tuesday; Saturday gives Monday).
+  const [prevEarliest, setPrevEarliest] = useState(earliest);
+  if (prevEarliest !== earliest) {
+    setPrevEarliest(earliest);
+    setMovedOn(null);
+  }
+  const first = later(earliest, prevEarliest !== earliest ? null : movedOn);
+  const [date, setDate] = useState(first);
   const [hn, setHn] = useState("");
-  // The shown error is about the HN, so the box is marked for screen readers too, not only by the message.
-  const [hnInvalid, setHnInvalid] = useState(false);
   const [operation, setOperation] = useState("");
   const [shift, setShift] = useState<Shift>("in");
+  // The field the shown error is about, marked for screen readers too, not only by the message.
+  const [invalid, setInvalid] = useState<CaseField | null>(null);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
   // Which action the shown answer is about: a save's is said beside จองห้อง, a cancel's under the list it changed.
@@ -105,17 +129,30 @@ export function AddCase({
     setMine([...initialMine]);
   }
 
-  // Opening starts a fresh form on the first open day, with the asked-for room or the doctor's department's room.
+  // At 15:00 the page refreshes with a later first day (components/board-refresh.tsx). A picked day that can no longer
+  // be booked moves on to it, and the form says why.
+  const [prevFirst, setPrevFirst] = useState(first);
+  if (prevFirst !== first) {
+    setPrevFirst(first);
+    if (date < first) {
+      setDate(first);
+      setAbout("save");
+      setInvalid("date");
+      setError(earliestText(today, first, holidays));
+      setDone("");
+    }
+  }
+
+  // Opening starts a fresh form on the first day that can be booked.
   const [prevRequest, setPrevRequest] = useState(request);
   if (prevRequest !== request) {
     setPrevRequest(request);
     if (request) {
-      setDate(firstDay);
-      setPicked(request.roomId);
+      setDate(first);
       setHn("");
-      setHnInvalid(false);
       setOperation("");
       setShift("in");
+      setInvalid(null);
       setError("");
       setDone("");
       setConfirming(null);
@@ -129,14 +166,25 @@ export function AddCase({
     if (!request && dialog.open) dialog.close();
   }, [request]);
 
-  function changeDate(value: string) {
-    setDate(value);
-    setError("");
-    setDone("");
+  function edited(field: CaseField) {
+    // A save's message goes with any change, so its mark goes too: a field left red with nothing said would puzzle.
+    setInvalid((current) => (current === field || about === "save" ? null : current));
+    if (about === "save") {
+      setError("");
+      setDone("");
+    }
+  }
+
+  function focusField(field: CaseField | undefined) {
+    if (field === "hn") hnRef.current?.focus();
+    else if (field === "operation") operationRef.current?.focus();
+    else if (field === "date") dateRef.current?.querySelector<HTMLElement>("button")?.focus();
   }
 
   function apply(result: CaseResult, from: "save" | "remove") {
     setAbout(from);
+    // A cancel's answer replaces a save's message, so the field that message marked is cleared too.
+    if (from === "remove") setInvalid(null);
     if (result.mine) setMine(result.mine);
     if (result.ok) {
       setDone(result.message);
@@ -148,32 +196,54 @@ export function AddCase({
     }
   }
 
+  // A field to focus once a save is over: the fields are disabled while it runs, and a disabled field takes no focus.
+  const focusAfter = useRef<CaseField | null>(null);
+  useEffect(() => {
+    const field = focusAfter.current;
+    if (pending || !field) return;
+    focusAfter.current = null;
+    if (field === "hn") hnRef.current?.focus();
+    else if (field === "operation") operationRef.current?.focus();
+    else if (field === "date") dateRef.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [pending]);
+
+  function refuse(message: string, field: CaseField | undefined, saving = false) {
+    setAbout("save");
+    setError(message);
+    setDone("");
+    setInvalid(field ?? null);
+    if (saving) focusAfter.current = field ?? null;
+    else focusField(field);
+  }
+
   function save(event: React.FormEvent) {
     event.preventDefault();
-    const input = { date, roomId, hn, operation, shift };
-    const checked = checkCase(input, today, periods);
+    const checked = checkCase({ date, hn, operation, shift }, { today, earliest: first, periods, subtype: doctor.subtype, holidays });
     if (!checked.ok) {
-      setAbout("save");
-      setError(checked.error);
-      setDone("");
-      // The day and room come from pickers, so a missing or mistyped HN is the usual problem: back to its box.
-      const hnCheck = checkHn(hn);
-      const aboutHn = !hnCheck.ok && hnCheck.error === checked.error;
-      setHnInvalid(aboutHn);
-      if (aboutHn) hnRef.current?.focus();
+      refuse(checked.error, checked.field);
       return;
     }
-    setHnInvalid(false);
+    setInvalid(null);
     startTransition(async () => {
       try {
-        // The checked value carries the HN normalised; the server checks it all again.
-        const result = await onAdd(checked.value);
+        // The checked value carries the HN normalised and the room; the server checks it all again and picks the room
+        // itself, from the doctor's department as the database has it.
+        const result = await onAdd({ date, hn, operation, shift });
+        if (!result.ok && result.earliest) {
+          // 15:00 passed while the form was open: the calendar moves on with the server's first day.
+          setMovedOn(result.earliest);
+          setPrevFirst(later(earliest, result.earliest));
+          if (date < result.earliest) setDate(result.earliest);
+          refuse(result.error, "date", true);
+          if (result.mine) setMine(result.mine);
+          return;
+        }
         apply(result, "save");
         if (result.ok) {
-          // Ready for the next patient on the same day and room.
+          // Ready for the next patient on the same day.
           setHn("");
           setOperation("");
-          hnRef.current?.focus();
+          focusAfter.current = "hn";
         }
       } catch {
         setAbout("save");
@@ -201,20 +271,19 @@ export function AddCase({
     });
   }
 
-  const weekend = date !== "" && ISO.test(date) && workdayIndex(date) === null;
   const specialty = subtypeLabel("DR", doctor.subtype);
-  // The day whose rooms the form offers: the chosen day, or the first open day while the field is being typed.
-  const roomDay = ISO.test(date) ? date : firstDay;
-  const repair = repairOn(roomDay, periods);
-  const unused = unusedRoomsText(roomDay, periods);
-  // Worked out from the day on each render, so a date passing through other days while it is typed never loses the
-  // doctor's pick: a picked room counts while it is open that day; otherwise the department's room (the ventilation
-  // repair moves the rooms by date), or none.
-  const roomId = picked && isOpenRoom(picked, roomDay, periods) ? picked : (roomForSubtype(doctor.subtype, roomDay, periods) ?? "");
-  // The HN is saved in its matching form (no leading zeros or dashes, upper case), so the doctor's list may show it
-  // differently from what was typed; say so under the box before saving.
-  const hnChecked = checkHn(hn);
-  const savedHn = hnChecked.ok && hnChecked.hn !== hn.trim() ? hnChecked.hn : null;
+  const last = addDays(today, BOOK_AHEAD_DAYS);
+  const dayState = (iso: string): DayState => {
+    const note = closedDayNote(iso, holidays);
+    return note ? { disabled: true, note } : { disabled: false };
+  };
+  // The room the server will pick, shown before saving: worked out again on each render from the day and the name.
+  const room = bookingRoom(doctor.subtype, cleanOperation(operation), date, periods);
+  const allocation = room.ok ? allocationFor(room.roomId, date, periods) : null;
+  const shownRoom = room.ok ? getRoom(room.roomId) : null;
+  const saveError = about === "save" && error ? error : "";
+  // The message under จองห้อง names the field it is about, for screen readers on that field.
+  const describe = (field: CaseField, own?: string) => [own, invalid === field && saveError ? "case-save-status" : null].filter(Boolean).join(" ") || undefined;
 
   return (
     // While a save runs the dialog stays open (Escape too), so its answer lands in the dialog that sent it.
@@ -234,8 +303,13 @@ export function AddCase({
             </h2>
             <p className="mt-0.5 text-sm text-ink-2">
               ศัลยแพทย์ <span className="font-semibold text-ink">{doctor.name}</span>
-              {specialty ? <span className="text-muted"> · {specialty}</span> : null}
             </p>
+            {/* The department on a line of its own (Pong, 15 Nov 2026): it picks the room. */}
+            {specialty ? (
+              <p className="text-sm text-ink-3" data-testid="case-dept">
+                {specialty}
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -251,125 +325,112 @@ export function AddCase({
           </button>
         </div>
 
-        <div className="mt-5 space-y-4">
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">วันที่ผ่าตัด</span>
-            <input
-              type="date"
+        {/*
+          Locked while a save runs, so what is saved is what the doctor sees: an HN corrected during a slow save would
+          otherwise be cleared by the save's answer, with the old HN booked. min-w-0: a fieldset is as wide as its
+          content by default, which would push the form past a narrow phone's edge.
+        */}
+        <fieldset disabled={pending} className="mt-5 min-w-0 space-y-4">
+          <div ref={dateRef}>
+            <label htmlFor="case-date" className="text-sm font-semibold text-ink">
+              วันที่ผ่าตัด
+            </label>
+            <ThaiDateField
+              id="case-date"
               value={date}
-              min={today}
-              max={addDays(today, BOOK_AHEAD_DAYS)}
-              onChange={(event) => changeDate(event.target.value)}
-              className="field field-text mt-1.5"
-              required
-              data-testid="case-date"
-            />
-            <span className={`mt-1 block text-xs ${weekend ? "font-semibold text-[var(--stop)]" : "text-muted"}`}>
-              {weekend ? "วันเสาร์และอาทิตย์ไม่มีตารางผ่าตัด" : date ? thaiDate(date) : "เลือกวัน"}
-            </span>
-          </label>
-
-          <fieldset>
-            <legend className="text-sm font-semibold text-ink">ห้องผ่าตัด</legend>
-            <div className="mt-1.5 grid grid-cols-5 gap-1.5" data-testid="case-rooms">
-              {openRooms(roomDay, periods).map((room) => {
-                const allocation = date && !weekend ? allocationFor(room.id, date, periods) : null;
-                return (
-                  <label key={room.id} className={OPTION}>
-                    <input
-                      type="radio"
-                      name="room"
-                      value={room.id}
-                      checked={roomId === room.id}
-                      onChange={() => {
-                        setPicked(room.id);
-                        setError("");
-                        setDone("");
-                      }}
-                      className="sr-only"
-                    />
-                    <span className="text-sm font-bold whitespace-nowrap">{roomLabel(room)}</span>
-                    {allocation ? (
-                      allocation.split ? (
-                        <span className="flex flex-col items-center gap-0.5">
-                          <DeptTag dept={allocation.am} />
-                          <DeptTag dept={allocation.pm} />
-                        </span>
-                      ) : (
-                        <DeptTag dept={allocation.am} />
-                      )
-                    ) : (
-                      <span className="text-[0.6875rem] leading-5 text-muted">–</span>
-                    )}
-                  </label>
-                );
-              })}
-            </div>
-            {unused ? (
-              <p className="mt-1 text-xs text-muted" data-testid="case-rooms-note">
-                {repair ? `ช่วงปิดซ่อมห้องผ่าตัด · ${unused}` : unused}
-              </p>
-            ) : null}
-          </fieldset>
-
-          <label className="block">
-            <span className="text-sm font-semibold text-ink">HN ผู้ป่วย</span>
-            {/*
-              HOSxP numbers are digits, so phones show the number pad; letters and dashes typed on a keyboard or
-              pasted are still taken. No maxLength: a pasted number cut short without a word could match another
-              patient, so a long one is refused with a message instead. No autocomplete: the browser must not keep a
-              list of patients' HNs.
-            */}
-            <input
-              ref={hnRef}
-              value={hn}
-              onChange={(event) => {
-                setHn(event.target.value);
-                setHnInvalid(false);
-                setError("");
-                setDone("");
+              onChange={(iso) => {
+                setDate(iso);
+                edited("date");
               }}
-              inputMode="numeric"
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              aria-invalid={hnInvalid || undefined}
-              aria-describedby={savedHn ? "case-hn-saved" : undefined}
-              className="field field-text mt-1.5 tabular-nums"
-              required
-              data-testid="case-hn"
+              min={first}
+              max={last}
+              dayState={dayState}
+              invalid={invalid === "date"}
+              describedBy={describe("date", "case-date-hint")}
+              testId="case-date"
+              today={today}
             />
-            {savedHn ? (
-              <span id="case-hn-saved" className="mt-1 block text-xs text-muted">
-                บันทึกเป็น <span className="tabular-nums">{savedHn}</span>
-              </span>
-            ) : null}
-          </label>
+            <p id="case-date-hint" className="mt-1 text-xs text-ink-3" data-testid="case-date-hint">
+              {earliestText(today, first, holidays)}
+            </p>
+          </div>
 
-          <label className="block">
+          <HnField
+            id="case-hn"
+            value={hn}
+            onChange={(digits) => {
+              setHn(digits);
+              edited("hn");
+            }}
+            inputRef={hnRef}
+            invalid={invalid === "hn"}
+            describedBy={describe("hn")}
+            testId="case-hn"
+          />
+
+          <div>
             <span className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-semibold text-ink">
-                การผ่าตัด <span className="font-normal text-muted">(ไม่บังคับ)</span>
-              </span>
+              <label htmlFor="case-operation" className="text-sm font-semibold text-ink">
+                การผ่าตัด
+              </label>
               <span className="text-xs text-muted tabular-nums">
                 {operation.length}/{MAX_OPERATION}
               </span>
             </span>
             <input
+              id="case-operation"
+              ref={operationRef}
               value={operation}
               onChange={(event) => {
                 setOperation(event.target.value);
-                setError("");
-                setDone("");
+                edited("operation");
               }}
               maxLength={MAX_OPERATION}
               autoComplete="off"
               placeholder="เช่น Lap chole, ORIF radius"
+              required
+              aria-required="true"
+              aria-invalid={invalid === "operation" || undefined}
+              aria-describedby={describe("operation")}
               className="field field-text mt-1.5"
               data-testid="case-operation"
             />
-          </label>
+          </div>
+
+          {/* No room to pick: the app arranges it, and says which before the booking is saved. */}
+          <div>
+            <p className="text-sm font-semibold text-ink" id="case-room-label">
+              ห้องผ่าตัด
+            </p>
+            <div
+              className="mt-1.5 flex min-h-12 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-line bg-surface-2 px-3 py-2"
+              role="status"
+              aria-labelledby="case-room-label"
+              data-testid="case-room"
+              data-room-id={room.ok ? room.roomId : undefined}
+            >
+              {room.ok ? (
+                <>
+                  <span className="text-[0.9375rem] font-bold text-ink">{shownRoom ? roomLabel(shownRoom) : room.roomId}</span>
+                  {allocation?.split ? (
+                    <>
+                      <DeptTag dept={allocation.am} />
+                      <DeptTag dept={allocation.pm} />
+                    </>
+                  ) : allocation ? (
+                    <DeptTag dept={allocation.am} />
+                  ) : null}
+                  <span className="basis-full text-xs text-ink-3" data-testid="case-room-why">
+                    {room.dressing ? "ห้องทำแผล: ชื่อการผ่าตัดเป็นการทำแผล" : "จัดให้อัตโนมัติตามสาขาของคุณ (เคสนัด)"}
+                  </span>
+                </>
+              ) : (
+                <span className="text-sm font-semibold text-[var(--stop)]" data-testid="case-room-why">
+                  {room.error}
+                </span>
+              )}
+            </div>
+          </div>
 
           <fieldset>
             <legend className="text-sm font-semibold text-ink">เวลา</legend>
@@ -394,13 +455,13 @@ export function AddCase({
               ))}
             </div>
           </fieldset>
-        </div>
+        </fieldset>
 
         {/* A save's answer is said quietly beside จองห้อง: left of the buttons, or on its own line above them on a phone. */}
         <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
-          {about === "save" && error ? (
-            <InlineStatus tone="warning" role="alert" className="sm:flex-1">
-              {error}
+          {saveError ? (
+            <InlineStatus tone="warning" role="alert" className="sm:flex-1" id="case-save-status" testId="case-save-status">
+              {saveError}
             </InlineStatus>
           ) : about === "save" && done ? (
             <InlineStatus tone="success" role="status" className="sm:flex-1">
@@ -440,15 +501,17 @@ export function AddCase({
         ) : (
           <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-white/70" data-testid="my-cases">
             {mine.map((item) => {
-              const room = getRoom(item.roomId);
+              // Where the booking is now (the app picks the room again if the repair's dates moved).
+              const roomId = bookedRoom(item, periods).roomId;
+              const room = getRoom(roomId);
               const asking = confirming === item.id;
               // A case whose room is not in use that day (the ventilation repair moves the rooms) is not on the board.
-              const offBoard = roomUse(item.roomId, item.date, periods) !== "open";
+              const offBoard = roomUse(roomId, item.date, periods) !== "open";
               // Names the booking for the cancel button's screen-reader label: several can share a day and an HN.
               const what = [
                 thaiDate(item.date, "short"),
-                room ? roomLabel(room) : item.roomId,
-                item.hn ? `HN ${item.hn}` : item.operation,
+                room ? roomLabel(room) : roomId,
+                item.hn ? `HN ${displayHn(item.hn)}` : item.operation,
               ]
                 .filter(Boolean)
                 .join(" ");
@@ -456,14 +519,14 @@ export function AddCase({
                 <li key={item.id} className="flex items-center gap-3 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-ink-2">
-                      {thaiDate(item.date, "short")} · {room ? roomLabel(room) : item.roomId}
+                      {thaiDate(item.date, "short")} · {room ? roomLabel(room) : roomId}
                       {item.shift === "out" ? <span className="badge badge-warning ml-1.5 align-middle">นอกเวลา</span> : null}
                       {offBoard ? <span className="badge badge-warning ml-1.5 align-middle">ห้องนี้ไม่เปิดวันนั้น</span> : null}
                     </p>
                     {/* Cases saved before bookings carried an HN have none; they show their operation as before. */}
                     {item.hn ? (
                       <p className="text-sm font-semibold break-all text-ink tabular-nums" data-testid="my-case-hn">
-                        HN {item.hn}
+                        HN {displayHn(item.hn)}
                       </p>
                     ) : null}
                     <p className={`text-sm break-words ${item.operation ? (item.hn ? "text-ink-2" : "font-semibold text-ink") : "text-muted"}`}>

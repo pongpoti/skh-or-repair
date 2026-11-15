@@ -93,12 +93,15 @@ test("MX uploads from 15:00:00 up to 16:00, every day", () => {
   assert.equal(inUploadWindow(at("2026-12-05T15:30:00")), true, "a holiday too");
 });
 
-test("the board refreshes itself at 16:00 and at midnight", () => {
-  assert.equal(nextBoardRefresh(at("2026-11-16T09:00:00")).toISOString(), at("2026-11-16T16:00:00").toISOString());
+test("the board refreshes itself at 15:00, at 16:00 and at midnight", () => {
+  // 15:00 too: bookings for the next workday close then, and the booking form's earliest day moves on.
+  assert.equal(nextBoardRefresh(at("2026-11-16T09:00:00")).toISOString(), at("2026-11-16T15:00:00").toISOString());
+  assert.equal(nextBoardRefresh(at("2026-11-16T14:59:59")).toISOString(), at("2026-11-16T15:00:00").toISOString());
+  assert.equal(nextBoardRefresh(at("2026-11-16T15:00:00")).toISOString(), at("2026-11-16T16:00:00").toISOString());
   assert.equal(nextBoardRefresh(at("2026-11-16T15:59:59")).toISOString(), at("2026-11-16T16:00:00").toISOString());
   assert.equal(nextBoardRefresh(at("2026-11-16T16:00:00")).toISOString(), at("2026-11-17T00:00:00").toISOString());
   assert.equal(nextBoardRefresh(at("2026-12-31T20:00:00")).toISOString(), at("2027-01-01T00:00:00").toISOString());
-  assert.equal(nextBoardRefresh(at("2026-11-17T00:00:00")).toISOString(), at("2026-11-17T16:00:00").toISOString());
+  assert.equal(nextBoardRefresh(at("2026-11-17T00:00:00")).toISOString(), at("2026-11-17T15:00:00").toISOString());
 });
 
 test("loading the board's day: BOT holidays when they come, weekdays and EXTRA_HOLIDAYS when they do not", async (t) => {

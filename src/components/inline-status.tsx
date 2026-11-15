@@ -30,16 +30,19 @@ export function InlineStatus({
   role,
   className = "",
   children,
+  id,
   testId,
 }: {
   tone: keyof typeof ICON;
+  /** For a field's aria-describedby. */
+  id?: string;
   role?: "status" | "alert";
   className?: string;
   children: React.ReactNode;
   testId?: string;
 }) {
   return (
-    <p className={`inline-status inline-status-${tone} ${className}`} role={role} data-testid={testId}>
+    <p className={`inline-status inline-status-${tone} ${className}`} role={role} id={id} data-testid={testId}>
       <svg
         width="14"
         height="14"

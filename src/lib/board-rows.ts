@@ -1,4 +1,4 @@
-import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
+import { NO_OPERATION_LABEL, bookedRoom, type AddedCase } from "./added-cases.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
 import { placeAll } from "./placement.ts";
@@ -96,16 +96,21 @@ function departmentName(dept: DeptCode | null): string | null {
  *
  * Workbook cases are placed first, in file order, by the report's rules under `periods` (lib/placement.ts): the
  * same rooms the upload gave them, unless an admin has moved the repair's dates since, and then the rooms in use
- * under the new dates. Matching is one to one by normalised HN on the board's date, in a stable order: workbook cases
- * in file order each take the earliest booking with their HN that is still free. A matched pair is shown once, in the
- * booking's room (the surgeon reserved it), with the workbook's operation name and status. A workbook case left over
- * shows in the room placement gave it, flagged "unbooked". A booking left over shows in its room, flagged
- * "not-in-hosxp" only when a workbook was uploaded (without one there is nothing to compare with). A row whose room is
- * not open that day (closed, a recovery or instrument room, or a workbook case not placed) is left off the board.
+ * under the new dates. Bookings are placed again too (lib/added-cases.ts bookedRoom): the app, not the doctor, picks
+ * their rooms. Matching is one to one by normalised HN on the board's date, in a stable order: workbook cases in file
+ * order each take the earliest booking with their HN that is still free. A matched pair is shown once, with the
+ * workbook's operation name and status, in the room placement gave the workbook case: MX's list is the day's schedule,
+ * and it spreads a department's cases over its rooms, which a booking alone cannot. The one exception is a booking the
+ * form sent to the dressing room by its name (Pong's dressing words, not all of which the workbook's rule shares): it
+ * stays there, as the doctor was told. A workbook case left over shows in its placed room, flagged "unbooked". A
+ * booking left over shows in its room, flagged "not-in-hosxp" only when a workbook was uploaded (without one there is
+ * nothing to compare with). A row whose room is not open that day (closed, a recovery or instrument room, or a
+ * workbook case not placed) is left off the board.
  */
 export function buildBoardRows({ date, periods, workbook, bookings, viewer }: BoardRowsInput): BoardRows {
   const uploaded = workbook !== null;
   const today = bookings.filter((item) => item.date === date);
+  const bookingRooms = new Map(today.map((booking) => [booking, bookedRoom(booking, periods)]));
   const cases = [...(workbook ?? [])].sort((a, b) => a.position - b.position);
   const placements = placeAll(cases, date, periods);
   const placedIn = new Map<WorkbookCase, string | null>();
@@ -142,7 +147,8 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
     const booking = pairs.get(item);
     if (booking) {
       const placed = placedIn.get(item) ?? null;
-      const roomId = open(booking.roomId) ? booking.roomId : open(placed) ? placed : null;
+      const own = bookingRooms.get(booking) ?? { roomId: booking.roomId, dressing: false };
+      const roomId = own.dressing && open(own.roomId) ? own.roomId : open(placed) ? placed : open(own.roomId) ? own.roomId : null;
       if (!roomId) continue;
       const hn = booking.hn ?? normalizeHn(item.hn);
       rows.push({
@@ -177,10 +183,11 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   }
 
   for (const booking of today) {
-    if (taken.has(booking) || !open(booking.roomId)) continue;
+    const roomId = bookingRooms.get(booking)?.roomId ?? booking.roomId;
+    if (taken.has(booking) || !open(roomId)) continue;
     rows.push({
       id: `bk-${booking.id}`,
-      roomId: booking.roomId,
+      roomId,
       procedure: booking.operation || NO_OPERATION_LABEL,
       surgeon: booking.surgeon,
       specialty: subtypeLabel("DR", booking.subtype),
