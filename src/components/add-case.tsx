@@ -9,13 +9,14 @@ import {
   BOOK_AHEAD_DAYS,
   checkCase,
   MAX_OPERATION,
-  nextWorkday,
+  NO_OPERATION_LABEL,
   roomForSubtype,
   type AddedCase,
 } from "@/lib/added-cases";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate, workdayIndex } from "@/lib/days";
-import { repairOn } from "@/lib/repair";
+import { checkHn } from "@/lib/hn";
+import { repairOn, type RepairPeriods } from "@/lib/repair";
 import { getRoom, isOpenRoom, openRooms, roomLabel, roomUse, unusedRoomsText } from "@/lib/rooms";
 import type { Shift } from "@/lib/schedule";
 import { subtypeLabel } from "@/lib/user-labels";
@@ -47,16 +48,19 @@ function DeptTag({ dept }: { dept: Department | null }) {
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * The doctor's form for a new case, in a dialog: day, room (rooms open that day only, each with its department),
- * operation name, and in or out of hours. The surgeon is always the signed-in doctor. Below it, the doctor's own
- * cases from today on, each removable. `request` opens it (with a room picked when it came from a room's list).
+ * The doctor's booking of a room, in a dialog: day, room (rooms open that day only under the repair's dates, each with
+ * its department), the patient's HN (required: the HOSxP workbook's case is matched by it), the operation's name
+ * (optional: the workbook gives it), and in or out of hours. The surgeon is always the signed-in doctor. Below it, the
+ * doctor's own bookings from today on, with their HN, each one cancellable. `request` opens it (with a room picked when
+ * it came from a room's list).
  */
 export function AddCase({
   request,
   onClosed,
   doctor,
   today,
-  todayClosed,
+  periods,
+  firstDay,
   initialMine,
   onAdd,
   onRemove,
@@ -67,19 +71,23 @@ export function AddCase({
   doctor: Doctor;
   /** Today in Thailand, YYYY-MM-DD. */
   today: string;
-  /** The suite is closed today (a holiday), so the form starts on the next weekday. */
-  todayClosed: boolean;
+  /** The repair's dates (lib/repair-store.ts), which decide the rooms open on each day. */
+  periods: RepairPeriods;
+  /** The day the form opens on (lib/added-cases.ts firstBookingDay): the board's own day, past any holiday. */
+  firstDay: string;
   initialMine: readonly AddedCase[];
   onAdd: (input: unknown) => Promise<CaseResult>;
   onRemove: (id: string) => Promise<CaseResult>;
 }) {
   const router = useRouter();
   const ref = useRef<HTMLDialogElement>(null);
-  const opRef = useRef<HTMLInputElement>(null);
-  const firstDay = nextWorkday(todayClosed ? addDays(today, 1) : today);
+  const hnRef = useRef<HTMLInputElement>(null);
   const [date, setDate] = useState(firstDay);
   // The room the doctor chose (from a room's list or in the grid), or null to follow their department's room.
   const [picked, setPicked] = useState<string | null>(null);
+  const [hn, setHn] = useState("");
+  // The shown error is about the HN, so the box is marked for screen readers too, not only by the message.
+  const [hnInvalid, setHnInvalid] = useState(false);
   const [operation, setOperation] = useState("");
   const [shift, setShift] = useState<Shift>("in");
   const [error, setError] = useState("");
@@ -102,6 +110,8 @@ export function AddCase({
     if (request) {
       setDate(firstDay);
       setPicked(request.roomId);
+      setHn("");
+      setHnInvalid(false);
       setOperation("");
       setShift("in");
       setError("");
@@ -137,20 +147,29 @@ export function AddCase({
 
   function save(event: React.FormEvent) {
     event.preventDefault();
-    const input = { date, roomId, operation, shift };
-    const checked = checkCase(input, today);
+    const input = { date, roomId, hn, operation, shift };
+    const checked = checkCase(input, today, periods);
     if (!checked.ok) {
       setError(checked.error);
       setDone("");
+      // The day and room come from pickers, so a missing or mistyped HN is the usual problem: back to its box.
+      const hnCheck = checkHn(hn);
+      const aboutHn = !hnCheck.ok && hnCheck.error === checked.error;
+      setHnInvalid(aboutHn);
+      if (aboutHn) hnRef.current?.focus();
       return;
     }
+    setHnInvalid(false);
     startTransition(async () => {
       try {
+        // The checked value carries the HN normalised; the server checks it all again.
         const result = await onAdd(checked.value);
         apply(result);
         if (result.ok) {
+          // Ready for the next patient on the same day and room.
+          setHn("");
           setOperation("");
-          opRef.current?.focus();
+          hnRef.current?.focus();
         }
       } catch {
         setError(UNSAVED);
@@ -168,7 +187,7 @@ export function AddCase({
       try {
         apply(await onRemove(id));
       } catch {
-        setError("ลบไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง");
+        setError("ยกเลิกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง");
         setDone("");
       } finally {
         setConfirming(null);
@@ -180,12 +199,16 @@ export function AddCase({
   const specialty = subtypeLabel("DR", doctor.subtype);
   // The day whose rooms the form offers: the chosen day, or the first open day while the field is being typed.
   const roomDay = ISO.test(date) ? date : firstDay;
-  const repair = repairOn(roomDay);
-  const unused = unusedRoomsText(roomDay);
+  const repair = repairOn(roomDay, periods);
+  const unused = unusedRoomsText(roomDay, periods);
   // Worked out from the day on each render, so a date passing through other days while it is typed never loses the
   // doctor's pick: a picked room counts while it is open that day; otherwise the department's room (the ventilation
   // repair moves the rooms by date), or none.
-  const roomId = picked && isOpenRoom(picked, roomDay) ? picked : (roomForSubtype(doctor.subtype, roomDay) ?? "");
+  const roomId = picked && isOpenRoom(picked, roomDay, periods) ? picked : (roomForSubtype(doctor.subtype, roomDay, periods) ?? "");
+  // The HN is saved in its matching form (no leading zeros or dashes, upper case), so the doctor's list may show it
+  // differently from what was typed; say so under the box before saving.
+  const hnChecked = checkHn(hn);
+  const savedHn = hnChecked.ok && hnChecked.hn !== hn.trim() ? hnChecked.hn : null;
 
   return (
     // While a save runs the dialog stays open (Escape too), so its answer lands in the dialog that sent it.
@@ -201,7 +224,7 @@ export function AddCase({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 id="add-case-title" className="text-lg font-bold">
-              เพิ่มเคสผ่าตัด
+              จองห้องผ่าตัด
             </h2>
             <p className="mt-0.5 text-sm text-ink-2">
               ศัลยแพทย์ <span className="font-semibold text-ink">{doctor.name}</span>
@@ -210,7 +233,7 @@ export function AddCase({
           </div>
           <button
             type="button"
-            className="btn btn-ghost size-10 min-h-0 shrink-0 rounded-full p-0"
+            className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
             aria-label="ปิด"
             title="ปิด"
             disabled={pending}
@@ -243,8 +266,8 @@ export function AddCase({
           <fieldset>
             <legend className="text-sm font-semibold text-ink">ห้องผ่าตัด</legend>
             <div className="mt-1.5 grid grid-cols-5 gap-1.5" data-testid="case-rooms">
-              {openRooms(roomDay).map((room) => {
-                const allocation = date && !weekend ? allocationFor(room.id, date) : null;
+              {openRooms(roomDay, periods).map((room) => {
+                const allocation = date && !weekend ? allocationFor(room.id, date, periods) : null;
                 return (
                   <label key={room.id} className={OPTION}>
                     <input
@@ -284,14 +307,50 @@ export function AddCase({
           </fieldset>
 
           <label className="block">
+            <span className="text-sm font-semibold text-ink">HN ผู้ป่วย</span>
+            {/*
+              HOSxP numbers are digits, so phones show the number pad; letters and dashes typed on a keyboard or
+              pasted are still taken. No maxLength: a pasted number cut short without a word could match another
+              patient, so a long one is refused with a message instead. No autocomplete: the browser must not keep a
+              list of patients' HNs.
+            */}
+            <input
+              ref={hnRef}
+              value={hn}
+              onChange={(event) => {
+                setHn(event.target.value);
+                setHnInvalid(false);
+                setError("");
+                setDone("");
+              }}
+              inputMode="numeric"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              aria-invalid={hnInvalid || undefined}
+              aria-describedby={savedHn ? "case-hn-saved" : undefined}
+              className="field field-text mt-1.5 tabular-nums"
+              required
+              data-testid="case-hn"
+            />
+            {savedHn ? (
+              <span id="case-hn-saved" className="mt-1 block text-xs text-muted">
+                บันทึกเป็น <span className="tabular-nums">{savedHn}</span>
+              </span>
+            ) : null}
+          </label>
+
+          <label className="block">
             <span className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-semibold text-ink">การผ่าตัด</span>
+              <span className="text-sm font-semibold text-ink">
+                การผ่าตัด <span className="font-normal text-muted">(ไม่บังคับ)</span>
+              </span>
               <span className="text-xs text-muted tabular-nums">
                 {operation.length}/{MAX_OPERATION}
               </span>
             </span>
             <input
-              ref={opRef}
               value={operation}
               onChange={(event) => {
                 setOperation(event.target.value);
@@ -302,7 +361,6 @@ export function AddCase({
               autoComplete="off"
               placeholder="เช่น Lap chole, ORIF radius"
               className="field field-text mt-1.5"
-              required
               data-testid="case-operation"
             />
           </label>
@@ -348,27 +406,35 @@ export function AddCase({
             ปิด
           </button>
           <button type="submit" disabled={pending} aria-busy={pending} className="btn btn-primary" data-testid="case-submit">
-            {pending ? "กำลังบันทึก…" : "เพิ่มเคส"}
+            {pending ? "กำลังบันทึก…" : "จองห้อง"}
           </button>
         </div>
       </form>
 
       <section className="mt-6 border-t border-line pt-4" aria-labelledby="my-cases-title">
         <h3 id="my-cases-title" className="flex items-center gap-2 text-sm font-bold">
-          เคสที่ฉันเพิ่ม
+          การจองของฉัน
           <span className="count-tag">
             <span className="tabular-nums">{mine.length}</span> รายการ
           </span>
         </h3>
         {mine.length === 0 ? (
-          <p className="mt-2 text-sm text-muted">ยังไม่มีเคสตั้งแต่วันนี้</p>
+          <p className="mt-2 text-sm text-muted">ยังไม่มีการจองตั้งแต่วันนี้</p>
         ) : (
           <ul className="mt-2 divide-y divide-line rounded-xl border border-line bg-white/70" data-testid="my-cases">
             {mine.map((item) => {
               const room = getRoom(item.roomId);
               const asking = confirming === item.id;
               // A case whose room is not in use that day (the ventilation repair moves the rooms) is not on the board.
-              const offBoard = roomUse(item.roomId, item.date) !== "open";
+              const offBoard = roomUse(item.roomId, item.date, periods) !== "open";
+              // Names the booking for the cancel button's screen-reader label: several can share a day and an HN.
+              const what = [
+                thaiDate(item.date, "short"),
+                room ? roomLabel(room) : item.roomId,
+                item.hn ? `HN ${item.hn}` : item.operation,
+              ]
+                .filter(Boolean)
+                .join(" ");
               return (
                 <li key={item.id} className="flex items-center gap-3 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
@@ -377,17 +443,25 @@ export function AddCase({
                       {item.shift === "out" ? <span className="badge badge-warning ml-1.5 align-middle">นอกเวลา</span> : null}
                       {offBoard ? <span className="badge badge-warning ml-1.5 align-middle">ห้องนี้ไม่เปิดวันนั้น</span> : null}
                     </p>
-                    <p className="text-sm font-semibold break-words text-ink">{item.operation}</p>
+                    {/* Cases saved before bookings carried an HN have none; they show their operation as before. */}
+                    {item.hn ? (
+                      <p className="text-sm font-semibold break-all text-ink tabular-nums" data-testid="my-case-hn">
+                        HN {item.hn}
+                      </p>
+                    ) : null}
+                    <p className={`text-sm break-words ${item.operation ? (item.hn ? "text-ink-2" : "font-semibold text-ink") : "text-muted"}`}>
+                      {item.operation || NO_OPERATION_LABEL}
+                    </p>
                   </div>
                   <button
                     type="button"
                     disabled={pending}
                     onClick={() => remove(item.id)}
                     onBlur={() => setConfirming((current) => (current === item.id ? null : current))}
-                    className={`btn min-h-10 shrink-0 px-3 text-sm ${asking ? "btn-danger" : "btn-ghost btn-ghost-danger"}`}
-                    aria-label={asking ? `ยืนยันลบ ${item.operation}` : `ลบ ${item.operation}`}
+                    className={`btn min-h-11 shrink-0 px-3 text-sm ${asking ? "btn-danger" : "btn-ghost btn-ghost-danger"}`}
+                    aria-label={asking ? `ยืนยันยกเลิก ${what}` : `ยกเลิกจอง ${what}`}
                   >
-                    {asking ? "ยืนยันลบ" : "ลบ"}
+                    {asking ? "ยืนยันยกเลิก" : "ยกเลิกจอง"}
                   </button>
                 </li>
               );

@@ -23,6 +23,13 @@ const nextConfig: NextConfig = {
   // Do not write AGENTS.md / agent rule files into the repository during `next dev`.
   agentRules: false,
   // cacheComponents/PPR stay off: nonce-based CSP needs fully dynamic rendering.
+  experimental: {
+    // MX's HOSxP file reaches the upload action as FormData. The action refuses anything over 4 MB with a Thai
+    // message (app/upload/file-check.ts); the limit here sits a little above that so the form's own bytes (boundaries,
+    // the action's fields) never make a 4 MB file fail before the action can answer, and under Vercel's 4.5 MB cap on
+    // a function's request body, which would refuse a bigger request before Next.js runs.
+    serverActions: { bodySizeLimit: "4.25mb" },
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },

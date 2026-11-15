@@ -7,9 +7,40 @@ import { AdminBar } from "@/components/admin-bar";
 export default function AdminLoading() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <AdminBar title="จัดการรายชื่อแพทย์" />
+      <AdminBar title="จัดการระบบ" />
       <main className="flex-1 overflow-y-auto overscroll-contain px-4 pt-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-6">
-        <div className="mx-auto w-full max-w-4xl">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 sm:gap-6">
+          {/* The repair dates and the MX list (components/repair-periods-form.tsx, mx-members.tsx), in their shapes. */}
+          <section className="card overflow-hidden" aria-busy="true" aria-labelledby="repair-periods-loading">
+            <div className="border-b border-line p-4 sm:p-5">
+              <h2 id="repair-periods-loading" className="text-base font-bold text-ink sm:text-lg">
+                ช่วงปิดซ่อมห้องผ่าตัด
+              </h2>
+              <span className="skeleton mt-1.5 h-4 w-56 max-w-full rounded-md" />
+            </div>
+            <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2" aria-hidden>
+              {[1, 2].map((half) => (
+                <div key={half} className="rounded-xl border border-line bg-white/70 p-3.5 sm:p-4">
+                  <span className="skeleton h-5 w-20 rounded-md" />
+                  <div className="mt-3 grid gap-2.5 min-[420px]:grid-cols-2">
+                    <span className="skeleton h-11" />
+                    <span className="skeleton h-11" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+          <section className="card overflow-hidden" aria-busy="true" aria-labelledby="mx-loading">
+            <div className="flex items-center justify-between gap-3 p-4 sm:p-5">
+              <div>
+                <h2 id="mx-loading" className="text-base font-bold text-ink sm:text-lg">
+                  ผู้จัดการตาราง (MX)
+                </h2>
+                <span className="skeleton mt-1.5 h-4 w-40 rounded-md" />
+              </div>
+              <span className="skeleton h-11 w-[6.5rem] shrink-0" />
+            </div>
+          </section>
           <section className="card overflow-hidden" aria-busy="true" aria-labelledby="physician-list-loading">
             <div className="flex flex-col gap-3 border-b border-line p-4 sm:p-5">
               <div className="flex items-center justify-between gap-3">

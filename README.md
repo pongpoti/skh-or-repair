@@ -2,44 +2,146 @@
 
 Operating-suite board. Staff sign in with LINE and a one-time code sent by SMS, then pick a room on the floor plan to see that day’s cases.
 
-The board shows **today** only, dated in Thai with the Buddhist year (Thailand time, so it turns over at midnight in Bangkok). There is no paging between days. At the weekend and on Thai public and special holidays the suite runs no list, so the board shows no cases and every OR keeps the plain colour with no department. Holidays come from the Bank of Thailand's Financial Institutions' Holidays API (public holidays, substitution days and the special holidays the cabinet announces), fetched again every six hours, plus any dates in `EXTRA_HOLIDAYS` (`src/lib/holidays.ts`). When an export is loaded it covers one week, so each weekday shows that weekday's cases from it; at the weekend the plan is shown with no cases. In development, `/preview?day=tue` shows another weekday of this week and `/preview?holiday=วันปิยมหาราช` shows the holiday view.
+The board shows **one day**, dated in Thai with the Buddhist year (Thailand time). The suite's day turns over at **16:00**, not at midnight (`src/lib/board-day.ts`): until 16:00 on a workday the board shows today; from 16:00 it shows the next workday, whose list MX uploaded between 15:00 and 16:00. At the weekend and on a holiday it already shows the next workday. The line above the date says which: "ตารางผ่าตัดวันนี้" (today), "ตารางผ่าตัดพรุ่งนี้" (tomorrow) or "ตารางผ่าตัด" (a later day, such as Monday seen on a Saturday). There is no paging between days. A workday is Monday to Friday and not a Thai public or special holiday. Holidays come from the Bank of Thailand's Financial Institutions' Holidays API (public holidays, substitution days and the special holidays the cabinet announces), fetched again every six hours, plus any dates in `EXTRA_HOLIDAYS` (`src/lib/holidays.ts`). If the API cannot be read, the board carries on with weekdays and `EXTRA_HOLIDAYS`; only the upload stops (see HOSxP upload). The page refreshes itself at 16:00 and at midnight, and when the tab comes back after more than 5 minutes in the background. A board brought back with the browser's Back button refreshes at once if its moment passed meanwhile. In development, `/preview` shows the board without signing in (see Local development).
 
 ## Case data
 
-**No case data is loaded at the moment** (the 28 Sep – 2 Oct 2026 export was removed on 27 Oct 2026), so every room shows as having no cases and the plan follows this week's allocation. Cases come from an export of the OR system, not from a live feed: `python3 scripts/build_week.py path/to/export.xls` (needs `pandas` and `xlrd`) rewrites `src/data/week-data.ts`. Only the day, department, status, procedure name, surgeon and shift are kept; patient fields never reach the repo.
+A room's case rows come from two places, merged on the server for the board's day (`src/lib/board-rows.ts`):
 
-- Rows whose `วันที่` equals `วันที่ผ่าตัด` are dropped (same-day entries).
-- Following the utilisation report, Tha Chalom hospital cases are cut, and so is vascular surgery on Tuesday to Thursday (Tha Chalom's quota).
-- The export's room column is not trusted and is not even stored. Every case is placed by the report's rules: dressing cases go to OR 1, emergency cases to OR 8 (obstetrics-gynaecology stays in its own room), and anything else to a room its department holds that day, spread across them when it holds several. A case whose department holds no room that day is left off the board.
-- OR 1 is exclusive to dressing cases from any sub-specialty, checked before everything else (even emergency). A case is a dressing case when its operation name matches the hospital's keyword regex (dressing, d/s, ds and dw as whole words, ทำแผล, ล้างแผล, เปลี่ยนแผล, change vac, vac d) and does not also name debridement/db, scrub, graft, suture, closure, escharotomy, fasciotomy, excision, incision or amputation. The hospital's last step (every item in the operation-items column must be a dressing) is skipped because the export has no such column, so this is the broader definition.
-- The SCOPE room (OR 3) is exclusive: it takes only cases by a GENSX-labelled surgeon whose operation name matches `egd, gastroscop, esophagoscop, ogd, colono, sigmoido, ercp, endoscop, eus` (case-insensitive, whole word for the short ones) and does not match `remove fb, foreign body, fb`. Such cases go nowhere else; other general-surgery cases use the GENSX rooms. The export has one operation-name column, so only that is matched.
-- The export has no start or end times, so cases are listed by position (ลำดับ), with the shift flagged when it is out of hours.
+1. **The HOSxP workbook.** HOSxP is รพ.สมุทรสาคร's hospital information system. Every day between 15:00 and 16:00 an MX user (ผู้จัดการตาราง) uploads HOSxP's operation list for the next workday as an `.xlsx` file on `/upload` (see HOSxP upload). Rows show only from the upload of the board's own cycle, so nothing is left over from an earlier day.
+2. **Doctors' room bookings**, each with the patient's HN (see Room bookings by doctors).
+
+A workbook case and a booking with the same HN on the same day are one case (see Case rows: source and matching).
+
+The old weekly export (`scripts/build_week.py`, `src/data/week-data.ts`) no longer feeds the board. The week file is empty, and it is kept only for its tests.
+
+The rules for the workbook (`src/lib/workbook.ts`, `src/lib/placement.ts`):
+
+- **Only what the board needs is kept:** case ID, HN, operation name, surgeon (with the surgeon's team, for the SCOPE rule below), department, room, shift, status, urgency and booked time. Patient name, age, AN, diagnosis, illnesses and costs are never read into a row, stored or logged.
+- **Every row's `สั่งผ่าตัดวันที่` must be the upload's day** (Buddhist years are converted). Otherwise the whole file is refused and the message lists the dates found.
+- **These rows are dropped,** and the upload's summary counts each reason:
+  - cancelled;
+  - marked Stat or Emergency;
+  - the operation name says on call, emergency, stat, ด่วน and the like;
+  - out of hours (SMC included);
+  - booked outside 08:00–15:00;
+  - Urgency with no booked time;
+  - no case ID.
+- **A repeated case ID** counts once.
+- **Cuts, following the utilisation report:** Tha Chalom hospital cases, and vascular surgery on Tuesday to Thursday (Tha Chalom's quota).
+- **The department** comes from แผนก, then ชนิด, then the surgeon lists (`src/lib/physicians.ts`), then the department that surgeon has most often in the same file. A case with none is left off the board.
+- **The export's room column is not trusted** and is not even stored. Every case is placed by the report's rules:
+  - **During the repair**, rooms come from the repair's layout (below):
+    - dressing cases go to the dressing room;
+    - emergency cases go to the emergency room, and NEURO and CVT emergencies to the half's override rooms;
+    - SCOPE cases, and departments with no room of their own, go to the คละแผนก (OTHER) room;
+    - anything else goes to its department's room, the one with the fewest cases when there are several.
+    - Obstetrics and gynaecology are not placed at all: they operate in the obstetric OR (อาคารแม่ ชั้น 3), and the summary says so.
+  - **Outside the repair**, the weekly allocation applies:
+    - dressing cases go to OR 1, emergency cases to OR 8 (obstetrics-gynaecology stays in its own room);
+    - anything else goes to a room its department holds that day, spread across them when it holds several;
+    - a case whose department holds no room that day is left off the board.
+- Outside the repair, OR 1 is exclusive to dressing cases from any sub-specialty, checked before everything else (even emergency); during the repair the half's dressing room is. A case is a dressing case when its operation name matches the hospital's keyword regex (dressing, d/s, ds and dw as whole words, ทำแผล, ล้างแผล, เปลี่ยนแผล, change vac, vac d) and does not also name debridement/db, scrub, graft, suture, closure, escharotomy, fasciotomy, excision, incision or amputation. The hospital's last step (every item in the operation-items column must be a dressing) is skipped because the export has no such column, so this is the broader definition.
+- Outside the repair, the SCOPE room (OR 3) is exclusive (during the repair SCOPE cases go to the คละแผนก room): it takes only cases by a GENSX-labelled surgeon whose operation name matches `egd, gastroscop, esophagoscop, ogd, colono, sigmoido, ercp, endoscop, eus` (case-insensitive, whole word for the short ones) and does not match `remove fb, foreign body, fb`. Such cases go nowhere else; other general-surgery cases use the GENSX rooms. The file has one operation-name column, so only that is matched.
+- Cases are listed by their position in the file, with the shift flagged when it is out of hours.
 - Surgeons are matched to the supplied physician list (`src/lib/physicians.ts`). Who may sign in is a separate list, the `users` table (see Sign-in).
 
 Room allocation comes from the new proposed OR schedule (ตารางผ่าตัดใหม่ที่นำเสนอ, 4 Nov 2026; `src/lib/allocation.ts`). Every OR has one department all day, except OR 5 on Tuesday (paediatric surgery in the morning, general surgery in the afternoon) and OR 11 on Friday (vascular in the morning, nephrology in the afternoon). On Mondays OR 11 and OR 13 alternate by week of the month: weeks 1, 3 and 5 CVT in OR 11 and ORTHO in OR 13, weeks 2 and 4 the other way round. Periods the schedule marks as over quota (*) are shown like any other. The per-department half-day periods are checked by a test (130 a week). Department colours are the chip colours of the proposed-schedule image Pong shared on 4 Nov 2026 (CHEST, LA and unknown keep their earlier colours); each OR takes its department's colour and code as its label, and every colour clears 4.5:1 against its white label. Every OR is filled with its department's colour for the day, whether or not it has cases; a room with no department would use the list's "unknown" gray. Recovery rooms share the service-area beige and the old circulation zone is a walkway.
 
 ### Open rooms
 
-**All of OR 1 to 13 are open (the normal OR)**, each holding the department the weekday OR schedule gives it (Pong, 5 Nov 2026). Every OR can be opened on the plan, takes imported cases by the rules above, and can be chosen for a new case. Closing a room is still possible: the open list is `OPEN_ROOM_IDS` in `src/lib/rooms.ts`, and a room taken out of it is drawn grey with stripes and ปิด, cannot be opened (a `?room=` link to one is ignored), takes no imported case and cannot be chosen for a new case (OR 6 to 13 were closed this way in early November 2026). With OR 8 closed, an imported emergency case would go to its department's open room instead. Which rooms are open depends on the day (`roomUse(room, date)`), for when the repair layout below is in use.
+**All of OR 1 to 13 are open (the normal OR)**, each holding the department the weekday OR schedule gives it (Pong, 5 Nov 2026). Every OR can be opened on the plan, takes imported cases by the rules above, and can be chosen for a new case. Closing a room is still possible: the open list is `OPEN_ROOM_IDS` in `src/lib/rooms.ts`, and a room taken out of it is drawn grey with stripes and ปิด, cannot be opened (a `?room=` link to one is ignored), takes no imported case and cannot be chosen for a new case (OR 6 to 13 were closed this way in early November 2026). With OR 8 closed, an imported emergency case would go to its department's open room instead. Which rooms are open depends on the day and the repair's dates (`roomUse(room, date, periods)`, see the repair layout below).
 
-### Ventilation repair layout (switched off, kept for later)
+### Ventilation repair layout (in use from 14 Nov 2026)
 
-**Not in use.** The board used this layout on 4 and 5 Nov 2026; Pong then asked for the normal rooms again and for the layout to be kept for later. It lives in `src/lib/repair.ts`: to use it again, set the two halves' dates in `REPAIR_HALVES` and `REPAIR_IN_USE` to `true`. Its tests (`src/lib/repair.test.ts`) run with it switched on.
+The air-ventilation system is repaired in two halves (Pong, 14 Nov 2026). While a half runs, the weekly schedule is set aside: each room in use has one fixed use every working day, morning and afternoon. Outside both halves the weekly allocation applies as before. The layout lives in `src/lib/repair.ts` (`REPAIR_LAYOUTS`).
 
-The plan: the air-ventilation system is repaired for 90 days from 8 Dec 2026, in two halves of 45 days. While the layout is in use the weekly schedule is set aside: each room in use has one fixed use every working day, morning and afternoon.
+| | Operating | Recovery rooms (RR) | Instrument room | Closed | NEURO and CVT emergencies |
+| --- | --- | --- | --- | --- | --- |
+| 1st half, planned 14 Nov 2026 – 26 Jan 2027 | OR 9 EMER, OR 10 dressing (D/S), OR 11 คละแผนก (OTHER), OR 12 GENSX, OR 13 ORTHO | OR 7, 8 | – | OR 1–6, RR 1 and 2 | OR 12 or 13 (fewer cases) |
+| 2nd half, planned 27 Jan – 17 Mar 2027 | OR 1 dressing, OR 2 ORTHO, OR 3 EMER, OR 4 คละแผนก (OTHER), OR 5 GENSX | RR 2 (as usual) | OR 6 (เครื่องมือ) | OR 7–13, RR 1 | OR 2 |
 
-| | Operating | Recovery rooms (RR) | Closed |
-| --- | --- | --- | --- |
-| 1st half, 8 Dec – 21 Jan | OR 1 dressing, OR 2 GENSX, OR 3 ORTHO, OR 4 and 5 คละแผนก (OTHER) | OR 6, 7, 8 | OR 9–13 |
-| 2nd half, 22 Jan – 7 Mar | OR 10 คละแผนก (OTHER), OR 11 dressing, OR 12 GENSX, OR 13 ORTHO | OR 9 | OR 1–8 |
+**The dates are the admin's.** The planned dates are only the seed: an admin moves either half on `/admin` (ช่วงปิดซ่อมห้องผ่าตัด, see Admin page). The dates are kept in the `repair_periods` table (one row per half, with who saved it and when). The rules: both halves need a start and an end, and the second half must start after the first ends; a gap between them is allowed, and the weekly schedule applies then. A save changes the board for everyone at once, HOSxP cases already uploaded included: the board places an upload's cases again each time it is read, under the dates in force then, so a case never stays in a room the new dates close (the upload page's rooms and matching follow too). If the table cannot be read, the board uses the planned dates and logs it once.
 
-Every room in use is drawn in one colour (the app's brown, `REPAIR_COLOR`) with its department's code as the label, not in its department's colour; the room's sheet and the add-case form show the department in that colour too. A recovery room reads RR and cannot be opened; closed rooms look as above. On a weekend or holiday every room is plain, the recovery rooms still reading RR. The board is always dated today, so an OR export from another week is placed in today's rooms. The board shows a one-line note with the half and its last day ("ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 21 ม.ค. 2570"). A doctor's room in the add-case form is their department's room, or the first คละแผนก room when their department has none; only rooms operating on the chosen day are offered, and a case already saved for a room that does not operate that day is marked in the doctor's list and left off the board. Imported cases follow the same rooms (dressing to the dressing room, any department without a room, emergencies included, to a คละแผนก room). If the repair runs longer, move the second half's `to` date. After it ends the board goes back to `OPEN_ROOM_IDS` and the weekly schedule. In development, `/preview?date=2026-12-14` shows the board as on any date (with `REPAIR_IN_USE` switched on locally to see the layout).
+**Obstetrics and gynaecology** operate in the obstetric OR (อาคารแม่ ชั้น 3) for the whole repair, so their HOSxP cases are not placed on the board.
 
-### Cases added by doctors
+**How it looks:**
+- Each operating room is drawn in its department's own colour with the department's code as its label, as outside the repair.
+- The recovery rooms and the instrument room are drawn in the app's brown (`REPAIR_COLOR`), labelled RR and เครื่องมือ. They cannot be opened.
+- Closed rooms keep the grey stripes and ปิด.
+- The closed area of the half is drawn as one dark zone with taupe stripes, a dashed edge and the tag "พื้นที่ปิดซ่อม". It lies under nothing clickable, the closed rooms' numbers still read through it, and it never covers a room in use, the lifts, the stairs or the lobby.
+- The board shows a one-line note with the half and its last day ("ปิดซ่อมห้องผ่าตัด ช่วงที่ 1 · ถึง 26 ม.ค. 2570").
 
-A signed-in doctor (a current claim on an active `users` row of type `DR`) sees a **เพิ่มเคส** button at the corner of the plan and in each room's list. The form asks for the day (today up to 60 days ahead, Monday to Friday, not a holiday), an open room (each shown with its department that day; the doctor's own department's room is picked first), the operation name (up to 300 characters) and ในเวลา or นอกเวลา. The surgeon is always the doctor who adds the case; under the form the doctor sees their own cases from today on and can remove them (only their own). Nurses, assistants, approved requests and `ALLOWED_PHONES` numbers see no button, and the server actions (`src/app/(board)/actions.ts`) check the doctor again on every call. A doctor can add at most 60 cases in 24 hours.
+A booking already saved for a room that does not operate on its day is marked in the doctor's list and left off the board. In development, `/preview?date=2027-02-01` shows the board as on any date.
 
-Added cases are stored in the `cases` table (`db/schema.sql`, created on first use like the sign-in tables) with no patient fields. A removed case keeps its row with `removed_at` set. The board lists a room's added cases after its imported ones, in the order they were added. If the table cannot be read, the board shows the imported cases with a notice and the button is hidden.
+### Room bookings by doctors (with HN)
+
+A signed-in doctor (a current claim on an active `users` row of type `DR`) sees a **จองห้อง** button at the corner of the plan. The form (จองห้องผ่าตัด) asks for:
+- **the day:** today up to 60 days ahead, Monday to Friday, not a holiday. The form opens on the board's day (from 16:00 the next workday, past any holiday);
+- **an open room:** only rooms operating on that day under the repair's dates, each shown with its department; the doctor's own department's room is picked first;
+- **the patient's HN** (required): 1 to 15 letters, digits or dashes. It is saved in its matching form (spaces and dashes removed, upper case, no leading zeros), and the form says so under the box when that differs from what was typed;
+- **the operation name** (optional, up to 300 characters): HOSxP's file gives it later;
+- **ในเวลา or นอกเวลา.**
+
+The surgeon is always the doctor who books. Under the form the doctor sees their own bookings from today on, with their HN, and can cancel them (only their own; ยกเลิกจอง, then ยืนยันยกเลิก). Nurses, assistants, approved requests and `ALLOWED_PHONES` numbers see no button. The server actions (`src/app/(board)/actions.ts`) check the doctor again on every call, check the day and room against the repair's dates and the holidays, and never log an HN. A doctor can book at most 60 rooms in 24 hours.
+
+Bookings are stored in the `cases` table (`db/schema.sql`, created on first use like the sign-in tables) with the HN and no other patient field. Bookings made before the HN was asked for have none. A cancelled booking keeps its row with `removed_at` set. If the table cannot be read, the board shows a notice ("โหลดเคสไม่สำเร็จ ลองรีเฟรช") and the button is hidden.
+
+### HOSxP upload (MX)
+
+**MX** (ผู้จัดการตาราง) is a role an admin grants on `/admin` (table `mx_members`, by `users.id`). It follows the user's claim: it ends when the claim ends or the user goes inactive. Admins can do everything MX can.
+
+MX and admins get an **อัปโหลดตาราง** button in the top bar and the same link in the account menu, both opening `/upload`. On phones the button is an icon. On the narrowest phones (below 390px, or 450px beside the admin button) it is left out so the date keeps its year, and the menu's link stands in. Everyone else gets a not-found page at `/upload`.
+
+The page shows:
+- the day the file is for, "ตารางของ{วัน}": the next workday after today by the Bank of Thailand's holidays, even when today is a weekend or holiday;
+- the window, "เปิดรับไฟล์ 15:00–16:00 น.", with its state in words (ยังไม่เปิดรับ, เปิดรับอยู่, ปิดรับแล้ว);
+- for admins, "ผู้ดูแลอัปโหลดได้ทุกเวลา".
+
+**Who may upload, and when.** MX may upload from 15:00:00 up to 16:00:00 Bangkok time, every day, holidays included. Admins may upload at any time. If the holidays API cannot be read, nobody can upload ("ตรวจวันหยุดจากธนาคารแห่งประเทศไทยไม่ได้ ลองใหม่อีกครั้ง"), because a guessed day could put a list on the wrong date.
+
+**The file.** **Only `.xlsx` is accepted**, up to 4 MB (Vercel refuses any request over 4.5 MB before the app sees it, so the limit stays under that and a refused file always gets the app's own message). An `.xls`, or an Excel file with a password, is refused with "ไฟล์นี้เป็น .xls หรือตั้งรหัสผ่านไว้ กรุณาเปิดใน Excel แล้วบันทึกเป็น .xlsx (ไม่ตั้งรหัสผ่าน) ก่อน". It is refused both by its name in the page and by its content on the server. The reader (`src/lib/xlsx.ts`) is the app's own, with no npm dependency. It reads the sheet named `operation` (or the first sheet) and refuses zip bombs: at most 30 MB unpacked, 1,000 zip entries, 5,000 rows and 200 columns.
+
+**The checks on the server.** The server action (`src/app/upload/actions.ts`) checks the role, the window and the file again, by the server's clock. The day the page named must still be the upload's day. Then the file goes through the rules under Case data, and is placed in the rooms of its day.
+
+**What is saved.** The upload is saved in the `workbook_uploads` and `workbook_cases` tables, holding only the fields listed under Case data, with the HN in its matching form. Each new upload deletes, in the same transaction, the uploads made more than 30 days before it, with their cases. Nothing else deletes them: if MX stops uploading (after the repair, say), the last 30 days of lists stay until the next upload or until they are deleted by hand (`DELETE FROM workbook_uploads WHERE uploaded_at < now() - interval '30 days'`; the cases go with them).
+
+**After an upload**, the page shows a one-line answer and the day's latest upload:
+- when it was made and by whom;
+- rows read, kept and placed;
+- the rows left out, by reason;
+- the cases per room, and the cases not placed, with why;
+- how it matches the doctors' bookings: matched; HOSxP cases nobody booked; bookings HOSxP does not list. Each case has its room, surgeon, HN and operation, since only MX and admins see this page.
+
+The rooms and the matching are worked out again on every visit, as the board does, so a booking made after the upload counts, and so does a change of the repair's dates. MX may upload again before 16:00; the latest upload of the day wins.
+
+### The 16:00 turnover
+
+An upload belongs to the day it was made (its cycle) and is for the next workday after it. The board shows only **the latest upload made on its cycle day for its own date**. A cycle day is today from 16:00, yesterday before then. So at 16:00 every day the board clears the day's rows and shows the next workday with the upload MX made between 15:00 and 16:00. An admin's upload after 16:00 shows at once.
+
+If MX has not uploaded, every user sees "ยังไม่มีตาราง HOSxP ของ {date}" above the plan, in the repair or not: the board's rows come only from the uploads, so an empty room must not look like a day with no cases. The rooms still open and show the doctors' bookings, with no flags since there is nothing to compare with.
+
+### Case rows: source and matching
+
+Each row in a room's list carries a small chip, an icon and a word, saying where it comes from (`src/components/case-source.tsx`; the icons are Lucide's, under the ISC licence). The word is always there, so the colour is never the only sign:
+- **HOSxP** (a database glyph, not the vendor's logo): a workbook case.
+- **จอง** (a calendar with a check): a doctor's booking.
+- **ตรงกัน** (a handshake): a workbook case that matches a booking by HN on the same day.
+
+**Matching.** Matching is one to one by the HN's matching form. Workbook cases are taken in file order, and each takes the earliest booking with its HN that is still free.
+- A matched pair shows once, in the booking's room (the surgeon reserved it), with HOSxP's operation name and status.
+- A HOSxP case nobody booked shows in the room placement gave it, with the badge **ไม่มีการจอง** (amber).
+- A booking HOSxP does not list shows in its room with **ไม่พบใน HOSxP** (red), but only once the day has an upload.
+- A booking with no operation name reads "จองห้อง (รอข้อมูล HOSxP)".
+
+**Mismatches are shown to all users:** "ไม่ตรงกับการจอง {n} รายการ" above the plan, and an amber triangle with "!" in the corner of each room that has one. The room's spoken name gains "ข้อมูลไม่ตรงกับการจอง".
+
+**HN is shown only to:**
+- the doctor who made the booking (their own bookings);
+- MX;
+- admins.
+
+For anyone else the server leaves the HN out of the page's data altogether, not just off the screen. No HN or workbook row is ever logged.
 
 ## Design
 
@@ -115,12 +217,14 @@ Copy `.env.example` to `.env.local` for local work. Names only here; values live
 | `ALLOWED_PHONES` | no | Break-glass list of mobile numbers, comma-separated (any common way of writing them). These stay authorized without a database read. Keep it empty or one administrator. Needs a redeploy to change |
 | `AUTH_ADMIN_LINE_IDS` | no | Comma-separated LINE user ids (the session's `sub`) of the admins, who may open `/admin`. Unset or empty means no admin. See Admin page |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | for name claims | Sign-in alerts, SMS alerts, access-request decisions, and name claims with their undo button. Chat IDs comma-separated; the numeric (person) IDs are also who may approve and undo. Name claims need both settings and at least one numeric ID; without them every new number goes to the access request. Off when either is unset |
-| `BOT_API_TOKEN` | no | Bank of Thailand API token for the Financial Institutions' Holidays API (free, from [portal.api.bot.or.th](https://portal.api.bot.or.th)). Server only. Without it only weekends and `EXTRA_HOLIDAYS` close the board |
+| `BOT_API_TOKEN` | for the upload | Bank of Thailand API token for the Financial Institutions' Holidays API (free, from [portal.api.bot.or.th](https://portal.api.bot.or.th)). Server only. Without it the board skips only weekends and `EXTRA_HOLIDAYS`, and nobody can upload the HOSxP file (its day must come from the holidays) |
 | `EXTRA_HOLIDAYS` | no | Closures the API does not list, comma-separated `YYYY-MM-DD`, each optionally `=name` |
 | `LIFF_ID` | yes, for the link | The board's LIFF app id (`2001234567-AbCdEfGh`). Not a secret. The "open in LINE" page links to `https://liff.line.me/<LIFF_ID>`. See Device gate |
 | `CLIENT_GATE` | no | `off` turns the device gate off (break-glass). Unset, the gate is on everywhere on Vercel (production and preview) and off elsewhere. Any other value means on |
 | `SMS_PROVIDER`, `SMS_OUTBOX_DIR`, `DEESMSX_API_URL`, `LINE_AUTH_URL`, `LINE_API_URL`, `TELEGRAM_API_URL` | dev only | Local SMS mode (`console` or `file`), the mock deeSMSX, mock LINE and Telegram. Ignored when `VERCEL` is set: there the app always uses the real deeSMSX |
 | `EMAIL_PROVIDER`, `EMAIL_OUTBOX_DIR` | dev only | Local email mode: `console` (the email in the log) or `file` (one JSON file per email, with the code). Ignored when `VERCEL` is set: there the app always uses SMTP |
+| `BOT_HOLIDAYS_URL` | tests only | Another address for the holidays API, such as the stub in `tests/mock-line.mjs` (`http://127.0.0.1:4010/financial-institutions-holidays/`). Ignored when `VERCEL` is set |
+| `APP_FAKE_NOW`, `APP_FAKE_NOW_FILE` | tests only | The app's clock (`src/lib/clock.ts`) for the 16:00 turnover, the upload window and the upload's day. Each takes an ISO time with its offset, such as `2026-11-16T15:30:00+07:00`. `APP_FAKE_NOW_FILE` names a file holding one, read again on every call, so a test can move a running server's clock; it wins over `APP_FAKE_NOW`. A value without an offset is ignored. Both are ignored when `VERCEL` is set, so production always runs on the real time |
 
 If `DATABASE_URL` or the deeSMSX keys are missing in production, pages still build and serve, the sign-in endpoints answer "ระบบยังไม่พร้อม กรุณาติดต่อผู้ดูแล", and the log names the missing variables.
 
@@ -322,7 +426,7 @@ Checklist for the first deploy of this sign-in:
 
 ## Admin page
 
-Admins (the LINE user ids in `AUTH_ADMIN_LINE_IDS`, compared with the session's `sub`) see a "จัดการแพทย์" button in the top bar (an icon on phones, labelled from 768px, left out below 390px so the date keeps its year) and the same link in the account menu, both opening `/admin`. Everyone else gets a not-found page there, and every save is checked against the admin list again on the server. An admin still signs in like everyone else (LINE, SMS code, an authorized number); the admin list only adds the page.
+Admins (the LINE user ids in `AUTH_ADMIN_LINE_IDS`, compared with the session's `sub`) see a "จัดการระบบ" button in the top bar (an icon on phones, labelled from 768px, left out below 390px so the date keeps its year) and the same link in the account menu, both opening `/admin`. Everyone else gets a not-found page there, and every save is checked against the admin list again on the server. An admin still signs in like everyone else (LINE, SMS code, an authorized number); the admin list only adds the page.
 
 To find someone's LINE user id, have them sign in once, then look it up in the Neon SQL editor and add it to `AUTH_ADMIN_LINE_IDS` (comma-separated, redeploy to apply):
 
@@ -332,9 +436,22 @@ SELECT line_sub, display_name, last_login_at FROM line_bindings WHERE phone = '0
 
 The ids are the same LINE user ids Auth.js used, so a list set before the switch keeps working.
 
-The page holds **รายชื่อแพทย์**, the surgeon list, with search, a specialty filter, and add, edit and delete. Specialty is a dropdown of department codes. Names are stored with invisible format characters (zero-width spaces, direction marks, soft hyphens) removed, runs of spaces evened out and Unicode NFC applied, and each name can appear once. The list is stored in the `surgeons` table. Nothing else reads it yet: the case board still matches surgeons to `src/lib/physicians.ts`, and who may sign in is the separate `users` table (see Sign-in).
+The page (จัดการระบบ) holds three sections:
 
-The admin page reaches the database through `src/db` (drizzle, Neon's HTTP driver). Its tables are created by the SQL files in `drizzle/`, run in order against the database (Neon's SQL editor works). `0001_surgeons.sql` creates `surgeons` and seeds it with the 76 surgeons supplied on 27 Oct 2026 (`src/data/surgeons.ts`). The seed only runs while the table's id sequence has never been used, so running the file again never brings back names the admin deleted.
+- **ช่วงปิดซ่อมห้องผ่าตัด**, the repair's dates:
+  - Four date inputs, a start and a last day for each half. Each half shows its operating rooms, the range in Thai dates with its number of days, and "กำลังปิดซ่อม" on the half that includes today.
+  - The dates are checked in the page and again on the server, with the same Thai messages (see the repair layout).
+  - A save changes the board for everyone at once. The section says who saved last and when ("แก้ไขล่าสุด … โดย …"), or that the planned dates are in use.
+- **ผู้จัดการตาราง (MX)**, the users who may upload the HOSxP file:
+  - Each member shows with their name, role and the date they were added. A member whose user is inactive is marked "ปิดใช้งานอยู่ สิทธิ์ยังไม่มีผล": the role does nothing until the user is active again.
+  - **เพิ่ม MX** searches the active users by name (names and roles only). The admin picks a name, then confirms.
+  - Taking the role back asks for a confirmation first.
+  - The role lives in the `mx_members` table, by `users.id`.
+- **รายชื่อแพทย์**, the surgeon list (below).
+
+The surgeon list has search, a specialty filter, and add, edit and delete. Specialty is a dropdown of department codes. Names are stored with invisible format characters (zero-width spaces, direction marks, soft hyphens) removed, runs of spaces evened out and Unicode NFC applied, and each name can appear once. The list is stored in the `surgeons` table. Nothing else reads it yet: the case board still matches surgeons to `src/lib/physicians.ts`, and who may sign in is the separate `users` table (see Sign-in).
+
+The surgeon list reaches the database through `src/db` (drizzle, Neon's HTTP driver); the repair's dates and the MX list go through `pg` like the rest of the app. Each section shows a notice when its data cannot be read, and the others still work. The surgeon list's table is created by the SQL files in `drizzle/`, run in order against the database (Neon's SQL editor works). `0001_surgeons.sql` creates `surgeons` and seeds it with the 76 surgeons supplied on 27 Oct 2026 (`src/data/surgeons.ts`). The seed only runs while the table's id sequence has never been used, so running the file again never brings back names the admin deleted.
 
 ## Local development
 
@@ -359,7 +476,19 @@ npm run dev-session -- 0812345678 "ชื่อที่แสดง"   # prints
 
 Set that cookie for `http://localhost:3000` in the browser. The number must be in `ALLOWED_PHONES`, hold a current claim on an active user of the local `users` table, or be approved. The script refuses to run when `APP_URL` is https.
 
-`/preview` renders the board without signing in (`/preview?admin=1` with the admin button), and `/preview/admin` renders the admin page with the supplied surgeon list (changes stay in the page and are not saved), both only while `NODE_ENV` is `development`.
+`/preview` renders the board without signing in, and `/preview/admin` renders the admin page with the planned repair dates, invented MX members and the supplied surgeon list (changes stay in the page and are not saved). Both work only while `NODE_ENV` is `development`. `/preview` takes these parameters:
+
+| Parameter | Shows |
+| --- | --- |
+| `?date=2026-12-14` | the board as on that date |
+| `?day=tue` | the Tuesday of this week |
+| `?at=2026-11-16T16:30+07:00` | the board's day at that moment (after 16:00: the next workday) |
+| `?holiday=วันปิยมหาราช` | a closed day |
+| `?sample=1` | made-up HOSxP cases and bookings, to see the source chips, flags and room marks; add `&upload=0` for the bookings alone, as before MX uploads |
+| `?mx=1` | the board as MX sees it (every HN, the upload button); without it, as the sample's doctor, who sees the HN of their own bookings |
+| `?admin=1` | the admin button |
+
+The upload page needs a signed-in MX user or admin. To try it locally, run `node tests/mock-line.mjs &` (it also serves the holidays stub; give the app `BOT_API_TOKEN=mock-bot-token` and `BOT_HOLIDAYS_URL=http://127.0.0.1:4010/financial-institutions-holidays/`), then set the clock inside the window with `APP_FAKE_NOW_FILE`. `tests/fixtures/e2e-or-export.xlsx` is a made-up file for Tue 17 Nov 2026 (made by `python3 -I tests/e2e/make-workbook.py` from `tests/fixtures/sample-or-export.xlsx`, needs openpyxl).
 
 ## Tests
 
@@ -371,9 +500,33 @@ npm run build
 npm run test:e2e    # mock LINE + mock deeSMSX + next build/start + Playwright (Chromium)
 ```
 
-`npm test` reads `TEST_DATABASE_URL` (default `postgres://postgres:postgres@localhost:5432/orskh_test`). It covers the number rules, the users CSV and sync script, the doctors' email codes (configuration, limits, the claim moving between LINE accounts, sessions by user id), the `users` DDL against the production text (and that applying the schema to a filled `users` writes nothing), claims (first claim wins under concurrency, one name per number and per LINE account, claims and requests excluding each other, a claim moving to a corrected row, limits, undo and its 24-hour block, claims off without a Telegram administrator), the deeSMSX adapter against a stubbed `fetch` (every reference code, timeouts, broken answers), local mode, the limits, the daily cap (also under concurrent sends), alerts and the rest of the sign-in.
+`npm test` reads `TEST_DATABASE_URL` (default `postgres://postgres:postgres@localhost:5432/orskh_test`). It covers the number rules, the users CSV and sync script, the doctors' email codes (configuration, limits, the claim moving between LINE accounts, sessions by user id), the `users` DDL against the production text (and that applying the schema to a filled `users` writes nothing), claims (first claim wins under concurrency, one name per number and per LINE account, claims and requests excluding each other, a claim moving to a corrected row, limits, undo and its 24-hour block, claims off without a Telegram administrator), the deeSMSX adapter against a stubbed `fetch` (every reference code, timeouts, broken answers), local mode, the limits, the daily cap (also under concurrent sends), alerts and the rest of the sign-in. For the repair phase it covers:
+- the clock, the 16:00 cycle and the upload window;
+- the holidays;
+- the repair's layouts and the saved dates;
+- the `.xlsx` reader (zip bombs, encrypted and `.xls` files);
+- the workbook rules against the made-up sample and its answers;
+- placement;
+- HN rules;
+- the merge of uploads and bookings, with the HN filtered by viewer;
+- the upload's storage and its 30-day clean-up;
+- the MX role.
 
-`npm run test:e2e` reads `E2E_DATABASE_URL` (default database `orskh_e2e`), `E2E_APP_PORT` (3100), `E2E_FILE_APP_PORT` (3101), `E2E_LINE_PORT` (4010), `E2E_SMS_PORT` (4011), `E2E_OUTBOX_DIR`, `E2E_SCREENS_DIR` (both default to the system temp folder) and `E2E_SKIP_BUILD=1`. It drops and recreates the sign-in tables and `users` in that database and loads invented names into `users` with the sync script. The main server runs in deeSMSX mode against the mock (sign-in with a name claim, binding, a second account that finds the name taken, a doctor's email sign-in from the file outbox and its LINE fast path, access requests, deactivation, break-glass, the Telegram undo and its 24-hour block, deeSMSX failures and low credit, logout, CSRF, open redirects, the admin gate); a second server on the same build runs in file mode with Telegram sent only to a group (a full sign-in, name claims off, and the daily cap). It saves screenshots of the sign-in pages and the board at 360 and 1280 px wide (the claim steps and the request form also at 320 px). Playwright is pinned to the version whose Chromium is installed.
+`npm run test:e2e` reads `E2E_DATABASE_URL` (default database `orskh_e2e`), `E2E_APP_PORT` (3100), `E2E_FILE_APP_PORT` (3101), `E2E_LINE_PORT` (4010), `E2E_SMS_PORT` (4011), `E2E_OUTBOX_DIR`, `E2E_SCREENS_DIR` (both default to the system temp folder) and `E2E_SKIP_BUILD=1`. It drops and recreates the sign-in tables and `users` in that database and loads invented names into `users` with the sync script. The main server runs in deeSMSX mode against the mock (sign-in with a name claim, binding, a second account that finds the name taken, a doctor's email sign-in from the file outbox and its LINE fast path, access requests, deactivation, break-glass, the Telegram undo and its 24-hour block, deeSMSX failures and low credit, logout, CSRF, open redirects, the admin gate); a second server on the same build runs in file mode with Telegram sent only to a group (a full sign-in, name claims off, and the daily cap).
+
+The repair-phase tests move the app's clock through `APP_FAKE_NOW_FILE` and read the holidays from the stub in `tests/mock-line.mjs`, through `BOT_HOLIDAYS_URL`; a holiday there, Mon 7 Dec 2026, is stepped over. They cover:
+- the board's day across the 16:00 turnover, a weekend and that holiday, and the no-upload alert after the repair;
+- the board refreshing itself: at 16:00 with no reload, after more than 5 minutes hidden, and at once when Back brings it back after its moment;
+- an admin saving the repair's dates on `/admin`, with the board following at once;
+- an admin granting and taking back MX;
+- doctors booking rooms with an HN, and the form opening on the board's day after 16:00, past a holiday;
+- the no-upload alert, with the bookings still in their rooms;
+- MX's upload: closed before 15:00; an `.xls` refused both by name and by content; a file of other days refused; refused by the server at 16:00; accepted inside the window, with its summary and matching. The file is `tests/fixtures/e2e-or-export.xlsx`;
+- the board from 16:00, with HOSxP, จอง and ตรงกัน rows, flags, room marks and the mismatch alert;
+- the HN appearing in each viewer's page only as allowed;
+- no HN or workbook row in the server logs.
+
+It saves screenshots of the sign-in pages and the board at 360 and 1280 px wide (the claim steps and the request form also at 320 px), and of the repair-phase pages on a 390 px phone. Playwright is pinned to the version whose Chromium is installed.
 
 Both test runs drop and truncate tables, `users` among them, and `users` is shared in production (another workstream owns it, with stable ids). So both refuse to start (`tests/db-guard.mjs`) when `TEST_DATABASE_URL` or `E2E_DATABASE_URL` names a host other than `localhost`, `127.0.0.1`, `::1` or a Unix socket, and when `users` in that database already holds more than 50 rows (more than the tests ever insert). Never point them at Neon or at a Neon branch of production. `ALLOW_REMOTE_TEST_DB=1` lifts only the host check, for a remote database that holds nothing you need.
 
@@ -385,6 +538,8 @@ Both test runs drop and truncate tables, `users` among them, and `users` is shar
 - Session: HS256 JWT (30 days) in an HttpOnly, Secure, SameSite=Lax `__Host-session` cookie, carrying the number in its canonical form, or, for a doctor signed in by email, their `users.id` (sessions from the old email version, which carried an address, are refused). The number, or the doctor's email claim, must still be authorized on every request; when the database is unreachable only `ALLOWED_PHONES` is (fail closed).
 - Codes: 6 digits, 5 minutes, single use, at most 5 attempts (counted before deeSMSX is asked). In deeSMSX mode the code never reaches the app's database; deeSMSX's token is stored encrypted. In local mode the code is stored as an HMAC with `OTP_PEPPER`. The API keys, tokens and codes are never logged. Limits and the daily cap are under Cost control. Every valid number gets a code and the same answer, so the page never shows whether a number is on the list before the code is checked.
 - `/admin`: a signed-in session whose `sub` is in `AUTH_ADMIN_LINE_IDS`; anyone else gets a 404, and every server action checks the admin list again.
+- `/upload`: MX (a row in `mx_members` for the session's user) or an admin; anyone else gets a 404 with no loading screen first. The upload action checks the role, the window (by the server's clock), the file's name, size and content, and the day again. The `.xlsx` reader caps sizes, entries, rows and columns, and refuses encrypted and `.xls` files.
+- Patient data: the HOSxP file's patient fields (name, age, AN, diagnosis, illnesses, costs) are never read into a row or stored. Each new upload deletes the uploads made more than 30 days before it (nothing else does, see HOSxP upload). A booking keeps its HN as long as the booking's row, cancelled ones included (`cases.hn`). The HN is sent only to MX, admins and the doctor who booked (the server filters the page's data), and no HN or workbook row is ever logged. The repository holds only the made-up sample workbooks.
 - Access requests: the `access` cookie (12 hours, own key) never grants a session; names allow only letters, spaces and `. - '`; everything sent to Telegram is escaped.
 - Headers: CSP (nonce and `strict-dynamic`), HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`, `X-Robots-Tag: noindex`, and `robots.txt` disallowing all.
 - Real names, real phone numbers, the users CSV, deeSMSX keys and other secrets never go in this public repository; examples, tests and screenshots use invented names and numbers only (`*.csv`, `outbox/` and `screens/` are gitignored as a safety net).

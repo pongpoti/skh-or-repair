@@ -2,14 +2,19 @@ import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
 import { ProfileAvatar } from "@/components/profile-avatar";
 
-/** The admin pages' bar: the mark, the page heading, a way back to the board, and who is signed in (a grey circle while the page loads). */
+/**
+ * The admin pages' bar: the mark, the page heading, a way back to the board, and who is signed in (a grey circle while
+ * the page loads). `eyebrow` names whose page it is: the upload page is MX's too.
+ */
 export function AdminBar({
   title,
+  eyebrow = "ผู้ดูแลระบบ",
   name,
   image,
   boardHref = "/",
 }: {
   title: string;
+  eyebrow?: string;
   name?: string;
   image?: string | null;
   boardHref?: string;
@@ -21,7 +26,7 @@ export function AdminBar({
           <BrandMark className="h-10 w-10 rounded-xl transition-[filter] hover:brightness-115" />
         </Link>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs leading-5 font-medium text-muted">ผู้ดูแลระบบ</p>
+          <p className="truncate text-xs leading-5 font-medium text-muted">{eyebrow}</p>
           <h1 className="truncate text-[0.9375rem] leading-6 font-bold text-ink min-[400px]:text-base sm:text-lg">{title}</h1>
         </div>
         <Link href={boardHref} className="btn btn-ghost shrink-0 px-3 text-sm sm:px-3.5" aria-label="กลับไปตารางผ่าตัด">

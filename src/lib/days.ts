@@ -19,6 +19,24 @@ export function todayIso(now: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
+/** Bangkok is UTC+7 all year (no daylight saving), so a fixed offset gives its wall clock exactly. */
+const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+/**
+ * The Bangkok calendar date (YYYY-MM-DD) of a moment and its minutes since Bangkok midnight (0–1439), for the board's
+ * 16:00 turnover and the upload window (lib/board-day.ts).
+ */
+export function bangkokParts(at: Date): { date: string; minutes: number } {
+  const wall = new Date(at.getTime() + BANGKOK_OFFSET_MS);
+  return { date: wall.toISOString().slice(0, 10), minutes: wall.getUTCHours() * 60 + wall.getUTCMinutes() };
+}
+
+/** `iso` (YYYY-MM-DD) moved by `days` calendar days. */
+export function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
 /** Working-day index (0 = Monday … 4 = Friday) for a YYYY-MM-DD date, or null at the weekend. */
 export function workdayIndex(iso: string): number | null {
   const [y, m, d] = iso.split("-").map(Number);

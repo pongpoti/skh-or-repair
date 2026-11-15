@@ -16,14 +16,26 @@ describe("database schema", () => {
   });
 
   test("applies to an empty database and is idempotent (also under concurrency)", async () => {
-    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, user_claims, email_codes, user_emails, users, access_requests");
+    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
     await Promise.all([ensureSchema(pool), ensureSchema(pool), ensureSchema(pool)]);
     await ensureSchema(pool);
     const { rows } = await pool.query<{ table_name: string }>(
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY 1",
     );
     const names = rows.map((r) => r.table_name);
-    for (const t of ["access_requests", "cases", "line_bindings", "login_events", "otp_codes", "user_claims", "users"]) {
+    for (const t of [
+      "access_requests",
+      "cases",
+      "line_bindings",
+      "login_events",
+      "mx_members",
+      "otp_codes",
+      "repair_periods",
+      "user_claims",
+      "users",
+      "workbook_cases",
+      "workbook_uploads",
+    ]) {
       assert.ok(names.includes(t), t);
     }
     for (const old of ["physicians", "staff", "staff_claims"]) assert.ok(!names.includes(old), `no ${old} table`);
@@ -97,7 +109,7 @@ describe("database schema", () => {
   });
 
   test("on a database where users already exists with data (production), applying the schema twice leaves users untouched", async () => {
-    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, user_claims, email_codes, user_emails, users, access_requests");
+    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
     await pool.query(PRODUCTION_USERS_DDL);
     await pool.query(
       `INSERT INTO users (first_name, last_name, type, subtype) VALUES
@@ -120,7 +132,7 @@ describe("database schema", () => {
       "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'user_claims'::regclass AND contype = 'f'",
     );
     assert.deepEqual(fk.rows.map((r) => r.def), ["FOREIGN KEY (user_id) REFERENCES users(id)"]);
-    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("users: one row per (first name, last name); valid types; names and subtype not blank; ids from the identity only", async () => {
@@ -132,7 +144,7 @@ describe("database schema", () => {
         subtype,
       ]);
     const code = (c: string) => (e: { code?: string }) => e.code === c;
-    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const a = (await insert("สมชาย", "ใจดี", "DR", "ORTHO")).rows[0].id;
     assert.equal(a, 1);
     await assert.rejects(insert("สมชาย", "ใจดี", "RN", "OR"), (e: { code?: string; constraint?: string }) => e.code === "23505" && e.constraint === "users_name_key");
@@ -145,11 +157,11 @@ describe("database schema", () => {
     const { rows } = await pool.query("SELECT active, created_at, updated_at FROM users WHERE id = $1", [a]);
     assert.equal(rows[0].active, true);
     assert.ok(rows[0].created_at instanceof Date && rows[0].updated_at instanceof Date);
-    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("user_claims: a real user, a valid number, one current claim per user, number and LINE account, an ended claim names its reason", async () => {
-    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.query("INSERT INTO users (first_name, last_name, type, subtype) VALUES ('ก', 'ข', 'DR', 'EYE'), ('ค', 'ง', 'RN', 'OR')");
     const claim = (user: number, phone: string, sub: string) =>
       pool.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, $2, $3) RETURNING *", [user, phone, sub]);
@@ -175,7 +187,7 @@ describe("database schema", () => {
       await claim(1, "0812345678", "U1"); // free again once ended
     }
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM user_claims")).rows[0].n, 4);
-    await pool.query("TRUNCATE cases, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("an old access_requests table (positions doctor and nurse) moves to the user types", async () => {
@@ -225,6 +237,46 @@ describe("database schema", () => {
     const { rows } = await pool.query("SELECT tg_messages, decided_at FROM access_requests LIMIT 1");
     assert.deepEqual(rows[0], { tg_messages: [], decided_at: null });
     await pool.query("TRUNCATE access_requests");
+  });
+
+  test("an old cases table gains the HN column and an optional operation, keeping its rows", async () => {
+    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("DROP TABLE cases");
+    // cases as it was before bookings carried an HN
+    await pool.query(
+      `CREATE TABLE cases (id bigserial PRIMARY KEY, op_date date NOT NULL,
+         room_id text NOT NULL CHECK (room_id ~ '^or-([1-9]|1[0-3])$'),
+         operation text NOT NULL CHECK (btrim(operation) <> '' AND char_length(operation) <= 300),
+         shift text NOT NULL DEFAULT 'in' CHECK (shift IN ('in', 'out')),
+         surgeon_id integer NOT NULL REFERENCES users (id), line_sub text NOT NULL,
+         created_at timestamptz NOT NULL DEFAULT now(), removed_at timestamptz)`,
+    );
+    await pool.query("INSERT INTO users (first_name, last_name, type, subtype) VALUES ('ก', 'ข', 'DR', 'GENSX')");
+    await pool.query("INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub) VALUES ('2026-11-02', 'or-3', 'TKA', 1, 'U1')");
+    await ensureSchema(pool);
+    await ensureSchema(pool);
+    const { rows } = await pool.query("SELECT operation, hn FROM cases");
+    assert.deepEqual(rows, [{ operation: "TKA", hn: null }]);
+    const insert = (operation: string | null, hn: string | null) =>
+      pool.query("INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub, hn) VALUES ('2026-11-17', 'or-12', $1, 1, 'U1', $2)", [
+        operation,
+        hn,
+      ]);
+    await insert(null, "12345");
+    const check = (e: { code?: string }) => e.code === "23514";
+    await assert.rejects(insert("  ", "12345"), check, "a blank name is NULL, never an empty string");
+    for (const hn of ["", "12-345", "abc", "1234567890123456", "12 34"]) await assert.rejects(insert(null, hn), check, hn);
+    await pool.query("TRUNCATE cases, users RESTART IDENTITY CASCADE");
+  });
+
+  test("mx_members: a real user, once; it goes when the user row does", async () => {
+    await pool.query("INSERT INTO users (first_name, last_name, type, subtype) VALUES ('ก', 'ข', 'RN', 'OR')");
+    await pool.query("INSERT INTO mx_members (user_id, added_by) VALUES (1, 'U-admin')");
+    await assert.rejects(pool.query("INSERT INTO mx_members (user_id) VALUES (1)"), (e: { code?: string }) => e.code === "23505");
+    await assert.rejects(pool.query("INSERT INTO mx_members (user_id) VALUES (2)"), (e: { code?: string }) => e.code === "23503");
+    await pool.query("DELETE FROM users WHERE id = 1");
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM mx_members")).rows[0].n, 0);
+    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("otp_codes has no column that could hold a plaintext code (only an HMAC or the sealed provider token)", async () => {
