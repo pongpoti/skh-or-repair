@@ -2524,6 +2524,9 @@ async function main() {
       const board = await nurse.newPage();
       await board.goto(`${APP}/`, { waitUntil: "networkidle" });
       assert((await board.getAttribute('[data-testid="repair-zone"]', "data-half")) === "2", "the second half's repair zone");
+      // iPhone pulls Thai vowels and tone marks off their letters in SVG text with letter-spacing.
+      const tagSpacing = await board.evaluate(() => getComputedStyle(document.querySelector(".fp-zone-text")).letterSpacing);
+      assert(tagSpacing === "normal" || tagSpacing === "0px", `no letter-spacing on the zone tag: ${tagSpacing}`);
       assert((await board.getAttribute("#or-1 .fp-floor", "role")) === "button", "OR 1 operates in the second half");
       assert((await board.getAttribute("#or-12 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 12 is closed in the second half");
       // As on the repair plan images: RR 2 stays open as a mint RR, RR 1 is closed, and the dark zone lies under the rooms.
