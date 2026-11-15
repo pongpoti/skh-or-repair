@@ -84,12 +84,9 @@ export const DEFAULT_REPAIR_PERIODS: RepairPeriods = {
 export type RepairHalf = RepairLayout & RepairDates;
 
 /**
- * The colour of the instrument room during the repair (the app's brown, `--brand-top`; white labels clear 9:1 on it).
- * Rooms that operate keep their department's colour.
+ * Rooms that operate during the repair keep their department's colour. A recovery room is mint and the instrument room
+ * light tan: RECOVERY_ROOM and INSTRUMENT_ROOM in lib/allocation.ts, the colour list.
  */
-export const REPAIR_COLOR = "#54402F";
-
-/** A recovery room during the repair is mint, as every recovery room: RECOVERY_ROOM in lib/allocation.ts. */
 
 /** Thai name of a room used as a recovery room during the repair, and its label on the plan. */
 export const RECOVERY_USE = { name: "ห้องพักฟื้น (RR)", label: "RR" } as const;

@@ -67,7 +67,7 @@ The air-ventilation system is repaired in two halves (Pong, 14 Nov 2026). While 
 
 **How it looks:**
 - Each operating room is drawn in its department's own colour with the department's code as its label, as outside the repair.
-- The recovery rooms are light mint (`RECOVERY_ROOM` in the colour list, `src/lib/allocation.ts`) with dark green text, labelled RR; the instrument room is in the app's brown (`REPAIR_COLOR`), labelled เครื่องมือ. Neither can be opened.
+- The recovery rooms are light mint (`RECOVERY_ROOM` in the colour list, `src/lib/allocation.ts`) with dark green text, labelled RR; the instrument room is light tan (`INSTRUMENT_ROOM`, in the same list) with near-black text, labelled เครื่องมือ, as on the repair plan images. Neither can be opened.
 - Closed rooms keep the grey stripes and ปิด.
 - The closed area of the half is drawn as one dark zone with taupe stripes, a dashed edge and a large "พื้นที่ปิดซ่อม" tag, as on the repair plan images. It lies under nothing clickable, the closed rooms' numbers still read through it, and it never covers a room in use, the lifts, the stairs or the lobby. There is no separate note above the plan.
 

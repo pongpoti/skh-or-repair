@@ -2,8 +2,17 @@
 
 import type { CSSProperties } from "react";
 import { FloorScenery } from "@/components/floor-scenery";
-import { allocationFor, allocationText, DEPARTMENTS, readableTextOn, RECOVERY_ROOM, type Department, type RoomAllocation } from "@/lib/allocation";
-import { INSTRUMENT_USE, RECOVERY_USE, REPAIR_COLOR, repairOn, type RepairPeriods } from "@/lib/repair";
+import {
+  allocationFor,
+  allocationText,
+  DEPARTMENTS,
+  INSTRUMENT_ROOM,
+  readableTextOn,
+  RECOVERY_ROOM,
+  type Department,
+  type RoomAllocation,
+} from "@/lib/allocation";
+import { INSTRUMENT_USE, RECOVERY_USE, repairOn, type RepairPeriods } from "@/lib/repair";
 import { recoveryAreaClosed, roomBounds, roomLabel, ROOMS, roomUse, type Room, type RoomUse } from "@/lib/rooms";
 import type { RoomMark } from "@/lib/schedule";
 
@@ -108,12 +117,12 @@ function RoomLabel({
           x={x}
           y={y + (short ? 44 : 54)}
           dy="0.35em"
-          // A recovery room is mint with dark green text, the instrument room the repair's brown, on working days; on a
+          // A recovery room is mint with dark green text, the instrument room light tan, on working days; on a
           // closed day both are plain, like every room. The instrument room's Thai label is longer than a code, so it
           // is fitted to the room.
           style={{
             fontSize: text.length > 5 ? fitSize(text, width, DEPT_SIZE, 28) : DEPT_SIZE,
-            fill: closed ? undefined : !suiteOpen ? "var(--fp-ink)" : use === "recovery" ? RECOVERY_ROOM.ink : readableTextOn(REPAIR_COLOR),
+            fill: closed ? undefined : !suiteOpen ? "var(--fp-ink)" : use === "recovery" ? RECOVERY_ROOM.ink : INSTRUMENT_ROOM.ink,
           }}
         >
           {text}
@@ -273,7 +282,7 @@ export function FloorPlan({
           const allocation = allocations[room.id] ?? null;
           const empty = room.kind === "or" && (cases[room.id] ?? 0) === 0;
           // On a closed day (weekend, holiday) no room takes a colour, a recovery room included.
-          const repairFill = use === "recovery" ? RECOVERY_ROOM.color : REPAIR_COLOR;
+          const repairFill = use === "recovery" ? RECOVERY_ROOM.color : INSTRUMENT_ROOM.color;
           const fill = closed ? "url(#fp-closed)" : recovery ? (date ? repairFill : undefined) : floorFill(room, allocation);
           const bounds = roomBounds(room);
           const parts = [roomLabel(room)];

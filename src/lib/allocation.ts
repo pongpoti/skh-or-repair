@@ -85,6 +85,18 @@ export const DEPARTMENTS: Record<DeptCode, Department> = {
  */
 export const RECOVERY_ROOM = { code: "RR", name: "ห้องพักฟื้น", label: "RR", color: "#BFE4D5", ink: "#0F4D3A" } as const;
 
+/**
+ * Not a department either: the room that holds the instruments during the second half of the repair. Light tan with
+ * near-black text, as on the repair plan images (Pong, 15 Nov 2026), so it reads as a store room, never a department.
+ */
+export const INSTRUMENT_ROOM = {
+  code: "INSTR",
+  name: "ห้องเก็บเครื่องมือ",
+  label: "เครื่องมือ",
+  color: "#D9C7AE",
+  ink: "#241C16",
+} as const;
+
 /** A department holding the room on a given day. `nth` limits it to those occurrences of the weekday in the month. */
 type Turn = { dept: DeptCode; nth?: readonly number[] };
 /** Empty means the room is not allocated that day. */

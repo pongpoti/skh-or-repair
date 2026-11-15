@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkCase, roomForSubtype, withAddedCases, type AddedCase } from "./added-cases.ts";
-import { allocationFor, DEPARTMENTS, readableTextOn } from "./allocation.ts";
+import { allocationFor, DEPARTMENTS } from "./allocation.ts";
 import {
   checkRepairPeriods,
   DEFAULT_REPAIR_PERIODS,
   INSTRUMENT_USE,
-  REPAIR_COLOR,
   REPAIR_IN_USE,
   REPAIR_LAYOUTS,
   repairOn,
@@ -135,7 +134,6 @@ test("rooms hold one department all day, whatever the weekly schedule says, in t
   assert.equal(allocation.am?.color, DEPARTMENTS.GENSX.color, "the department's colour (Pong, 14 Nov 2026)");
   assert.equal(allocation.am?.label, "GENSX");
   assert.equal(DEPARTMENTS.GENSX.color, "#1E7B3C", "the department list keeps its colour");
-  assert.equal(readableTextOn(REPAIR_COLOR), "#ffffff", "the instrument room keeps the repair's brown");
 
   assert.equal(allocationFor("or-12", "2026-11-21", REPAIR), null, "Saturday");
   assert.equal(allocationFor("or-4", "2026-11-09", REPAIR)?.repair, false);
