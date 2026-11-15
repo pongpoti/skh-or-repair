@@ -4,18 +4,15 @@ import { db } from "@/lib/db";
 import { json, MSG } from "@/lib/http";
 import { isUserType, subtypeLabel } from "@/lib/user-labels";
 import { listClaimable } from "@/lib/user-list";
-import { claimsEnabled } from "@/lib/telegram";
 
 /**
  * The names of one user type for the claim page (/login/claim): GET ?type=RN|PN|PCA (doctors: /login/doctor). Only for a browser holding
  * an access cookie (a verified number). Each name carries its id, first and last name, subtype (code and Thai label)
- * and whether it is taken; never a number or a LINE id. Not cached anywhere. While claims are off (claimsEnabled()),
- * the answer sends the page to the access request instead, like POST /api/auth/claim.
+ * and whether it is taken (a taken name cannot be picked); never a number or a LINE id. Not cached anywhere.
  */
 export async function GET(req: NextRequest) {
   const grant = await accessGrantFor(req);
   if (grant instanceof NextResponse) return grant;
-  if (!claimsEnabled()) return json({ error: MSG.claimsOff, reason: "claims_off", redirect: "/login/request" }, 503);
   const type = req.nextUrl.searchParams.get("type");
   if (!isUserType(type)) return json({ error: MSG.claimType }, 400);
   // Doctors prove their name by an email code (/login/doctor), never by number.

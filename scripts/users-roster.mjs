@@ -277,8 +277,8 @@ export function isMassDeactivation(d, current) {
 }
 
 /**
- * Warning for claimed names that the CSV deactivates: their numbers stop signing in (lib/authz.ts) unless they also
- * have an approved access request. Counts only; the names are in the diff above.
+ * Warning for claimed names that the CSV deactivates: whoever holds them stops signing in (lib/authz.ts). Counts only;
+ * the names are in the diff above.
  * @param {UserDiff} d
  * @returns {string[]}
  */
@@ -286,6 +286,6 @@ export function formatClaimedOff(d) {
   const n = d.deactivated.filter((r) => r.claimed).length;
   if (!n) return [];
   return [
-    `${n} deactivated name(s) were claimed: those numbers stop signing in within 60 s (unless they have an approved access request).`,
+    `${n} deactivated name(s) were claimed: whoever holds them stops signing in within 60 s.`,
   ];
 }

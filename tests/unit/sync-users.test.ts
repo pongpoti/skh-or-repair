@@ -171,7 +171,7 @@ describe("users CSV (scripts/users-roster.mjs)", () => {
     const both = diffRoster([row(1, "ก", "ข", "PN", "OR")], parseRoster(`${HEADER}\nก,ข,RN,ANES`).entries);
     assert.deepEqual(formatDiff(both).slice(0, 2), ["changed (1):", '  ~ RN  ก ข  type "PN" -> "RN", subtype "OR" -> "ANES"']);
     assert.deepEqual(formatClaimedOff(d), [
-      "1 deactivated name(s) were claimed: those numbers stop signing in within 60 s (unless they have an approved access request).",
+      "1 deactivated name(s) were claimed: whoever holds them stops signing in within 60 s.",
     ]);
     const same = diffRoster(current.slice(0, 1), entries.slice(0, 1));
     assert.equal(isEmptyDiff(same), true);
@@ -317,7 +317,7 @@ describe("scripts/sync-users.mjs against the test database", () => {
     assert.match(r.out, /added \(1\):\n {2}\+ RN {2}คนใหม่ มาใหม่ \(OR\)\n/);
     assert.match(r.out, /changed \(2\):\n {2}~ DR {2}สมชาย ใจดี {2}subtype "ORTHO" -> "URO"\n {2}~ PN {2}ปราณี สายบุญ {2}type "RN" -> "PN", subtype "OR" -> "ANES"\n/);
     assert.match(r.out, /deactivated \(1\):\n {2}- PN {2}สุดา คำดี \(OR\) {2}\[claimed: stops signing in\]\n/);
-    assert.match(r.out, /1 deactivated name\(s\) were claimed: those numbers stop signing in within 60 s/);
+    assert.match(r.out, /1 deactivated name\(s\) were claimed: whoever holds them stops signing in within 60 s/);
     let now = await rows();
     assert.equal(now.length, 7, "no row deleted");
     assert.deepEqual(

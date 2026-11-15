@@ -1,30 +1,29 @@
 import "server-only";
-import { approvedRequest } from "../access";
 import { db } from "../db";
 import { normalizePhone } from "../phone";
-import { roleLabel, TYPE_LABELS } from "../user-labels";
+import { roleLabel } from "../user-labels";
 import { fullName, userForPhone, userForSession, type SessionIdentity } from "../user-list";
 
-/** Shown when nothing better is known (no claimed name, no approved request, no LINE display name). */
+/** Shown when nothing better is known (no claimed name, no LINE display name). */
 export const FALLBACK_NAME = "ผู้ใช้ LINE";
 
 export interface Profile {
   /** "ชื่อ นามสกุล" for the top bar and the account menu. */
   name: string;
-  /** "แพทย์ · ออร์โธปิดิกส์" (claimed name) or "พยาบาล" (approved request); null for a LINE name. */
+  /** "แพทย์ · ออร์โธปิดิกส์" (claimed name); null for a LINE name. */
   role: string | null;
 }
 
 /**
  * Who the board shows for a signed-in user (a session, or a number alone), resolved on every request (a corrected name
- * shows without signing out): the active user whose current claim holds the number (or the doctor's email claim) (first and last name, type and subtype from users), else the approved access
- * request's "first last" and position, else the LINE display name, else FALLBACK_NAME. Never throws: a database
- * problem falls back to the LINE name (logged).
+ * shows without signing out): the active user whose current claim holds the number (or the doctor's email claim) (first
+ * and last name, type and subtype from users), else the LINE display name (ALLOWED_PHONES), else FALLBACK_NAME. Never
+ * throws: a database problem falls back to the LINE name (logged).
  */
 export async function profileFor(who: string | SessionIdentity, lineName: string): Promise<Profile> {
   const line = { name: lineName.trim() || FALLBACK_NAME, role: null };
   if (typeof who !== "string" && who.userId) {
-    // a doctor signed in by email: the claimed name, no number and no access request
+    // a doctor signed in by email: the claimed name, no number
     try {
       const user = await userForSession(await db(), who);
       if (user) return { name: fullName(user), role: roleLabel(user.type, user.subtype) };
@@ -36,11 +35,8 @@ export async function profileFor(who: string | SessionIdentity, lineName: string
   const e = normalizePhone(typeof who === "string" ? who : who.phone);
   if (!e) return line;
   try {
-    const pool = await db();
-    const user = await userForPhone(pool, e);
+    const user = await userForPhone(await db(), e);
     if (user) return { name: fullName(user), role: roleLabel(user.type, user.subtype) };
-    const request = await approvedRequest(pool, e);
-    if (request) return { name: `${request.firstName} ${request.lastName}`, role: TYPE_LABELS[request.position] ?? null };
   } catch (err) {
     console.error("[auth] display name lookup failed:", (err as Error).message);
   }

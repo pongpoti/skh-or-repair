@@ -105,44 +105,12 @@ describe("Telegram alert text", () => {
     assert.equal(escapeHtml("a&b<c>"), "a&amp;b&lt;c&gt;");
   });
 
-  test("approved (non-listed) user: the 🩺 line shows the requested name and position", () => {
-    const html = buildVerifiedAlert({
-      user: null,
-      requester: { firstName: "สมชาย", lastName: "ใจดี", position: "RN" },
-      lineName: "Som",
-      phone: "0910000003",
-      at: AT,
-      history: NONE,
-      verifiedPhones: 2,
-    });
-    assert.match(html, /\n🩺 พยาบาล: สมชาย ใจดี \(อนุมัติจากคำขอ\)\n/);
-    const doctor = buildVerifiedAlert({
-      user: null,
-      requester: { firstName: "A", lastName: "B", position: "DR" },
-      lineName: "x",
-      phone: "0900000001",
-      at: AT,
-      history: NONE,
-      verifiedPhones: 2,
-    });
-    assert.match(doctor, /\n🩺 แพทย์: A B \(อนุมัติจากคำขอ\)\n/);
-    assert.doesNotMatch(doctor, /ไม่พบในรายชื่อ/);
-  });
-
-  test("the number and an approved requester's name are never shortened", () => {
+  test("the number is never shortened, and a number with no claimed name says so", () => {
     for (const phone of ["0812345678", "0611111111"]) {
-      const html = buildVerifiedAlert({
-        user: null,
-        requester: { firstName: "ก".repeat(60), lastName: "ข".repeat(60), position: "DR" },
-        lineName: "x",
-        phone,
-        at: AT,
-        history: NONE,
-        verifiedPhones: 1,
-      });
+      const html = buildVerifiedAlert({ user: null, lineName: "x", phone, at: AT, history: NONE, verifiedPhones: 1 });
       assert.ok(html.includes(`\n📱 เบอร์: ${phone.slice(0, 3)}-${phone.slice(3, 6)}-${phone.slice(6)}\n`), html);
-      assert.ok(html.includes(`\n🩺 แพทย์: ${"ก".repeat(60)} ${"ข".repeat(60)} (อนุมัติจากคำขอ)\n`), "whole name");
-      assert.ok(!html.includes("…"));
+      assert.match(html, /\n🩺 ไม่พบในรายชื่อเจ้าหน้าที่\n/);
+      assert.doesNotMatch(html, /คำขอ/, "access requests are gone");
     }
   });
 

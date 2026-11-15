@@ -1,11 +1,10 @@
 import "server-only";
 import { createHash, createHmac } from "node:crypto";
-import { POSITIONS, type AccessRequest, type Position, type TelegramRef } from "./access";
 import { appUrl, ConfigError, onVercel, sessionSecret, telegramConfig, type TelegramConfig } from "./env";
 import type { OtpHistory } from "./otp";
 import { formatPhone } from "./phone";
 import { roleLabel, subtypeLabel, TYPE_LABELS } from "./user-labels";
-import type { ListedUser, UserClaim } from "./user-list";
+import type { ListedUser, TelegramRef, UserClaim } from "./user-list";
 import { deriveKey } from "./tokens";
 
 /** Public route for Telegram button taps (proxy.ts lets it through without a session or Origin). */
@@ -14,8 +13,6 @@ export const TELEGRAM_WEBHOOK_PATH = "/api/telegram/webhook";
 export interface VerifiedAlert {
   /** The active user whose current claim holds the number, or null. */
   user: ListedUser | null;
-  /** Name and position from the approved access request, for numbers that hold no name. */
-  requester?: { firstName: string; lastName: string; position: Position } | null;
   /** LINE display name: attacker-controlled, so it is flattened and escaped. */
   lineName: string;
   /** Canonical mobile number (0812345678), shown in full as 081-234-5678. */
@@ -95,9 +92,7 @@ export function buildVerifiedAlert(a: VerifiedAlert): string {
         : "🔁 <b>ยืนยันตัวตนอีกครั้ง</b>";
   const who = a.user
     ? `${TYPE_LABELS[a.user.type]}: ${whole(a.user.firstName)} ${whole(a.user.lastName)}${sub(a.user)}`
-    : a.requester
-      ? `${POSITIONS[a.requester.position]}: ${whole(a.requester.firstName)} ${whole(a.requester.lastName)} (อนุมัติจากคำขอ)`
-      : "ไม่พบในรายชื่อเจ้าหน้าที่";
+    : "ไม่พบในรายชื่อเจ้าหน้าที่";
   const lines = [
     header,
     "ORSKH.APP ตารางห้องผ่าตัด",
@@ -175,26 +170,6 @@ export function buildLowCreditAlert(balance: number, at: Date): string {
   ].join("\n");
 }
 
-/** Telegram HTML message asking an administrator to approve an access request. */
-export function buildRequestMessage(r: AccessRequest): string {
-  return [
-    "📝 <b>คำขอเข้าใช้งาน (เบอร์ไม่อยู่ในรายชื่อ)</b>",
-    "ORSKH.APP ตารางห้องผ่าตัด",
-    "",
-    `👤 ชื่อ-นามสกุล: ${whole(r.firstName)} ${whole(r.lastName)}`,
-    `💼 ตำแหน่ง: ${POSITIONS[r.position]}`,
-    `📱 เบอร์: ${whole(formatPhone(r.phone))} (ยืนยันรหัสแล้ว)`,
-    `💬 ชื่อ LINE: ${text(r.lineName ?? "") || "ไม่ระบุ"}`,
-    `🕒 เวลา: ${thaiDateTime(r.createdAt)}`,
-  ].join("\n");
-}
-
-/** The request message once decided (sent as an edit without buttons). */
-export function buildDecidedMessage(r: AccessRequest, decision: "approved" | "rejected", at: Date): string {
-  const verdict = decision === "approved" ? "✅ <b>อนุมัติแล้ว</b>" : "❌ <b>ไม่อนุมัติ</b>";
-  return `${buildRequestMessage(r)}\n\n${verdict} · ${thaiDateTime(at)}`;
-}
-
 /**
  * Telegram HTML message for a claimed name (sent with the undo button, claimKeyboard()):
  * "🪪 ยืนยันชื่อ: <name> (<type> · <subtype>)", the number in full with the LINE name, the time in Bangkok.
@@ -210,8 +185,8 @@ export function buildClaimMessage(user: ListedUser, claim: Pick<UserClaim, "phon
 
 /**
  * A doctor proved their name with a code sent to their own email (lib/email-otp.ts): a notice without a button (the
- * code went to the doctor's own addresses, so there is nothing to undo). `replaced` says that an earlier claim of the
- * name (another LINE account, or a number) ended with it.
+ * code went to the doctor's own addresses, so there is nothing to undo). `replaced` says that another LINE account's
+ * claim of the name by number (which holds nothing for a doctor) ended with it.
  */
 export function buildEmailSignInMessage(
   user: ListedUser,
@@ -239,26 +214,10 @@ export function buildClaimUndoneMessage(
   return `${buildClaimMessage(user, claim)}\n\n↩️ ยกเลิกแล้ว โดย ${text(by) || "ผู้ดูแล"} เวลา ${thaiDateTime(at)}`;
 }
 
-export type CallbackAction = "approve" | "reject";
-
 /**
- * callback_data "ox:<request id>:a|r" (Telegram allows at most 64 bytes). The "ox" prefix is orskh's own: skh-or-schedule
- * uses "ar:" with the same numbering, so if both apps were ever set up with one bot (which has a single webhook), a tap
- * on the other app's message is refused as invalid here instead of deciding the local request with the same id.
- */
-export function callbackData(id: string, action: CallbackAction): string {
-  return `ox:${id}:${action === "approve" ? "a" : "r"}`;
-}
-
-export function parseCallbackData(v: unknown): { id: string; action: CallbackAction } | null {
-  if (typeof v !== "string" || v.length > 64) return null;
-  const m = /^ox:([1-9]\d{0,14}):([ar])$/.exec(v);
-  return m ? { id: m[1], action: m[2] === "a" ? "approve" : "reject" } : null;
-}
-
-/**
- * callback_data "oc:<claim id>:u" (undo a claimed name). Its own prefix, so a claim id can never be read as a request
- * id or the other way round; as strict as "ox:".
+ * callback_data "oc:<claim id>:u" (undo a claimed name; Telegram allows at most 64 bytes). The "oc" prefix is orskh's
+ * own, so a tap on another app's message (if one bot were ever shared) is refused as invalid. The "ox:" buttons of the
+ * former access requests are refused the same way.
  */
 export function claimCallbackData(id: string): string {
   return `oc:${id}:u`;
@@ -272,17 +231,6 @@ export function parseClaimCallbackData(v: unknown): { claimId: string } | null {
 
 export function claimKeyboard(id: string) {
   return { inline_keyboard: [[{ text: "↩️ ยกเลิกการยืนยัน", callback_data: claimCallbackData(id) }]] };
-}
-
-export function requestKeyboard(id: string) {
-  return {
-    inline_keyboard: [
-      [
-        { text: "✅ อนุมัติ", callback_data: callbackData(id, "approve") },
-        { text: "❌ ไม่อนุมัติ", callback_data: callbackData(id, "reject") },
-      ],
-    ],
-  };
 }
 
 /** Calls one Bot API method. Throws on failure; error messages never include the token. */
@@ -363,14 +311,12 @@ async function sendWithButtons(html: string, reply_markup: unknown, what: string
   return sent;
 }
 
-/** Sends the request with its two buttons to every configured chat (see sendWithButtons()). */
-export async function sendRequestMessages(r: AccessRequest): Promise<TelegramRef[]> {
-  return sendWithButtons(buildRequestMessage(r), requestKeyboard(r.id), "access");
-}
-
-/** Announces a claimed name with its undo button in every configured chat (see sendWithButtons()). */
+/**
+ * Announces a claimed name in every configured chat (see sendWithButtons()), with its undo button when someone may
+ * press it (claimUndoAvailable(): a numeric id in TELEGRAM_CHAT_ID); to groups or channels only, as a notice.
+ */
 export async function sendClaimMessages(user: ListedUser, claim: UserClaim): Promise<TelegramRef[]> {
-  return sendWithButtons(buildClaimMessage(user, claim), claimKeyboard(claim.id), "claim");
+  return sendWithButtons(buildClaimMessage(user, claim), claimUndoAvailable() ? claimKeyboard(claim.id) : undefined, "claim");
 }
 
 /** Pause before the one retry of a claim announcement that reached no chat. */
@@ -392,7 +338,7 @@ export async function announceClaim(
   return sendClaimMessages(user, claim);
 }
 
-/** Replaces each request message with the decided text. No reply_markup: the buttons disappear. */
+/** Replaces each claim message with its undone text. No reply_markup: the button disappears. */
 export async function markDecided(refs: TelegramRef[], html: string): Promise<void> {
   const cfg = telegramConfig();
   if (!cfg) return;
@@ -406,7 +352,7 @@ export async function markDecided(refs: TelegramRef[], html: string): Promise<vo
         link_preview_options: { is_disabled: true },
       });
     } catch (e) {
-      console.error("[access] editing request message failed:", (e as Error).message);
+      console.error("[claim] editing claim message failed:", (e as Error).message);
     }
   }
 }
@@ -417,31 +363,32 @@ export async function answerCallback(callbackQueryId: string, message: string): 
     const cfg = telegramConfig();
     if (cfg) await callTelegram(cfg, "answerCallbackQuery", { callback_query_id: callbackQueryId, text: message });
   } catch (e) {
-    console.error("[access] answerCallbackQuery failed:", (e as Error).message);
+    console.error("[telegram] answerCallbackQuery failed:", (e as Error).message);
   }
 }
 
 /**
  * Secret Telegram sends in X-Telegram-Bot-Api-Secret-Token: HMAC-SHA256(HKDF(SESSION_SECRET, "telegram-webhook"),
  * bot token) as base64url (43 characters of [A-Za-z0-9_-]). Derived, so there is no extra setting; it changes
- * when either secret is rotated; the next access request, or the first refused webhook call (healWebhook()),
+ * when either secret is rotated; the next name claim, or the first refused webhook call (healWebhook()),
  * then registers the new one.
  */
 export function webhookSecret(botToken: string, secret: string): string {
   return createHmac("sha256", deriveKey(secret, "telegram-webhook")).update(botToken, "utf8").digest("base64url");
 }
 
-/** Numeric ids in TELEGRAM_CHAT_ID: the people allowed to decide (a private chat's id is the user's id). */
+/** Numeric ids in TELEGRAM_CHAT_ID: the people allowed to undo a claim (a private chat's id is the user's id). */
 export function adminIds(cfg: TelegramConfig): Set<string> {
   return new Set(cfg.chatIds.filter((id) => /^\d{1,20}$/.test(id)));
 }
 
 /**
- * Name claims are open only when every claim can be announced with an undo button that someone may press: Telegram is
- * configured and valid, and TELEGRAM_CHAT_ID holds at least one numeric (person) id. Otherwise a verified number that
- * holds no name goes to the access request, which waits for a decision (fail closed, like requests). Never throws.
+ * True when every claim is announced with an undo button that someone may press: Telegram is configured and valid, and
+ * TELEGRAM_CHAT_ID holds at least one numeric (person) id. Claims are open either way (names come only from the staff
+ * list, first claim wins); this only decides what the confirm step says (an administrator is told, and may undo).
+ * Never throws.
  */
-export function claimsEnabled(): boolean {
+export function claimUndoAvailable(): boolean {
   try {
     const cfg = telegramConfig();
     return !!cfg && adminIds(cfg).size > 0;
@@ -484,7 +431,7 @@ export async function ensureWebhook(): Promise<boolean> {
       const updates = Array.isArray(info?.allowed_updates) ? info.allowed_updates : [];
       if (info?.url !== url || updates.length !== 1 || updates[0] !== "callback_query") {
         await callTelegram(cfg, "setWebhook", { url, secret_token: secret, allowed_updates: ["callback_query"] });
-        console.info("[access] telegram webhook registered");
+        console.info("[telegram] webhook registered");
       }
       registered = key;
       return true;
@@ -500,7 +447,7 @@ let lastHeal = -Infinity;
 
 /**
  * For a webhook call with a wrong secret. After SESSION_SECRET or the bot token is rotated, Telegram keeps sending
- * the old secret until setWebhook runs again, so every tap would be refused until the next access request.
+ * the old secret until setWebhook runs again, so every tap would be refused until the next name claim.
  * This registers the current secret instead: nothing to do once this instance registered it, and at most one
  * attempt a minute, so refused calls cannot drive Bot API traffic. Telegram's retry then carries the new secret.
  * Never throws.
@@ -512,7 +459,7 @@ export async function healWebhook(): Promise<void> {
   try {
     await ensureWebhook();
   } catch (e) {
-    console.error("[access] webhook re-registration failed:", (e as Error).message);
+    console.error("[telegram] webhook re-registration failed:", (e as Error).message);
   }
 }
 

@@ -3,11 +3,11 @@ import { accessGrantFor } from "@/lib/access-http";
 import { noteAuthorized } from "@/lib/authz";
 import { clearCookie, setCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
-import { sessionSecret } from "@/lib/env";
+import { sessionSecret, telegramEnabled } from "@/lib/env";
 import { guardPost, json, MSG } from "@/lib/http";
 import { logEvent } from "@/lib/otp";
 import { clientIp, readJsonBody, userAgent } from "@/lib/security";
-import { announceClaim, claimsEnabled, ensureWebhook } from "@/lib/telegram";
+import { announceClaim, ensureWebhook } from "@/lib/telegram";
 import { signSession } from "@/lib/tokens";
 import { claimUser, saveClaimTelegramRefs } from "@/lib/user-list";
 
@@ -21,20 +21,17 @@ function userIdOf(v: unknown): string | null {
 }
 
 /**
- * POST {userId}: the verified number of this browser's access cookie claims that name (lib/user-list.ts claimUser():
- * first claim wins, one name per number and per LINE account, limits, the 24 h block after an undo; the LINE account
- * is bound to the number in the same transaction). On success the access cookie becomes a session, and every chat in
- * TELEGRAM_CHAT_ID is told after the response, with a button to undo the claim. Claims are open only while that
- * announcement can reach an administrator (claimsEnabled()); otherwise, and for a number that already has an access
- * request (pending, approved or recently rejected), the answer sends the browser to the access request instead.
+ * POST {userId}: the verified number of this browser's access cookie claims that name from the staff list
+ * (lib/user-list.ts claimUser(): first claim wins and the name is then locked for everyone else, one name per number and
+ * per LINE account, limits, the 24 h block after an undo; the LINE account is bound to the number in the same
+ * transaction; doctors are refused, they sign in by email). On success the access cookie becomes a session. When
+ * Telegram is set up, every chat in TELEGRAM_CHAT_ID is told after the response, with a button to undo the claim.
  */
 export async function POST(req: NextRequest) {
   const blocked = guardPost(req);
   if (blocked) return blocked;
   const grant = await accessGrantFor(req);
   if (grant instanceof NextResponse) return grant;
-  // No Telegram admin to tell, so nobody could undo a wrong claim: refused before anything is stored.
-  if (!claimsEnabled()) return json({ error: MSG.claimsOff, reason: "claims_off", redirect: "/login/request" }, 503);
 
   const body = await readJsonBody(req);
   const userId = userIdOf(body?.userId);
@@ -46,11 +43,9 @@ export async function POST(req: NextRequest) {
     const pool = await db();
     const result = await claimUser(pool, { userId, phone: grant.phone, sub: grant.sub, lineName: grant.name, ip, userAgent: ua });
     switch (result.status) {
-      case "requested":
-        return json({ error: MSG.claimRequested, reason: "requested", redirect: "/login/request" }, 409);
       case "blocked":
         await logEvent(pool, { event: "claim_refused", sub: grant.sub, phone: grant.phone, ip, userAgent: ua });
-        return json({ error: MSG.claimBlocked, reason: "blocked" }, 403);
+        return json({ error: result.by === "line" ? MSG.claimBlockedLine : MSG.claimBlocked, reason: "blocked", by: result.by }, 403);
       case "limited":
         await logEvent(pool, { event: "claim_refused", sub: grant.sub, phone: grant.phone, ip, userAgent: ua });
         return json({ error: MSG.claimTooMany, reason: "limited", retryAfter: result.retryAfterS }, 429, {
@@ -66,7 +61,7 @@ export async function POST(req: NextRequest) {
         return json({ error: MSG.claimLineHasName, reason: "line_has_claim" }, 409);
     }
 
-    if (result.status === "claimed") {
+    if (result.status === "claimed" && telegramEnabled()) {
       const { claim, user } = result;
       // Registered before anything else can fail: every stored claim is announced. Telegram being slow or down never
       // fails the claim; announceClaim() tries twice, and a claim that reached nobody keeps an empty tg_messages.

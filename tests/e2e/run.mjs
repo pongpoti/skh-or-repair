@@ -8,9 +8,11 @@
 //   E2E_OUTBOX_DIR (tmp)  E2E_SCREENS_DIR (tmp)  E2E_SKIP_BUILD=1 (reuse .next)
 //   ALLOW_REMOTE_TEST_DB=1 (allow a non-local E2E_DATABASE_URL; see tests/db-guard.mjs)
 // The database's sign-in tables are dropped first (the built app creates them again on first use), then the list of
-// people (table users) is loaded with scripts/sync-users.mjs from a CSV in Pong's format in a new temp folder. People
-// claim their names on /login/claim after the SMS code (table user_claims); doctors (DR) instead pick their name on
-// /login/doctor and type a code sent to their email (EMAIL_PROVIDER=file: the email is a JSON file in the outbox).
+// people (table users) is loaded with scripts/sync-users.mjs from a CSV in Pong's format in a new temp folder. After
+// LINE, everyone picks their position on /login/verify: RN, PN and PCA verify their number by SMS and then claim their
+// own name from the list on /login/claim (table user_claims; a claimed name is locked for everyone else); doctors (DR)
+// pick their name on /login/doctor and type a code sent to their email (EMAIL_PROVIDER=file: the email is a JSON file
+// in the outbox). There are no typed names anywhere (the access requests are gone).
 // Only invented phone numbers (0812345678, 09000000xx, 0611111111) and invented names are used. Keep E2E_SCREENS_DIR
 // outside the repository.
 // The repair-phase tests near the end (MX's HOSxP upload, doctors' bookings with HN, the 16:00 turnover) move the app's
@@ -73,6 +75,16 @@ const EMAIL_DOC = "กมล ทองดี";
 const EMAIL_DOC_ROLE = "แพทย์ · สูติ-นรีเวชกรรม";
 const EMAIL_DOC_ADDRESSES = ["kamon.t@example.com", "kt@example.org"];
 const NO_EMAIL_DOC = "สมใจ ใจเย็น";
+// NO_EMAIL_DOC also stands for a doctor whose name was claimed by number (a user_claims row via = 'phone', made by hand
+// here, as before doctors had to use email): such a claim holds nothing, so doctors sign in by email only. RACE_DOC is
+// given an address for one test only (a name taken between loading the page, or the emailed code, and the next step).
+const PHONE_DOC = NO_EMAIL_DOC;
+const PHONE_DOC_PHONE = "0900000010";
+const RACE_DOC = "ณัฐพล วงศ์ใหญ่";
+// MSG texts (src/lib/http.ts) of a name someone else holds: the way on is the administrator, never a typed name
+const CLAIM_TAKEN = "ชื่อนี้มีผู้เลือกแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล";
+const EMAIL_TAKEN = "ชื่อนี้มีผู้ยืนยันตัวตนแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล";
+const ASK_ADMIN = "ไม่พบชื่อ หรือชื่อมีผู้เลือกแล้ว? กรุณาติดต่อผู้ดูแล";
 const LOCKED = "0900000008"; // locks its code with 5 wrong guesses
 const USERS_CSV = [
   "\uFEFFfirst_name,last_name,type,subtype",
@@ -95,7 +107,6 @@ const SUB_B = "U0000000000000000000000000000000b";
 const SUB_C = "U0000000000000000000000000000000c";
 const SUB_D = "U0000000000000000000000000000000d";
 const SUB_E = "U0000000000000000000000000000000e";
-const SUB_F = "U0000000000000000000000000000000f";
 const SUB_G = "U0000000000000000000000000000000g";
 const SUB_H = "U0000000000000000000000000000000h";
 const SUB_I = "U0000000000000000000000000000000i";
@@ -103,7 +114,9 @@ const SUB_J = "U0000000000000000000000000000000j";
 const SUB_K = "U0000000000000000000000000000000k";
 const SUB_L = "U0000000000000000000000000000000l";
 const SUB_M = "U0000000000000000000000000000000m";
-const SUB_N = "U0000000000000000000000000000000n";
+const SUB_P = "U0000000000000000000000000000000p"; // PHONE_DOC's LINE account
+const SUB_Q = "U0000000000000000000000000000000q";
+const SUB_R = "U0000000000000000000000000000000r";
 const SUB_DOC = "U000000000000000000000000000000dc";
 // AUTH_ADMIN_LINE_IDS: admins are listed by LINE user id, the session's sub
 const ADMIN_SUB = "U00000000000000000000000000000ad1";
@@ -112,7 +125,8 @@ const TG_CHAT = "1228757000";
 const XSS_NAME = `<img src=x onerror="window.__xss=1">หมอ A`;
 // the LINE name in every flow that takes screenshots: an ordinary Thai name (the XSS name is used where nothing is shot)
 const LINE_NAME_A = "ต้นข้าว";
-// access requests (numbers that hold no name)
+// numbers that hold no name; NURSE and WALK_IN have rows in access_requests from before (history only: access
+// requests with typed names are gone, and no row there authorizes or names anyone)
 const UNLISTED = "0900000003";
 const NURSE = "0900000004";
 const WALK_IN = "0900000005";
@@ -127,14 +141,15 @@ const NOW_FILE = join(tmpdir(), `orskh-e2e-now-${APP_PORT}.txt`);
 const BOT_TOKEN = randomBytes(12).toString("hex");
 const E2E_WORKBOOK = join(repoRoot, "tests", "fixtures", "e2e-or-export.xlsx");
 const SAMPLE_WORKBOOK = join(repoRoot, "tests", "fixtures", "sample-or-export.xlsx");
-// Invented people of the users list, each given a number by hand (README: a claim without the claim page). The
-// admin's claim is held by the admin's LINE account, so /admin can name who saved the repair's dates.
+// Invented people of the users list, each given their name by hand (README: a claim without the claim page): the
+// nurses by a number, the doctors by email (doctors sign in by email only; `userId` is filled in when the claims are
+// made). The admin's claim is held by the admin's LINE account, so /admin can name who saved the repair's dates.
 const RP = {
   admin: { phone: "0900000021", name: "วิไล แสงทอง", sub: ADMIN_SUB },
   mx: { phone: "0900000022", name: "ปราณี สายบุญ", sub: "U00000000000000000000000000000mx1" },
   nurse: { phone: "0900000023", name: "อรุณี ศรีสุข", sub: "U00000000000000000000000000000rn1" },
-  drX: { phone: "0900000024", name: "ณัฐพล วงศ์ใหญ่", sub: "U00000000000000000000000000000dx1" },
-  drY: { phone: "0900000025", name: "ชัยวัฒน์ มีสุข", sub: "U00000000000000000000000000000dy1" },
+  drX: { phone: null, name: "ณัฐพล วงศ์ใหญ่", sub: "U00000000000000000000000000000dx1", userId: null },
+  drY: { phone: null, name: "ชัยวัฒน์ มีสุข", sub: "U00000000000000000000000000000dy1", userId: null },
 };
 // The bookings' HNs (invented): doctor X books one for Monday and two for Tuesday (one typed with a dash, matching the
 // workbook's 71000002; one HOSxP will not list); doctor Y books 71000015, which the workbook writes 0071000015.
@@ -304,6 +319,20 @@ function outboxFiles() {
   return existsSync(OUTBOX) ? readdirSync(OUTBOX).filter((f) => f.endsWith(".json")).sort() : [];
 }
 
+/** The doctors' emails written so far (EMAIL_PROVIDER=file), oldest first. */
+function emailFiles() {
+  const dir = join(OUTBOX, "email");
+  return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".json")).sort() : [];
+}
+
+/** The email written after the first `count` ones: {to, subject, text, html, code, at}. */
+async function waitForEmail(count, timeoutMs = 10_000) {
+  const files = await waitUntil(() => (emailFiles().length > count ? emailFiles() : null), "an email in the outbox", timeoutMs);
+  const mail = JSON.parse(readFileSync(join(OUTBOX, "email", files[count]), "utf8"));
+  issuedCodes.push(mail.code);
+  return mail;
+}
+
 /** Every OTP the mock deeSMSX issued [{to, pin, ref, sender, token, at}]. */
 async function smsIssued() {
   return (await fetch(`${SMS}/__control/sms`)).json();
@@ -357,8 +386,9 @@ function assert(cond, msg) {
 }
 
 /** A session cookie value signed like signSession() in src/lib/tokens.ts (for checks that need no sign-in). */
-function sessionToken(phone, secret = SESSION_SECRET, sub = "Ux") {
-  return new SignJWT({ phone, name: "x", picture: null })
+/** A session cookie's token: an SMS sign-in's number, or with `uid` a doctor's email sign-in (a users.id, no number). */
+function sessionToken(phone, secret = SESSION_SECRET, sub = "Ux", uid = null) {
+  return new SignJWT(uid ? { uid, name: "x", picture: null } : { phone, name: "x", picture: null })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(sub)
     .setIssuer("orskh")
@@ -401,12 +431,6 @@ async function noSideScroll(page, label) {
   assert(w[0] <= w[1], `${label}: horizontal scroll ${w[0]} > ${w[1]}`);
 }
 
-/** `inner` lies within `outer` horizontally (nothing spills over a box's border). */
-async function within(page, inner, outer, label) {
-  const [a, b] = await Promise.all([page.locator(inner).boundingBox(), page.locator(outer).boundingBox()]);
-  assert(a && b, `${label}: both elements visible`);
-  assert(a.x >= b.x - 0.5 && a.x + a.width <= b.x + b.width + 0.5, `${label}: ${inner} [${a.x}, ${a.x + a.width}] outside ${outer} [${b.x}, ${b.x + b.width}]`);
-}
 
 /** Every visible button, link and field is at least 44 px tall (touch targets). */
 async function touchTargets(page, label) {
@@ -417,6 +441,18 @@ async function touchTargets(page, label) {
       .filter(([, h]) => h < 44),
   );
   assert(small.length === 0, `${label}: touch targets under 44 px: ${JSON.stringify(small)}`);
+}
+
+/** A sign-in screen never offers LINE Login: no button, no "sign in with LINE" (LINE has signed the person in already). */
+async function noLineLogin(page, label) {
+  assert((await page.locator('[data-testid="line-login"]').count()) === 0, `${label}: no LINE button`);
+  const text = (await page.textContent("main")) ?? "";
+  assert(!/LINE Login|เข้า(ใช้|สู่ระบบ)?ด้วย ?LINE|ล็อกอิน(ด้วย)? ?LINE/i.test(text), `${label}: no "sign in with LINE" wording`);
+}
+
+/** The text of an element with its no-break and repeated spaces evened out. */
+async function plainText(page, selector) {
+  return ((await page.textContent(selector)) ?? "").replace(/ /g, " ").replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -570,7 +606,7 @@ async function main() {
     LINE_API_URL: LINE,
     SESSION_SECRET,
     OTP_PEPPER,
-    // break-glass only: everyone else claims a name or is approved (any common way of writing the number)
+    // break-glass only: everyone else claims a name from the list (any common way of writing the number)
     ALLOWED_PHONES: ` ${fmt(BREAK_GLASS)} `,
     DATABASE_URL: DB_URL,
     // provider mode against the mock (DEESMSX_SENDER unset: the shared sender deeSMS.OTP)
@@ -639,7 +675,19 @@ async function main() {
   let webhookSecret = ""; // read from the recorded setWebhook call
   let webhookPath = "";
 
-  /** On /login/verify: types the number (as `typed`), asks for the code, and returns the SMS the mock deeSMSX issued. */
+  /**
+   * On the position step of /login/verify (right after LINE): picks RN, PN or PCA, which opens the SMS form
+   * (/login/verify?as=TYPE). Doctors (verify-type-DR) go to /login/doctor instead.
+   */
+  async function chooseType(page, type = "RN") {
+    await page.waitForSelector('[data-testid="verify-types"]');
+    await page.click(`[data-testid="verify-type-${type}"]`);
+    await page.waitForSelector("#phone");
+    const at = new URL(page.url());
+    assert(at.pathname === "/login/verify" && at.search === `?as=${type}`, `the SMS form of ${type}: ${page.url()}`);
+  }
+
+  /** On /login/verify?as=TYPE: types the number (as `typed`), asks for the code, and returns the SMS the mock deeSMSX issued. */
   async function requestCode(page, phone, typed = phone) {
     await page.fill("#phone", typed);
     await page.click('button[type="submit"]');
@@ -647,42 +695,46 @@ async function main() {
     return waitForSms(phone, seenSms);
   }
 
-  /** LINE login with a fresh account, then a number that holds no name, verified by code: the claim page. */
-  async function verifyToClaim(page, phone) {
+  /**
+   * LINE login with a fresh account, the position `type`, then a number that holds no name, verified by code: the
+   * claim page, with that position's names already open.
+   */
+  async function verifyToClaim(page, phone, type = "RN") {
     await lineLogin(page);
     assert(new URL(page.url()).pathname === "/login/verify", `at ${page.url()}`);
+    await chooseType(page, type);
     const sms = await requestCode(page, phone);
     await page.fill("#code", sms.pin);
-    await page.waitForURL(`${APP}/login/claim`);
-    await page.waitForSelector('[data-testid="claim-types"]');
+    await page.waitForURL(`${APP}/login/claim?type=${type}`);
+    await page.waitForSelector('[data-testid="claim-names-step"]');
+    await page.waitForSelector('[data-testid="claim-names"]');
   }
 
-  /** As verifyToClaim(), then "ไม่พบชื่อ ... ส่งคำขอเข้าใช้งาน" to the access request form. */
-  async function verifyUnlisted(page, phone) {
-    await verifyToClaim(page, phone);
-    await page.click('[data-testid="claim-request-link"]');
-    await page.waitForURL(`${APP}/login/request`);
-    await page.waitForSelector('[data-testid="request-form"]');
-  }
-
-  /** On /login/claim: picks the type, then the name (after typing `search`), and opens the confirm dialog. */
+  /**
+   * On /login/claim: the names of `type` (picked from the position list unless they are open already), then the name
+   * (after typing `search`), and opens the confirm dialog.
+   */
   async function pickName(page, type, fullName, search = "") {
-    await page.click(`[data-testid="claim-type-${type}"]`);
+    if (await page.locator('[data-testid="claim-types"]').count()) await page.click(`[data-testid="claim-type-${type}"]`);
     await page.waitForSelector('[data-testid="claim-names"]');
     if (search) await page.fill("#claim-search", search);
     await page.locator('[data-testid="claim-name"]', { hasText: fullName }).click();
     await page.waitForSelector('[data-testid="claim-confirm"][open]');
   }
 
-  async function fillRequest(page, first, last, position) {
-    await page.fill("#firstName", first);
-    await page.fill("#lastName", last);
-    await page.selectOption("#position", position);
-    await page.click('[data-testid="request-form"] button[type="submit"]');
+  /** A row in access_requests as one from before the typed-name requests were removed (history only now). */
+  async function oldRequest(phone, sub, status) {
+    const r = await db.query(
+      `INSERT INTO access_requests (phone, line_sub, line_name, first_name, last_name, position, status, decided_at, decided_by)
+       VALUES ($1, $2, 'e2e', 'ขอ', 'เข้าใช้', 'RN', $3, $4::timestamptz, $5::bigint)
+       RETURNING id::text AS id`,
+      [phone, sub, status, status === "pending" ? null : new Date(), status === "pending" ? null : ADMIN_ID],
+    );
+    return r.rows[0].id;
   }
 
-  async function requestRow(phone) {
-    return (await db.query("SELECT * FROM access_requests WHERE phone = $1 ORDER BY id DESC LIMIT 1", [phone])).rows[0];
+  async function requestRow(id) {
+    return (await db.query("SELECT status, decided_at, decided_by::text AS decided_by FROM access_requests WHERE id = $1", [id])).rows[0];
   }
 
   async function t(name, fn) {
@@ -770,19 +822,62 @@ async function main() {
       assert(same.status === 200, `canonical host is served: ${same.status}`);
     });
 
-    await t("first login: LINE -> phone -> SMS code (deeSMSX) -> /login/claim -> type and name -> board with the claimed full name", async () => {
+    await t("first login: LINE -> position (พยาบาล) -> phone -> SMS code (deeSMSX) -> /login/claim?type=RN with the names open -> name -> board with the claimed full name", async () => {
       await setIdentity({ sub: SUB_A, name: LINE_NAME_A, picture: "https://profile.line-scdn.net/0hMockPicture" });
       ctxA = await newContext(browser);
       const page = await ctxA.newPage();
       const csp = [];
       trackCsp(page, csp);
+      const verifyBodies = [];
+      page.on("request", (q) => {
+        if (new URL(q.url()).pathname === "/api/auth/otp/verify") verifyBodies.push(q.postDataJSON());
+      });
       await lineLogin(page);
-      assert(new URL(page.url()).pathname === "/login/verify", `at ${page.url()}`);
+      assert(new URL(page.url()).pathname === "/login/verify" && new URL(page.url()).search === "", `at ${page.url()}`);
       assert(!(await cookie(ctxA, "line-tx"))?.value, "tx cookie cleared");
       const pending = await cookie(ctxA, "pending");
       assert(pending?.httpOnly && pending.sameSite === "Lax", "pending cookie HttpOnly+Lax");
-      assert((await page.textContent("h1")).includes("ยืนยันเบอร์มือถือ"), `title: ${await page.textContent("h1")}`);
       assert((await page.textContent('[data-testid="line-name"]')).includes(LINE_NAME_A), "LINE name shown");
+
+      // step 1: the position. Doctors go to the email sign-in, everyone else to an SMS code; nothing to type here
+      await page.waitForSelector('[data-testid="verify-types"]');
+      assert((await page.textContent("h1")).trim() === "ยืนยันตัวตน", `title: ${await page.textContent("h1")}`);
+      assert((await plainText(page, '[data-testid="verify-types"] h2')) === "เลือกตำแหน่งของคุณ", "position heading");
+      const verifyTypes = await page.$$eval('[data-testid^="verify-type-"]', (els) =>
+        els.map((e) => [e.dataset.testid, e.getAttribute("href"), e.textContent.trim()]),
+      );
+      assert(
+        JSON.stringify(verifyTypes) ===
+          JSON.stringify([
+            ["verify-type-DR", "/login/doctor", "แพทย์ยืนยันตัวตนด้วยรหัสทางอีเมล"],
+            ["verify-type-RN", "/login/verify?as=RN", "พยาบาลยืนยันตัวตนด้วยรหัสทาง SMS"],
+            ["verify-type-PN", "/login/verify?as=PN", "ผู้ช่วยพยาบาลยืนยันตัวตนด้วยรหัสทาง SMS"],
+            ["verify-type-PCA", "/login/verify?as=PCA", "พนักงานช่วยเหลือคนไข้ยืนยันตัวตนด้วยรหัสทาง SMS"],
+          ]),
+        `position links: ${JSON.stringify(verifyTypes)}`,
+      );
+      assert((await page.locator("#phone").count()) === 0 && (await page.locator("main input").count()) === 0, "no field on the position step");
+      assert((await plainText(page, '[data-testid="verify-types"] [data-testid="ask-admin"]')) === ASK_ADMIN, "not on the list: ask the administrator");
+      assert((await page.locator('[data-testid="doctor-email-link"]').count()) === 0, "no separate doctors' button any more");
+      await noLineLogin(page, "/login/verify (position)");
+      await touchTargets(page, "/login/verify (position)");
+      await shoot(page, "verify-types", { narrow: true });
+      // the address decides nothing a doctor could use: ?as=DR is the email sign-in, an unknown position the list again
+      await page.goto(`${APP}/login/verify?as=DR`);
+      assert(new URL(page.url()).pathname === "/login/doctor", `?as=DR -> ${page.url()}`);
+      await page.goto(`${APP}/login/verify?as=XX`);
+      await page.waitForSelector('[data-testid="verify-types"]');
+      await chooseType(page, "PN");
+      // "เปลี่ยน" goes back to the positions
+      assert((await page.getAttribute('[data-testid="verify-change-type"]', "href")) === "/login/verify", "the way back to the positions");
+      await page.click('[data-testid="verify-change-type"]');
+      await chooseType(page, "RN");
+
+      // step 2: the number, under the chosen position
+      assert((await page.textContent("h1")).includes("ยืนยันเบอร์มือถือ"), `title: ${await page.textContent("h1")}`);
+      assert((await page.textContent('[data-testid="verify-type"]')).trim() === "พยาบาล", "the chosen position is shown");
+      assert((await page.locator('[data-testid="doctor-email-link"]').count()) === 0, "no doctors' email button under the number");
+      await noLineLogin(page, "/login/verify (phone)");
       // the number field: a phone keypad, the browser's saved number, a Thai example
       const attrs = await page.$eval("#phone", (el) => ({
         type: el.type,
@@ -826,17 +921,35 @@ async function main() {
       await touchTargets(page, "/login/verify (code)");
       await shoot(page, "verify-code");
 
-      // paste-friendly: spaces and Thai digits are accepted; the number holds no name yet, so the claim page follows
+      // paste-friendly: spaces and Thai digits are accepted; the number holds no name yet, so the claim page follows,
+      // with the names of the position chosen before the number already open
       const thai = sms.pin.replace(/\d/g, (d) => String.fromCharCode(0x0e50 + Number(d)));
       await page.fill("#code", `${thai.slice(0, 3)} ${thai.slice(3)}`);
-      await page.waitForURL(`${APP}/login/claim`);
-      await page.waitForSelector('[data-testid="claim-types"]');
+      await page.waitForURL(`${APP}/login/claim?type=RN`);
+      await page.waitForSelector('[data-testid="claim-names-step"]');
+      await page.waitForSelector('[data-testid="claim-names"]');
+      assert(verifyBodies.length === 1 && verifyBodies[0].as === "RN", `the position goes with the code: ${JSON.stringify(verifyBodies.map((b) => b.as))}`);
+      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "พยาบาล", "the nurses' names, opened at once");
+      assert((await page.locator('[data-testid="claim-types"]').count()) === 0, "no position list first");
       assert(!(await cookie(ctxA, "session")), "no session before a name is chosen");
       assert(!(await cookie(ctxA, "pending"))?.value, "pending cleared");
       assert((await cookie(ctxA, "access"))?.httpOnly, "access cookie for the claim step");
       assert((await page.textContent("h1")).includes("ยืนยันชื่อของคุณ"), `claim title: ${await page.textContent("h1")}`);
       assert((await page.textContent('[data-testid="line-name"]')) === LINE_NAME_A, "LINE name shown");
       assert((await page.textContent('[data-testid="request-phone"]')).trim() === fmt(DOC1), "verified number shown");
+      // names come only from the list: no field but the search, no access request, the administrator for anything else
+      assert((await plainText(page, '[data-testid="claim-names-step"] [data-testid="ask-admin"]')) === ASK_ADMIN, "ask the administrator");
+      assert(
+        (await page.$eval('[data-testid="claim-names-step"] [data-testid="ask-admin"]', (el) => el.tagName + el.querySelectorAll("a").length)) === "P0",
+        "plain text, not a link",
+      );
+      assert((await page.locator('[data-testid="claim-request-link"], a[href="/login/request"]').count()) === 0, "no way to an access request");
+      assert(JSON.stringify(await page.$$eval("main input", (els) => els.map((e) => e.id))) === '["claim-search"]', "the search is the only field");
+      await noLineLogin(page, "/login/claim (names)");
+
+      // the other positions: "เปลี่ยน" (doctors go to the email sign-in from there)
+      await page.click('[data-testid="claim-change-type"]');
+      await page.waitForSelector('[data-testid="claim-types"]');
       const typeLabels = await page.$$eval('[data-testid^="claim-type-"]', (els) => els.map((e) => [e.dataset.testid, e.textContent.trim()]));
       assert(
         JSON.stringify(typeLabels) ===
@@ -849,7 +962,8 @@ async function main() {
         `type buttons: ${JSON.stringify(typeLabels)}`,
       );
       assert((await page.getAttribute('[data-testid="claim-type-DR"]', "href")) === "/login/doctor", "doctors go to the email sign-in");
-      assert((await page.getAttribute('[data-testid="claim-request-link"]', "href")) === "/login/request", "a way to the access request");
+      assert((await plainText(page, '[data-testid="claim-types"] [data-testid="ask-admin"]')) === ASK_ADMIN, "ask the administrator");
+      assert((await page.locator('[data-testid="claim-request-link"], a[href="/login/request"]').count()) === 0, "no way to an access request");
       await touchTargets(page, "/login/claim (types)");
       await shoot(page, "claim-types", { narrow: true });
 
@@ -908,8 +1022,13 @@ async function main() {
       await page.waitForSelector('[data-testid="claim-confirm"][open]');
       assert((await page.textContent('[data-testid="claim-confirm-name"]')).trim() === DOC1_NAME, "name in the dialog");
       assert((await page.textContent('[data-testid="claim-confirm-role"]')).trim() === DOC1_ROLE, "role in the dialog");
-      const note = (await page.textContent('[data-testid="claim-confirm"]')).replace(/ /g, " ");
-      assert(note.includes(fmt(DOC1)) && note.includes("24 ชั่วโมง"), "the dialog says the admin sees the number and what an undo means");
+      // an administrator in TELEGRAM_CHAT_ID can undo a claim here: the dialog says so
+      const note = await plainText(page, "#claim-confirm-note");
+      assert(
+        note ===
+          `ชื่อนี้จะผูกกับเบอร์ ${fmt(DOC1)} และบัญชี LINE นี้ แล้วผู้อื่นจะเลือกชื่อนี้ไม่ได้อีก ผู้ดูแลจะได้รับแจ้งทันที หากไม่ใช่ชื่อของคุณ ผู้ดูแลจะยกเลิก และเบอร์นี้กับบัญชี LINE นี้จะเลือกชื่อใหม่ไม่ได้ 24 ชั่วโมง`,
+        `the dialog says the name is locked to this number and LINE account, and what an undo means: ${note}`,
+      );
       assert((await page.evaluate(() => document.activeElement?.textContent?.trim())) === "ยกเลิก", "focus on cancel");
       await shoot(page, "claim-confirm", { narrow: true, full: false });
       await page.keyboard.press("Escape");
@@ -960,6 +1079,16 @@ async function main() {
       assert(kb === JSON.stringify([[{ text: "↩️ ยกเลิกการยืนยัน", callback_data: `oc:${cl.rows[0].id}:u` }]]), `undo button: ${kb}`);
       const refs = await waitUntil(async () => (await db.query("SELECT tg_messages FROM user_claims WHERE id = $1", [cur.id])).rows[0].tg_messages[0], "stored message id");
       assert(refs.message_id === tg[0].message_id, "message id stored for the undo edit");
+      // the webhook (for the undo button) was registered before the message, with a derived secret
+      const set = await telegramCalls("setWebhook");
+      assert(set.length === 1, `one setWebhook: ${set.length}`);
+      assert((await telegramCalls("getWebhookInfo")).length >= 1, "getWebhookInfo called first");
+      const hook = new URL(set[0].body.url);
+      assert(hook.origin === APP && hook.pathname === WEBHOOK_PATH && /^\?v=[0-9a-f]{12}$/.test(hook.search), `webhook url ${hook}`);
+      assert(JSON.stringify(set[0].body.allowed_updates) === '["callback_query"]', "only callback queries");
+      webhookSecret = set[0].body.secret_token;
+      webhookPath = `${hook.pathname}${hook.search}`;
+      assert(/^[A-Za-z0-9_-]{43}$/.test(webhookSecret), "secret is URL-safe");
       // the code was single use
       const again = await page.request.post(`${APP}/api/auth/otp/verify`, {
         headers: { origin: APP, "content-type": "application/json" },
@@ -1051,42 +1180,82 @@ async function main() {
       await ctx.close();
     });
 
-    await t("a second LINE account with another number: a claimed name is disabled, the access request is offered; claims its own name", async () => {
+    await t("a second LINE account with another number: a claimed name is disabled and refused (ask the administrator); claims its own name", async () => {
       await setIdentity({ sub: SUB_M, name: "หมอหญิง" });
       const ctx = await newContext(browser);
       const page = await ctx.newPage();
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
       const before = (await telegramMessages()).length;
-      await verifyToClaim(page, DOC2);
-      await page.click('[data-testid="claim-type-RN"]');
-      await page.waitForSelector('[data-testid="claim-names"]');
+      await verifyToClaim(page, DOC2, "RN");
       const taken = page.locator('[data-testid="claim-name"][data-claimed="true"]');
       assert((await taken.count()) === 1 && (await taken.textContent()).includes(DOC1_NAME), "the claimed name is marked");
       assert(await taken.isDisabled(), "and cannot be chosen");
       assert((await taken.textContent()).includes("มีผู้เลือกแล้ว"), "taken badge");
       assert((await page.textContent('[data-testid="claim-count"]')).trim() === "5 รายชื่อ · เลือกได้ 4", "count of free names");
+      await taken.click({ force: true });
+      await sleep(300);
+      assert((await page.locator('[data-testid="claim-confirm"][open]').count()) === 0, "a taken name opens no dialog");
       await shoot(page, "claim-names-taken", { narrow: true });
       // the API agrees, and leaks no number or LINE id
       const list = await page.request.get(`${APP}/api/auth/claim/list?type=RN`);
       const body = await list.text();
       assert(list.status() === 200 && !body.includes(DOC1) && !body.includes(SUB_A), "list without numbers or LINE ids");
+      assert(JSON.parse(body).names.find((n) => `${n.first_name} ${n.last_name}` === DOC1_NAME)?.claimed === true, "taken in the API");
       const headers = { origin: APP, "content-type": "application/json" };
       const doc1Id = Number(await userId(db, DOC1_NAME));
       const r = await page.request.post(`${APP}/api/auth/claim`, { headers, data: { userId: doc1Id } });
-      assert(r.status() === 409 && (await r.json()).reason === "taken", `claim a taken name -> ${r.status()}`);
+      const rBody = await r.json();
+      assert(r.status() === 409 && rBody.reason === "taken" && rBody.error === CLAIM_TAKEN && !rBody.redirect, `claim a taken name -> ${r.status()} ${JSON.stringify(rBody)}`);
+      assert((await currentClaim(db, DOC1_NAME))?.line_sub === SUB_A, "the first claim keeps the name");
       for (const badId of ["1; DROP TABLE users", 2147483648]) {
         const bad = await page.request.post(`${APP}/api/auth/claim`, { headers, data: { userId: badId } });
         assert(bad.status() === 400, `bad id ${badId} -> ${bad.status()}`);
       }
-      // the phone's Back button goes from the names to the positions (not off the page), Forward comes back
+      // the phone's Back button goes from the names to the positions (not off the page), Forward comes back: the names
+      // opened from the address have the positions under them, and so do names opened by hand
+      await page.goBack();
+      await page.waitForSelector('[data-testid="claim-types"]');
+      assert(new URL(page.url()).pathname === "/login/claim", `Back from the names opened by the address: ${page.url()}`);
+      await page.goForward();
+      await page.waitForSelector('[data-testid="claim-names"]');
+      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "พยาบาล", "Forward reopens them");
+      await page.click('[data-testid="claim-change-type"]');
+      await page.waitForSelector('[data-testid="claim-types"]');
+      await page.click('[data-testid="claim-type-RN"]');
+      await page.waitForSelector('[data-testid="claim-names"]');
       await page.goBack();
       await page.waitForSelector('[data-testid="claim-types"]');
       assert(new URL(page.url()).pathname === "/login/claim", `Back stays on the claim page: ${page.url()}`);
       await page.goForward();
       await page.waitForSelector('[data-testid="claim-names"]');
       assert((await page.textContent('[data-testid="claim-type"]')).trim() === "พยาบาล", "Forward reopens the names");
-      // a name taken while its dialog is open: the message is shown above the list, with focus, and links the request
+      // the address keeps ?type=RN, yet a reload (or a Back or Forward that loads the page again) shows the step of its
+      // entry: a position chosen by hand, and the positions under names opened from the address
+      const showsPN = () =>
+        document.querySelector('[data-testid="claim-type"]')?.textContent?.trim() === "ผู้ช่วยพยาบาล" &&
+        [...document.querySelectorAll('[data-testid="claim-name"]')].some((b) => b.textContent.includes("สุดา คำดี"));
+      await page.click('[data-testid="claim-change-type"]');
+      await page.waitForSelector('[data-testid="claim-types"]');
+      await page.click('[data-testid="claim-type-PN"]');
+      await page.waitForFunction(showsPN);
+      await page.reload();
+      await page.waitForFunction(showsPN);
+      await page.goBack();
+      await page.waitForSelector('[data-testid="claim-types"]');
+      await page.reload();
+      await page.waitForSelector('[data-testid="claim-types"]');
+      await sleep(400);
+      assert((await page.locator('[data-testid="claim-names"]').count()) === 0, "a reload of the positions stays at the positions");
+      await page.goForward();
+      await page.waitForFunction(showsPN);
+      await page.goBack();
+      await page.waitForSelector('[data-testid="claim-types"]');
+      await page.click('[data-testid="claim-type-RN"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="claim-type"]')?.textContent?.trim() === "พยาบาล");
+      await page.waitForSelector('[data-testid="claim-name"]');
+      // a name taken while its dialog is open: the message is shown above the list, with focus; the way on is the
+      // administrator (plain text, no link)
       const kamol = "ปราณี สายบุญ";
       await page.locator('[data-testid="claim-name"]', { hasText: kamol }).click();
       await page.waitForSelector('[data-testid="claim-confirm"][open]');
@@ -1097,18 +1266,13 @@ async function main() {
       await page.click('[data-testid="claim-confirm-yes"]');
       await page.waitForSelector('[data-testid="claim-error"]');
       await page.waitForFunction(() => document.activeElement?.dataset?.testid === "claim-error");
-      assert((await page.textContent('[data-testid="claim-error"]')).includes("มีผู้เลือกแล้ว"), "taken message");
-      assert((await page.getAttribute('[data-testid="claim-error-request"]', "href")) === "/login/request", "request link in the message");
+      assert((await plainText(page, '[data-testid="claim-error"]')) === CLAIM_TAKEN, `taken message: ${await plainText(page, '[data-testid="claim-error"]')}`);
+      assert((await page.locator('[data-testid="claim-error"] a, [data-testid="claim-error-request"]').count()) === 0, "no link in the message");
       await page.waitForFunction((n) => [...document.querySelectorAll('[data-testid="claim-name"][data-claimed="true"]')].some((b) => b.textContent.includes(n)), kamol);
+      assert((await currentClaim(db, kamol))?.line_sub === "U-kamol-by-hand", "the name stays with whoever took it first");
       await shoot(page, "claim-taken-race", { narrow: true });
       // released by hand, as README shows (no 24 h block)
       await db.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE phone = '0900000099' AND undone_at IS NULL");
-      // "ไม่พบชื่อ" leads to the access request form, and back
-      await page.click('[data-testid="claim-request-link"]');
-      await page.waitForURL(`${APP}/login/request`);
-      await page.waitForSelector('[data-testid="request-form"]');
-      await page.click('[data-testid="back-to-claim"]');
-      await page.waitForURL(`${APP}/login/claim`);
       await pickName(page, "RN", DOC2_NAME, "สมหญิง");
       await page.click('[data-testid="claim-confirm-yes"]');
       await page.waitForURL(`${APP}/`);
@@ -1141,10 +1305,14 @@ async function main() {
       const ctx = await newContext(browser);
       const page = await ctx.newPage();
       await lineLogin(page);
-      const who = await page.textContent('[data-testid="line-name"]');
-      assert(who.includes(XSS_NAME), `literal name shown: ${who}`);
-      assert((await page.locator('img[src="x"]').count()) === 0, "no injected <img>");
-      assert((await page.evaluate(() => window.__xss)) === undefined, "no script executed");
+      // on the position step and on the number step
+      for (const step of ["position", "phone"]) {
+        if (step === "phone") await chooseType(page, "PCA");
+        const who = await page.textContent('[data-testid="line-name"]');
+        assert(who.includes(XSS_NAME), `literal name shown (${step}): ${who}`);
+        assert((await page.locator('img[src="x"]').count()) === 0, `no injected <img> (${step})`);
+        assert((await page.evaluate(() => window.__xss)) === undefined, `no script executed (${step})`);
+      }
       // a landline is refused before anything is sent
       await page.fill("#phone", "02-123-4567");
       await page.click('button[type="submit"]');
@@ -1194,7 +1362,7 @@ async function main() {
       await ctx.close();
     });
 
-    await t("unlisted number: same answer, a real SMS code, the code leads to /login/claim, then the access request (no session)", async () => {
+    await t("unlisted number: same answer, a real SMS code, the code opens /login/claim?type=PN (no session); no typed names, no doctors by number", async () => {
       await setIdentity({ sub: SUB_C, name: "คนนอก" });
       const ctx = await newContext(browser);
       const page = await ctx.newPage();
@@ -1202,6 +1370,8 @@ async function main() {
       trackCsp(page, csp);
       const tgBefore = (await telegramMessages()).length;
       await lineLogin(page);
+      await chooseType(page, "PN");
+      assert((await page.textContent('[data-testid="verify-type"]')).trim() === "ผู้ช่วยพยาบาล", "the chosen position");
       const sms = await requestCode(page, UNLISTED);
       const msg = (await page.textContent('[data-testid="otp-info"]')).trim();
       const shape = (m) => m.replace(/\d{3}-\d{3}-\d{4}/, "N").replace(/รหัสอ้างอิง \S+$/, "R");
@@ -1211,14 +1381,14 @@ async function main() {
       // a wrong code gets exactly the same answer as for a listed number
       await page.fill("#code", sms.pin === "000000" ? "111111" : "000000");
       await page.waitForFunction(() =>
-        document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/ /g, " ").includes("เหลือโอกาสอีก 4 ครั้ง"),
+        document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/\u00a0/g, " ").includes("เหลือโอกาสอีก 4 ครั้ง"),
       );
       await page.fill("#code", sms.pin);
-      await page.waitForURL(`${APP}/login/claim`);
-      await page.waitForSelector('[data-testid="claim-types"]');
-      await page.click('[data-testid="claim-request-link"]');
-      await page.waitForURL(`${APP}/login/request`);
-      await page.waitForSelector('[data-testid="request-form"]');
+      await page.waitForURL(`${APP}/login/claim?type=PN`);
+      await page.waitForSelector('[data-testid="claim-names"]');
+      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "ผู้ช่วยพยาบาล", "the assistants' names, opened at once");
+      const names = await page.$$eval('[data-testid="claim-name"] .font-semibold', (els) => els.map((e) => e.textContent.trim()));
+      assert(JSON.stringify(names) === JSON.stringify(["สุดา คำดี"]), `PN names: ${JSON.stringify(names)}`);
       assert(!(await cookie(ctx, "session")), "no session");
       assert(!(await cookie(ctx, "pending"))?.value, "pending cleared");
       const access = await cookie(ctx, "access");
@@ -1226,322 +1396,192 @@ async function main() {
       assert(access.expires - Date.now() / 1000 > 11 * 3600 && access.expires - Date.now() / 1000 <= 12 * 3600 + 5, "access cookie ~12 h");
       assert((await page.textContent('[data-testid="request-phone"]')).trim() === fmt(UNLISTED), "verified number shown");
       assert((await page.textContent('[data-testid="line-name"]')) === "คนนอก", "LINE name shown");
-      for (const [id, label] of [["firstName", "ชื่อ"], ["lastName", "นามสกุล"], ["position", "ตำแหน่ง"]]) {
-        assert((await page.textContent(`label[for="${id}"]`)).trim() === label, `label for #${id}`);
-      }
-      const options = await page.$$eval("#position option", (os) => os.map((o) => [o.value, o.textContent]));
-      assert(
-        JSON.stringify(options) ===
-          JSON.stringify([["", "เลือกตำแหน่ง"], ["DR", "แพทย์"], ["RN", "พยาบาล"], ["PN", "ผู้ช่วยพยาบาล"], ["PCA", "พนักงานช่วยเหลือคนไข้"]]),
-        `options ${JSON.stringify(options)}`,
-      );
-      assert((await page.textContent('[data-testid="request-form"] button[type="submit"]')).trim() === "ส่งคำขอ", "submit button");
       const ev = await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND phone = $2 AND event = 'otp_verified_unlisted'", [SUB_C, UNLISTED]);
       assert(ev.rowCount === 1, "otp_verified_unlisted event logged");
-      assert((await telegramMessages()).length === tgBefore, "no Telegram message before the form is sent");
-      // verified the wrong number? a way back to the number step (LINE again, then another number)
-      const other = page.locator('[data-testid="request-form"] [data-testid="other-phone"]');
+      assert((await telegramMessages()).length === tgBefore, "no Telegram message before a name is claimed");
+
+      // no typed names anywhere: the old request page goes on to the positions, and holds no form
+      await page.goto(`${APP}/login/request`);
+      assert(new URL(page.url()).pathname === "/login/claim" && new URL(page.url()).search === "", `/login/request -> ${page.url()}`);
+      await page.waitForSelector('[data-testid="claim-types"]');
+      assert((await page.locator("main input, main select, main textarea, #firstName, #lastName, #position").count()) === 0, "no field to type a name into");
+      assert((await page.locator('[data-testid="request-form"]').count()) === 0, "no request form");
+      // a doctor's position from the address is not a position for numbers: the list again (DR goes to the email sign-in)
+      await page.goto(`${APP}/login/claim?type=DR`);
+      await page.waitForSelector('[data-testid="claim-types"]');
+      assert((await page.getAttribute('[data-testid="claim-type-DR"]', "href")) === "/login/doctor", "DR leads to the email sign-in");
+      const headers = { origin: APP, "content-type": "application/json" };
+      const drList = await page.request.get(`${APP}/api/auth/claim/list?type=DR`);
+      const drListBody = await drList.json();
+      assert(drList.status() === 400 && drListBody.reason === "doctor_email" && drListBody.redirect === "/login/doctor", `doctors' names by number: ${JSON.stringify(drListBody)}`);
+      // and a doctor's name cannot be claimed with a number, free or not
+      for (const name of [RACE_DOC, EMAIL_DOC]) {
+        const dr = await page.request.post(`${APP}/api/auth/claim`, { headers, data: { userId: Number(await userId(db, name)) } });
+        assert(dr.status() === 409 && (await dr.json()).reason === "unavailable", `claim a doctor by number -> ${dr.status()}`);
+      }
+      assert((await db.query("SELECT count(*)::int AS n FROM user_claims WHERE phone = $1", [UNLISTED])).rows[0].n === 0, "nothing claimed");
+      for (const [method, path] of [["POST", "/api/auth/access/request"], ["POST", "/api/auth/access/complete"], ["GET", "/api/auth/access/status"]]) {
+        const r = await page.request.fetch(`${APP}${path}`, {
+          method,
+          headers,
+          ...(method === "POST" ? { data: { firstName: "คน", lastName: "นอก", position: "PN" } } : {}),
+          maxRedirects: 0,
+        });
+        assert(r.status() === 404, `${method} ${path} (removed) -> ${r.status()}`);
+      }
+      assert((await db.query("SELECT count(*)::int AS n FROM access_requests")).rows[0].n === 0, "no access request stored");
+
+      // verified the wrong number? a way back to the start (LINE again, then the position and another number)
+      const other = page.locator('[data-testid="claim-types"] [data-testid="other-phone"]');
       assert((await other.textContent()).trim() === "ใช้เบอร์อื่น", "use another number link");
       await other.click();
       await page.waitForURL(`${APP}/login/verify`);
-      await page.waitForSelector("#phone");
-      // still signed out everywhere else; /login offers the way back to the name step (nothing requested yet)
+      await page.waitForSelector('[data-testid="verify-types"]');
+      // still signed out everywhere else; /login offers the way back to the name step
       await page.goto(`${APP}/`);
       assert(new URL(page.url()).pathname === "/login", "protected pages still redirect");
       assert((await page.getAttribute('[data-testid="claim-resume-link"]', "href")) === "/login/claim", "resume link on /login");
-      assert((await page.locator('[data-testid="request-status-link"]').count()) === 0, "no status link before a request");
-      assert((await page.locator('[data-testid="line-login"]').count()) === 0, "no LINE button on /login");
+      assert((await page.locator('[data-testid="request-status-link"]').count()) === 0, "no request status link");
+      await noLineLogin(page, "/login (resume)");
       await shoot(page, "login-resume");
       assert(csp.length === 0, `CSP violations: ${csp.join(" | ")}`);
       await ctx.close();
     });
 
-    await t("deactivated user holding a claim: no session, the code leads to /login/claim; reactivated: sign-in offered at once", async () => {
+    await t("deactivated user holding a claim: no session, the code leads to /login/claim; reactivated: the claim page offers the sign-in", async () => {
       const gated = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(RETIRED)}` });
       assert(gated.status === 307 && gated.location?.startsWith("/login"), `session of a deactivated number -> ${gated.status}`);
       await setIdentity({ sub: SUB_G, name: "หมอเกษียณ" });
       const ctx = await newContext(browser);
       const page = await ctx.newPage();
       const before = (await telegramMessages()).length;
-      await verifyToClaim(page, RETIRED);
+      await lineLogin(page);
+      await chooseType(page, "RN");
+      const sms = await requestCode(page, RETIRED);
+      // a position that is not one for numbers (sent by hand): the claim page opens on the position list
+      let sentAs = null;
+      let verified = null;
+      await page.route("**/api/auth/otp/verify", async (route) => {
+        const body = route.request().postDataJSON();
+        sentAs = body.as;
+        const response = await route.fetch({ postData: JSON.stringify({ ...body, as: "DR" }) });
+        verified = await response.json();
+        await route.fulfill({ response });
+      });
+      await page.fill("#code", sms.pin);
+      await page.waitForURL(`${APP}/login/claim`);
+      assert(sentAs === "RN", `the page sends the chosen position: ${sentAs}`);
+      assert(verified.ok === true && verified.redirect === "/login/claim", `as=DR -> ${JSON.stringify(verified)}`);
+      await page.waitForSelector('[data-testid="claim-types"]');
+      await page.unroute("**/api/auth/otp/verify");
       assert(!(await cookie(ctx, "session")), "no session");
-      await page.goto(`${APP}/login/request`);
-      await page.waitForSelector('[data-testid="request-form"]');
-      const status = async () => (await page.request.get(`${APP}/api/auth/access/status`)).json();
-      assert((await status()).status === "form", "nothing requested yet");
-      // back on the list (the waiting page and the status check read the table, not the 60 s cache)
+      await page.click('[data-testid="claim-type-RN"]');
+      await page.waitForSelector('[data-testid="claim-names"]');
+      const names = await page.$$eval('[data-testid="claim-name"] .font-semibold', (els) => els.map((e) => e.textContent.trim()));
+      assert(!names.includes(RETIRED_NAME), "the deactivated name is not offered");
+      const accessCookie = `access=${(await cookie(ctx, "access")).value}`;
+      // back on the list (the claim page reads the table, not the 60 s cache): the number holds its name again, so the
+      // claim page says so and offers the sign-in
       await db.query("UPDATE users SET active = true, updated_at = now() WHERE first_name || ' ' || last_name = $1", [RETIRED_NAME]);
-      assert((await status()).status === "signin", "status says sign in again");
       await page.reload();
-      await page.waitForSelector('[data-testid="request-signin"]');
-      assert((await page.textContent('[data-testid="request-signin"] a')).trim() === "เข้าสู่ระบบ", "sign-in link");
-      const claimPage = await rawRequest("/login/claim", { host: `localhost:${APP_PORT}`, cookie: `access=${(await cookie(ctx, "access")).value}` });
-      assert(claimPage.status === 307 && claimPage.location === "/login/request", `a listed number skips the claim page: ${claimPage.status} ${claimPage.location}`);
+      await page.waitForSelector('[data-testid="claim-signin"]');
+      assert((await plainText(page, '[data-testid="claim-signin"] h2')) === "เบอร์นี้มีชื่อในระบบแล้ว", "the number holds a name");
+      const signin = page.locator('[data-testid="claim-signin"] a');
+      assert((await signin.textContent()).trim() === "เข้าสู่ระบบ" && (await signin.getAttribute("href")) === "/login", "sign-in link");
+      assert((await page.locator('[data-testid="claim-types"], [data-testid="claim-names-step"]').count()) === 0, "no names offered");
+      await noLineLogin(page, "/login/claim (signed in elsewhere)");
+      // /login has nothing to resume for it (LINE signs it in), and the old request page goes on to the claim page
+      const login = await rawRequest("/login", { host: `localhost:${APP_PORT}`, cookie: accessCookie });
+      assert(login.status === 307 && login.location === "/api/auth/line/start", `/login for a listed number: ${login.status} ${login.location}`);
+      const request = await rawRequest("/login/request", { host: `localhost:${APP_PORT}`, cookie: accessCookie });
+      assert(request.status === 307 && request.location === "/login/claim", `/login/request: ${request.status} ${request.location}`);
       await db.query("UPDATE users SET active = false, updated_at = now() WHERE first_name || ' ' || last_name = $1", [RETIRED_NAME]);
-      assert((await status()).status === "form", "removed again");
+      // off the list again: back to choosing. The reload keeps the step of its history entry (the names of พยาบาล,
+      // picked above), and the deactivated name is not among them
+      await page.reload();
+      await page.waitForFunction(
+        () =>
+          document.querySelector('[data-testid="claim-type"]')?.textContent?.trim() === "พยาบาล" &&
+          document.querySelectorAll('[data-testid="claim-name"]').length > 0,
+      );
+      const again = await page.$$eval('[data-testid="claim-name"] .font-semibold', (els) => els.map((e) => e.textContent.trim()));
+      assert(!again.includes(RETIRED_NAME), "the deactivated name is not offered again");
+      assert((await page.locator('[data-testid="claim-signin"]').count()) === 0, "no sign-in offered");
       assert((await telegramMessages()).length === before, "no Telegram message");
       await ctx.close();
     });
 
-    await t("access request approved in Telegram: request with buttons, webhook checks, waiting page signs in with the requested name", async () => {
+    await t("access requests are gone: an approved one from before authorizes nothing (no LINE fast path, the SMS code leads to the names); Telegram 'ox:' taps are invalid", async () => {
+      // rows from before, as an approval in Telegram left them: an approved request with the LINE account bound to its
+      // number, and one still pending
+      const approved = await oldRequest(NURSE, SUB_D, "approved");
+      const pendingId = await oldRequest(WALK_IN, SUB_E, "pending");
+      await db.query("INSERT INTO line_bindings (line_sub, phone, display_name, verified_at, last_login_at) VALUES ($1, $2, 'มาลี', now(), now())", [SUB_D, NURSE]);
+      const session = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(NURSE)}` });
+      assert(session.status === 307 && session.location?.startsWith("/login"), `session of an approved number -> ${session.status} ${session.location}`);
       await setIdentity({ sub: SUB_D, name: "มาลี" });
       const ctx = await newContext(browser);
       const page = await ctx.newPage();
-      const csp = [];
-      trackCsp(page, csp);
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
-      await verifyUnlisted(page, NURSE);
-      await touchTargets(page, "/login/request (form)");
-      await shoot(page, "request-form", {
-        narrow: true,
-        atEach: (width) => within(page, '[data-testid="request-phone"]', '[data-testid="request-identity"]', `request header at ${width}px`),
-      });
+      const tgBefore = (await telegramMessages()).length;
+      await lineLogin(page);
+      assert(new URL(page.url()).pathname === "/login/verify", `no fast path for an approved request: ${page.url()}`);
+      await chooseType(page, "RN");
+      const sms = await requestCode(page, NURSE);
+      await page.fill("#code", sms.pin);
+      await page.waitForURL(`${APP}/login/claim?type=RN`);
+      await page.waitForSelector('[data-testid="claim-names"]');
+      assert(!(await cookie(ctx, "session")), "no session: the number has to pick its name from the list");
+      const ev = await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND phone = $2 AND event = 'otp_verified_unlisted'", [SUB_D, NURSE]);
+      assert(ev.rowCount === 1, "verified as a number that holds no name");
+      assert((await requestRow(approved)).status === "approved", "the old row is kept as it was");
+      assert((await telegramMessages()).length === tgBefore, "no Telegram message (no sign-in alert, no request)");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
 
-      // validation: field errors in Thai, marked on the field
-      await fillRequest(page, "สมหญิง1", "ใจดี", "RN");
-      await page.waitForSelector('[data-testid="request-error"]');
-      assert((await page.textContent('[data-testid="request-error"]')).includes("กรุณากรอกชื่อ"), "first name error");
-      assert((await page.getAttribute("#firstName", "aria-invalid")) === "true", "first name marked invalid");
-      await page.fill("#firstName", "");
-      await page.selectOption("#position", "");
-      await page.click('[data-testid="request-form"] button[type="submit"]');
-      await page.waitForFunction(() => document.activeElement?.id === "firstName");
-      assert((await requestRow(NURSE)) === undefined, "nothing stored for invalid input");
-
-      await fillRequest(page, "  มาลี ", "ศรีสุข", "RN");
-      await page.waitForSelector('[data-testid="request-pending"]');
-      const pendingText = (await page.textContent('[data-testid="request-pending"]')).replace(/ /g, " ");
-      assert(pendingText.includes("ส่งคำขอแล้ว รอผู้ดูแลอนุมัติ") && pendingText.includes(fmt(NURSE)), "pending view names the number");
-      assert(pendingText.includes("เข้าสู่ระบบให้อัตโนมัติ"), "pending view explains what happens next");
-      assert(
-        pendingText.includes("“ดูสถานะคำขอเข้าใช้งาน”") && pendingText.includes("12 ชั่วโมง"),
-        "closing the page: the result is on the login page's status button for 12 h (no new SMS code)",
-      );
-      assert(
-        (await page.getAttribute('[data-testid="request-pending"] [data-testid="other-phone"]', "href")) === "/api/auth/line/start",
-        "use another number from the waiting page",
-      );
-      await shoot(page, "request-pending", {
-        atEach: (width) => within(page, '[data-testid="request-phone"]', '[data-testid="request-identity"]', `request header at ${width}px`),
-      });
-
-      // the request in the database and in Telegram (sent after the response)
-      const row = await requestRow(NURSE);
-      assert(row.status === "pending" && row.first_name === "มาลี" && row.last_name === "ศรีสุข" && row.position === "RN", "row stored");
-      assert(row.line_sub === SUB_D, "row bound to the LINE account");
-      const msgs = await waitUntil(async () => {
-        const m = (await telegramMessages()).filter((x) => x.text.startsWith("📝"));
-        return m.length ? m : null;
-      }, "Telegram request message");
-      assert(msgs.length === 1, `one request message: ${msgs.length}`);
-      const req = msgs[0];
-      const lines = req.text.split("\n");
-      assert(lines[0] === "📝 <b>คำขอเข้าใช้งาน (เบอร์ไม่อยู่ในรายชื่อ)</b>" && lines[1] === "ORSKH.APP ตารางห้องผ่าตัด" && lines[2] === "", "header");
-      assert(lines[3] === "👤 ชื่อ-นามสกุล: มาลี ศรีสุข", lines[3]);
-      assert(lines[4] === "💼 ตำแหน่ง: พยาบาล", lines[4]);
-      assert(lines[5] === `📱 เบอร์: ${fmt(NURSE)} (ยืนยันรหัสแล้ว)`, lines[5]);
-      assert(lines[6] === "💬 ชื่อ LINE: มาลี", lines[6]);
-      assert(/^🕒 เวลา: \d{1,2} \S+ 25\d\d \d{2}:\d{2} น\.$/.test(lines[7]) && lines.length === 8, lines[7]);
-      assert(req.chat_id === TG_CHAT && req.parse_mode === "HTML" && req.token === TG_TOKEN, "sent to the admin chat as HTML");
-      const kb = req.reply_markup?.inline_keyboard;
-      assert(
-        JSON.stringify(kb) === JSON.stringify([[{ text: "✅ อนุมัติ", callback_data: `ox:${row.id}:a` }, { text: "❌ ไม่อนุมัติ", callback_data: `ox:${row.id}:r` }]]),
-        `buttons: ${JSON.stringify(kb)}`,
-      );
-      const stored = await waitUntil(async () => (await requestRow(NURSE)).tg_messages[0], "stored message id");
-      assert(stored.chat_id === TG_CHAT && stored.message_id === req.message_id, `stored ${JSON.stringify(stored)}`);
-
-      // webhook registered before the message, with a derived secret
-      const set = await telegramCalls("setWebhook");
-      assert(set.length === 1, `one setWebhook: ${set.length}`);
-      const info = await telegramCalls("getWebhookInfo");
-      assert(info.length >= 1, "getWebhookInfo called first");
-      const hook = new URL(set[0].body.url);
-      assert(hook.origin === APP && hook.pathname === WEBHOOK_PATH && /^\?v=[0-9a-f]{12}$/.test(hook.search), `webhook url ${hook}`);
-      assert(JSON.stringify(set[0].body.allowed_updates) === '["callback_query"]', "only callback queries");
-      webhookSecret = set[0].body.secret_token;
-      webhookPath = `${hook.pathname}${hook.search}`;
-      assert(/^[A-Za-z0-9_-]{43}$/.test(webhookSecret), "secret is URL-safe");
-
-      // wrong / missing secret: refused, nothing changes
-      const approve = tapUpdate(`ox:${row.id}:a`, ADMIN_ID, req);
+      // Telegram: wrong or missing secret refused (nothing registered again: this instance registered it at the first claim)
+      assert(webhookSecret && webhookPath, "the webhook was registered at the first claim");
+      const setBefore = (await telegramCalls("setWebhook")).length;
+      const approve = tapUpdate(`ox:${pendingId}:a`, ADMIN_ID, { chat_id: TG_CHAT, message_id: 9001 });
       for (const secret of [undefined, "", "wrong-secret", `${webhookSecret}x`]) {
         const r = await tgWebhook(webhookPath, approve, secret);
         assert(r.status === 401 && !r.body.includes("ox:"), `secret ${secret} -> ${r.status} ${r.body}`);
       }
       await sleep(300);
-      assert((await telegramCalls("setWebhook")).length === 1, "refused calls cause no new setWebhook (registered on this instance)");
-      // someone who is not an administrator: polite refusal, nothing changes
-      const stranger = await tgWebhook(webhookPath, tapUpdate(`ox:${row.id}:a`, STRANGER_ID, req), webhookSecret);
-      assert(stranger.status === 200 && stranger.body === '{"ok":true}', `stranger -> ${stranger.status} ${stranger.body}`);
-      await waitUntil(async () => (await telegramCalls("answerCallbackQuery")).length === 1, "refusal answer");
-      assert((await telegramCalls("answerCallbackQuery"))[0].body.text === "คุณไม่มีสิทธิ์พิจารณาคำขอนี้", "refusal text");
-      assert((await requestRow(NURSE)).status === "pending", "still pending");
-      assert((await telegramCalls("editMessageText")).length === 0, "message not edited");
-
-      // the administrator approves
-      const smsBefore = (await smsIssued()).length;
-      const ok = await tgWebhook(webhookPath, approve, webhookSecret);
-      assert(ok.status === 200 && ok.body === '{"ok":true}', `approve -> ${ok.status} ${ok.body}`);
-      const decided = await requestRow(NURSE);
-      assert(decided.status === "approved" && String(decided.decided_by) === TG_CHAT && decided.decided_at, "approved by the admin");
-      const edit = await waitUntil(async () => (await telegramCalls("editMessageText"))[0], "edited message");
-      assert(edit.body.chat_id === TG_CHAT && edit.body.message_id === req.message_id, "the request message is edited");
-      assert(edit.body.text.startsWith(`${req.text}\n\n✅ <b>อนุมัติแล้ว</b> · `) && edit.body.text.endsWith(" น."), `edited text: ${edit.body.text}`);
-      assert(edit.body.reply_markup === undefined, "buttons removed");
-      await waitUntil(async () => (await telegramCalls("answerCallbackQuery")).length === 2, "approval answer");
-      const answer = (await telegramCalls("answerCallbackQuery"))[1].body.text;
-      assert(answer === "อนุมัติแล้ว หน้ารออนุมัติของผู้ขอจะเข้าสู่ระบบให้เอง", `approval answer: ${answer}`);
-
-      // the waiting page notices (polling) and signs in by itself; the board shows the requested name
-      await page.waitForURL(`${APP}/`, { timeout: 25_000 });
-      assert((await boardName(page)) === "มาลี ศรีสุข", `requested name on the board: ${await boardName(page)}`);
-      assert((await page.textContent('[data-testid="account-phone"]')).trim() === fmt(NURSE), "the approved number in the menu");
-      assert((await cookie(ctx, "session"))?.httpOnly, "session cookie");
-      assert(!(await cookie(ctx, "access"))?.value, "access cookie cleared");
-      const b = await db.query("SELECT phone FROM line_bindings WHERE line_sub = $1", [SUB_D]);
-      assert(b.rows[0]?.phone === NURSE, "LINE account bound to the approved number");
-      const ev = await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND event = 'login_access'", [SUB_D]);
-      assert(ev.rowCount === 1, "login_access event logged");
-      assert((await smsIssued()).length === smsBefore, "no SMS is sent on approval (it would cost credit)");
-
-      // a second tap (any button): already decided, nothing changes
-      const again = await tgWebhook(webhookPath, tapUpdate(`ox:${row.id}:r`, ADMIN_ID, req), webhookSecret);
-      assert(again.status === 200, `second tap -> ${again.status}`);
-      await waitUntil(async () => (await telegramCalls("answerCallbackQuery")).length === 3, "already-decided answer");
-      assert((await telegramCalls("answerCallbackQuery"))[2].body.text === "คำขอนี้พิจารณาไปแล้ว (อนุมัติ)", "already decided text");
-      assert((await requestRow(NURSE)).status === "approved", "still approved");
-      assert((await telegramCalls("editMessageText")).length === 1, "no second edit");
-      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
-      assert(csp.length === 0, `CSP violations: ${csp.join(" | ")}`);
-      await ctx.close();
-    });
-
-    await t("approved number: LINE fast path; another LINE account verifies by code and the alert shows the request", async () => {
-      await setIdentity({ sub: SUB_D, name: "มาลี" });
-      let ctx = await newContext(browser);
-      let page = await ctx.newPage();
-      await lineLogin(page);
-      assert(new URL(page.url()).pathname === "/", `binding fast path: ${page.url()}`);
-      assert((await boardName(page)) === "มาลี ศรีสุข", "requested name again");
-      await ctx.close();
-
-      await setIdentity({ sub: SUB_F, name: "<b>เครื่องใหม่</b>" });
-      ctx = await newContext(browser);
-      page = await ctx.newPage();
-      const before = (await telegramMessages()).length;
-      await lineLogin(page);
-      const sms = await requestCode(page, NURSE);
-      await page.fill("#code", sms.pin);
-      await page.waitForURL(`${APP}/`);
-      await page.waitForSelector('[data-testid="user-menu"]');
-      const alert = await waitUntil(async () => (await telegramMessages()).slice(before).find((m) => m.text.startsWith("⚠️") || m.text.startsWith("🆕")), "verified alert");
-      assert(alert.text.includes("\n🩺 พยาบาล: มาลี ศรีสุข (อนุมัติจากคำขอ)\n"), `alert: ${alert.text}`);
-      assert(alert.text.includes(`📱 เบอร์: ${fmt(NURSE)}`), "alert names the number");
-      assert(alert.text.includes("&lt;b&gt;เครื่องใหม่&lt;/b&gt;") && !alert.text.includes("<b>เครื่องใหม่"), "LINE name escaped in the alert");
-      await ctx.close();
-    });
-
-    await t("access request rejected: waiting page shows it, no session, no new request for 24 h", async () => {
-      await setIdentity({ sub: SUB_E, name: "ผู้มาใหม่" });
-      const ctx = await newContext(browser);
-      const page = await ctx.newPage();
-      await verifyUnlisted(page, WALK_IN);
-      await fillRequest(page, "Walk-In", "O'Neil", "DR");
-      await page.waitForSelector('[data-testid="request-pending"]');
-      const row = await requestRow(WALK_IN);
-      const req = await waitUntil(async () => (await telegramMessages()).find((m) => m.text.includes(fmt(WALK_IN))), "request message");
-      assert(req.text.includes("💼 ตำแหน่ง: แพทย์") && req.text.includes("👤 ชื่อ-นามสกุล: Walk-In O'Neil"), "doctor request");
-      // the same number verified again (another browser and LINE account) goes to its pending request, not to the claim page
-      {
-        await setIdentity({ sub: SUB_N, name: "เครื่องที่สอง" });
-        const ctx2 = await newContext(browser);
-        const page2 = await ctx2.newPage();
-        await lineLogin(page2);
-        const sms2 = await requestCode(page2, WALK_IN);
-        await page2.fill("#code", sms2.pin);
-        await page2.waitForURL(`${APP}/login/request`);
-        await page2.waitForSelector('[data-testid="request-pending"]');
-        await ctx2.close();
-        await setIdentity({ sub: SUB_E, name: "ผู้มาใหม่" });
-      }
-      // one polling loop, however often the tab is hidden and shown while a (slow) status check is in flight
-      let statusCalls = 0;
-      page.on("request", (q) => {
-        if (new URL(q.url()).pathname === "/api/auth/access/status") statusCalls += 1;
-      });
-      await page.route("**/api/auth/access/status", async (route) => {
-        await sleep(1500);
-        await route.continue();
-      });
-      await page.evaluate(() => {
-        let hidden = false;
-        Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
-        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
-        window.__setHidden = (h) => {
-          hidden = h;
-          document.dispatchEvent(new Event("visibilitychange"));
-        };
-      });
-      const visible = async (v) => page.evaluate((h) => window.__setHidden(h), !v);
-      await visible(false);
-      await visible(true); // checks at once (in flight for 1.5 s)
-      for (let i = 0; i < 3; i++) {
-        await sleep(150);
-        await visible(false);
-        await visible(true);
-      }
-      await sleep(2500);
-      assert(statusCalls === 1, `one status check for four hide/show switches during a slow check: ${statusCalls}`);
-      await page.unroute("**/api/auth/access/status");
-
-      const smsBefore = (await smsIssued()).length;
+      assert((await telegramCalls("setWebhook")).length === setBefore, "refused calls cause no new setWebhook");
+      // someone who is not an administrator: refused
+      const answers = (await telegramCalls("answerCallbackQuery")).length;
       const edits = (await telegramCalls("editMessageText")).length;
-      const r = await tgWebhook(webhookPath, tapUpdate(`ox:${row.id}:r`, ADMIN_ID, req), webhookSecret);
-      assert(r.status === 200, `reject -> ${r.status}`);
-      await page.waitForSelector('[data-testid="request-rejected"]', { timeout: 25_000 });
-      const text = await page.textContent('[data-testid="request-rejected"]');
-      assert(text.includes("คำขอนี้ไม่ได้รับอนุมัติ") && text.includes("ติดต่อผู้ดูแลระบบ"), "rejected view");
-      await shoot(page, "request-rejected");
-      // the heading gets focus from script (no pointer interaction after a reload): no focus ring on it
-      await page.reload();
-      await page.waitForSelector('[data-testid="request-rejected"]');
-      const ring = await page.evaluate(() => {
-        const h = document.querySelector('[data-testid="request-rejected"] h2');
-        h.focus();
-        return { focused: document.activeElement === h, outline: getComputedStyle(h).outlineStyle };
-      });
-      assert(ring.focused && ring.outline === "none", `script-focused heading without a ring: ${JSON.stringify(ring)}`);
-      const edit = await waitUntil(async () => (await telegramCalls("editMessageText"))[edits], "edited message");
-      assert(edit.body.text.startsWith(`${req.text}\n\n❌ <b>ไม่อนุมัติ</b> · `), `edited: ${edit.body.text}`);
-      assert((await requestRow(WALK_IN)).status === "rejected", "row rejected");
-      assert(!(await cookie(ctx, "session")), "no session");
-      await sleep(1000);
-      assert((await smsIssued()).length === smsBefore, "no SMS on rejection");
-      const headers = { origin: APP, "content-type": "application/json" };
-      const again = await page.request.post(`${APP}/api/auth/access/request`, { headers, data: { firstName: "Walk", lastName: "In", position: "DR" } });
-      assert(again.status() === 409 && (await again.json()).status === "rejected", `re-request -> ${again.status()}`);
-      const complete = await page.request.post(`${APP}/api/auth/access/complete`, { headers, data: {} });
-      assert(complete.status() === 403, `complete without approval -> ${complete.status()}`);
-      // a rejected number cannot claim a name instead (no way round the 24 h): the API and the page send it back
-      const claim = await page.request.post(`${APP}/api/auth/claim`, { headers, data: { userId: Number(await userId(db, "สมใจ ใจเย็น")) } });
-      const claimBody = await claim.json();
-      assert(claim.status() === 409 && claimBody.reason === "requested" && claimBody.redirect === "/login/request", `claim after a rejection -> ${claim.status()} ${JSON.stringify(claimBody)}`);
-      const claimPage = await rawRequest("/login/claim", { host: `localhost:${APP_PORT}`, cookie: `access=${(await cookie(ctx, "access")).value}` });
-      assert(claimPage.status === 307 && claimPage.location === "/login/request", `claim page after a rejection: ${claimPage.status} ${claimPage.location}`);
-      assert((await db.query("SELECT count(*)::int AS n FROM user_claims WHERE phone = $1", [WALK_IN])).rows[0].n === 0, "nothing claimed");
-      const status = await page.request.get(`${APP}/api/auth/access/status`);
-      assert((await status.json()).status === "rejected", "status endpoint");
-      assert((await db.query("SELECT count(*)::int AS n FROM access_requests WHERE phone = $1", [WALK_IN])).rows[0].n === 1, "one row");
-      await ctx.close();
+      const stranger = await tgWebhook(webhookPath, tapUpdate(`ox:${pendingId}:a`, STRANGER_ID), webhookSecret);
+      assert(stranger.status === 200 && stranger.body === '{"ok":true}', `stranger -> ${stranger.status} ${stranger.body}`);
+      await waitUntil(async () => (await telegramCalls("answerCallbackQuery")).length === answers + 1, "refusal answer");
+      assert((await telegramCalls("answerCallbackQuery"))[answers].body.text === "คุณไม่มีสิทธิ์ดำเนินการนี้", "refusal text");
+      // the approve and reject buttons of the former requests, tapped by the administrator: invalid, nothing changes
+      for (const [i, data] of [`ox:${pendingId}:a`, `ox:${pendingId}:r`, `ox:${approved}:r`].entries()) {
+        const r = await tgWebhook(webhookPath, tapUpdate(data, ADMIN_ID, { chat_id: TG_CHAT, message_id: 9001 }), webhookSecret);
+        assert(r.status === 200 && r.body === '{"ok":true}', `${data} -> ${r.status} ${r.body}`);
+        await waitUntil(async () => (await telegramCalls("answerCallbackQuery")).length === answers + 2 + i, `answer to ${data}`);
+        const text = (await telegramCalls("answerCallbackQuery"))[answers + 1 + i].body.text;
+        assert(text === "คำสั่งไม่ถูกต้อง", `${data} answered as invalid: ${text}`);
+      }
+      const still = await requestRow(pendingId);
+      assert(still.status === "pending" && still.decided_at === null && still.decided_by === null, `the pending row is untouched: ${JSON.stringify(still)}`);
+      assert((await requestRow(approved)).status === "approved", "the approved row is untouched");
+      await sleep(300);
+      assert((await telegramCalls("editMessageText")).length === edits, "no message edited");
+      assert((await smsIssued()).filter((m) => m.to === intl(WALK_IN)).length === 0, "nobody is told by SMS");
     });
 
-    await t("break-glass ALLOWED_PHONES: signs in without a table row and shows the LINE name (as text)", async () => {
+    await t("break-glass ALLOWED_PHONES: signs in without a table row and shows the LINE name (as text), never an old request's name", async () => {
+      // an approved request from before for the same number names nobody: the board and the alert show the LINE name
+      await oldRequest(BREAK_GLASS, SUB_H, "approved");
       await setIdentity({ sub: SUB_H, name: "ผู้ดูแล <b>ฉุกเฉิน</b>" });
       const ctx = await newContext(browser);
       const page = await ctx.newPage();
+      const tgBefore = (await telegramMessages()).length;
       await lineLogin(page);
+      await chooseType(page, "RN");
       // written the international way: the same number
       const sms = await requestCode(page, BREAK_GLASS, `+66 ${BREAK_GLASS.slice(1, 3)} ${BREAK_GLASS.slice(3, 6)} ${BREAK_GLASS.slice(6)}`);
       await page.fill("#code", sms.pin);
@@ -1550,7 +1590,14 @@ async function main() {
       assert((await page.innerHTML('[data-testid="account-name"]')).includes("&lt;b&gt;"), "the LINE name is text, not markup");
       assert((await page.textContent('[data-testid="account-phone"]')).trim() === fmt(BREAK_GLASS), "formatted number");
       assert((await db.query("SELECT 1 FROM user_claims WHERE phone = $1", [BREAK_GLASS])).rowCount === 0, "holds no name");
-      assert((await page.locator('[data-testid="account-role"]').count()) === 0, "no role without a name or request");
+      assert((await page.locator('[data-testid="account-role"]').count()) === 0, "no role without a name");
+      const alert = await waitUntil(
+        async () => (await telegramMessages()).slice(tgBefore).find((m) => m.text.includes(`📱 เบอร์: ${fmt(BREAK_GLASS)}`)),
+        "verified alert",
+      );
+      assert(alert.text.startsWith("🆕") && alert.text.includes("\n🩺 ไม่พบในรายชื่อเจ้าหน้าที่\n"), `alert: ${alert.text}`);
+      assert(!alert.text.includes("อนุมัติจากคำขอ") && !alert.text.includes("ขอ เข้าใช้"), "no request named in the alert");
+      assert(alert.text.includes("&lt;b&gt;ฉุกเฉิน&lt;/b&gt;") && !alert.text.includes("<b>ฉุกเฉิน"), "LINE name escaped in the alert");
       await ctx.close();
     });
 
@@ -1560,6 +1607,7 @@ async function main() {
       const page = await ctx.newPage();
       const tgBefore = (await telegramMessages()).length;
       await lineLogin(page);
+      await chooseType(page, "RN"); // a reload below keeps the position (?as=RN)
       const sendAndExpect = async (mode, message) => {
         await smsControl("fail", { mode });
         await page.fill("#phone", DOC2);
@@ -1670,6 +1718,7 @@ async function main() {
       await setIdentity({ sub: SUB_A, error: "access_denied" });
       await lineLogin(page);
       assert(page.url().includes("/login/error?code=cancelled"), `cancel -> ${page.url()}`);
+      await noLineLogin(page, "/login/error (cancelled)");
       await setIdentity({ sub: SUB_A, name: LINE_NAME_A });
       await ctx.close();
     });
@@ -1694,7 +1743,7 @@ async function main() {
     });
 
     await t("CSRF: POST without/with foreign Origin is rejected; non-JSON rejected", async () => {
-      for (const path of ["/api/auth/otp/send", "/api/auth/otp/verify", "/api/auth/logout", "/api/auth/access/request", "/api/auth/access/complete", "/api/auth/claim", "/"]) {
+      for (const path of ["/api/auth/otp/send", "/api/auth/otp/verify", "/api/auth/logout", "/api/auth/claim", "/api/auth/email/send", "/api/auth/email/verify", "/"]) {
         const none = await postJson(path, { phone: DOC1 });
         assert(none.status === 403, `${path} without Origin -> ${none.status}`);
         const evil = await postJson(path, { phone: DOC1 }, { origin: "https://evil.test" });
@@ -1710,9 +1759,9 @@ async function main() {
       assert(text.status === 415, `text/plain -> ${text.status}`);
       const noPending = await postJson("/api/auth/otp/send", { phone: DOC1 }, { origin: APP });
       assert(noPending.status === 401, `no pending cookie -> ${noPending.status}`);
-      for (const path of ["/api/auth/access/request", "/api/auth/access/complete", "/api/auth/claim"]) {
+      for (const path of ["/api/auth/claim", "/api/auth/email/send", "/api/auth/email/verify"]) {
         const noAccess = await postJson(path, {}, { origin: APP });
-        assert(noAccess.status === 401, `${path} without access cookie -> ${noAccess.status}`);
+        assert(noAccess.status === 401, `${path} without its cookie -> ${noAccess.status}`);
       }
       // the Telegram webhook takes no Origin (server to server) but needs the secret header
       const hook = await postJson(WEBHOOK_PATH, { update_id: 1 });
@@ -1796,22 +1845,25 @@ async function main() {
       await ctx.close();
     });
 
-    await t("/login/verify, /login/request and /login/claim without their cookie go back to /login", async () => {
-      for (const path of ["/login/verify", "/login/request", "/login/claim"]) {
+    await t("the sign-in steps without their cookie go back to /login; the old /login/request goes on to /login/claim", async () => {
+      for (const path of ["/login/verify", "/login/verify?as=RN", "/login/verify?as=DR", "/login/claim", "/login/claim?type=RN", "/login/doctor"]) {
         const r = await rawRequest(path, { host: `localhost:${APP_PORT}` });
         assert(r.status === 307 && r.location === "/login", `${path}: ${r.status} ${r.location}`);
       }
-      const status = await fetch(`${APP}/api/auth/access/status`);
-      assert(status.status === 401, `status without access cookie -> ${status.status}`);
-      const list = await fetch(`${APP}/api/auth/claim/list?type=DR`);
+      const request = await rawRequest("/login/request", { host: `localhost:${APP_PORT}` });
+      assert(request.status === 307 && request.location === "/login/claim", `/login/request: ${request.status} ${request.location}`);
+      const list = await fetch(`${APP}/api/auth/claim/list?type=RN`);
       assert(list.status === 401, `claim list without access cookie -> ${list.status}`);
+      const status = await fetch(`${APP}/api/auth/access/status`, { redirect: "manual" });
+      assert(status.status === 404, `the removed request status -> ${status.status}`);
     });
 
     await t("local file mode (SMS_PROVIDER=file): the app makes the code, writes the SMS to a file; SMS_DAILY_CAP stops sending", async () => {
       // the same build, a second server: local mode, and a daily cap two sends above what was sent so far
       const sent = (await db.query("SELECT count(*)::int AS n FROM otp_codes WHERE created_at > now() - interval '24 hours'")).rows[0].n;
       const cap = sent + 2;
-      // Telegram only to a group: alerts still go out, but nobody could tap undo, so name claims are off on this server
+      // Telegram only to a group: alerts still go out, but nobody could tap undo (no person's id in TELEGRAM_CHAT_ID).
+      // Claims work all the same (they used to be off here): the confirm step says to ask the administrator instead.
       const fileEnv = {
         ...appEnv,
         APP_URL: FILE_APP,
@@ -1832,6 +1884,7 @@ async function main() {
       let page = await ctx.newPage();
       await lineLogin(page, undefined, FILE_APP);
       assert(new URL(page.url()).pathname === "/login/verify", `at ${page.url()}`);
+      await chooseType(page, "RN");
       await page.fill("#phone", fmt(DOC1));
       await page.click('button[type="submit"]');
       await page.waitForSelector('[data-testid="otp-info"]');
@@ -1847,33 +1900,41 @@ async function main() {
       assert((await boardName(page)) === DOC1_NAME, `signed in by file mode: ${await boardName(page)}`);
       await ctx.close();
 
-      // 2: the second send reaches the cap exactly
+      // 2: the second send reaches the cap exactly; the number holds no name and claims one (no undo administrator here)
       await setIdentity({ sub: SUB_K, name: "คนที่สอง" });
       ctx = await newContext(browser);
       page = await ctx.newPage();
       await lineLogin(page, undefined, FILE_APP);
+      await chooseType(page, "PCA");
       await page.fill("#phone", UNLISTED);
       await page.click('button[type="submit"]');
       await page.waitForSelector('[data-testid="otp-info"]');
       const unlistedFile = await waitForSmsFile(UNLISTED, seenFiles);
-      // claims are off here (no person in TELEGRAM_CHAT_ID to undo one): the code leads to the access request, and the
-      // claim page and API send there too
       await page.fill("#code", unlistedFile.code);
-      await page.waitForURL(`${FILE_APP}/login/request`);
-      await page.waitForSelector('[data-testid="request-form"]');
-      assert((await page.locator('[data-testid="back-to-claim"]').count()) === 0, "no way back to the claim page");
-      const off = await page.request.post(`${FILE_APP}/api/auth/claim`, {
-        headers: { origin: FILE_APP, "content-type": "application/json" },
-        data: { userId: Number(await userId(db, "สมใจ ใจเย็น")) },
-      });
-      assert(off.status() === 503 && (await off.json()).reason === "claims_off", `claim with claims off -> ${off.status()}`);
-      const offList = await page.request.get(`${FILE_APP}/api/auth/claim/list?type=DR`);
-      assert(offList.status() === 503, `claim list with claims off -> ${offList.status()}`);
-      await page.goto(`${FILE_APP}/login/claim`);
-      assert(new URL(page.url()).pathname === "/login/request", `claim page with claims off: ${page.url()}`);
-      await page.goto(`${FILE_APP}/login`);
-      assert((await page.locator('[data-testid="claim-resume-link"]').count()) === 0, "no claim link on /login");
-      assert((await page.locator('[data-testid="request-status-link"]').count()) === 1, "the request link instead");
+      await page.waitForURL(`${FILE_APP}/login/claim?type=PCA`);
+      await page.waitForSelector('[data-testid="claim-names"]');
+      assert((await page.textContent('[data-testid="claim-type"]')).trim() === "พนักงานช่วยเหลือคนไข้", "the PCA names, opened at once");
+      const pca = "บุญมี ใจซื่อ";
+      await pickName(page, "PCA", pca);
+      const note = await plainText(page, "#claim-confirm-note");
+      assert(
+        note === `ชื่อนี้จะผูกกับเบอร์ ${fmt(UNLISTED)} และบัญชี LINE นี้ แล้วผู้อื่นจะเลือกชื่อนี้ไม่ได้อีก หากเลือกผิด กรุณาติดต่อผู้ดูแล`,
+        `without an administrator to undo, the dialog says to ask one: ${note}`,
+      );
+      assert(!note.includes("24 ชั่วโมง"), "no undo promised");
+      await shoot(page, "claim-confirm-no-undo", { narrow: true, full: false });
+      await page.click('[data-testid="claim-confirm-yes"]');
+      await page.waitForURL(`${FILE_APP}/`);
+      assert((await boardName(page)) === pca, `claimed on the file-mode server: ${await boardName(page)}`);
+      const pcaClaim = await currentClaim(db, pca);
+      assert(pcaClaim?.phone === UNLISTED && pcaClaim.line_sub === SUB_K, "the claim holds the number and the LINE account");
+      // Telegram is set up (a group), so the claim is announced there all the same
+      const announced = await waitUntil(
+        async () => (await telegramMessages()).slice(tgBefore).find((m) => m.text.startsWith(`🪪 ยืนยันชื่อ: ${pca}`)),
+        "claim message to the group",
+      );
+      assert(announced.chat_id === "-1001234567890", `to the group: ${announced.chat_id}`);
+      assert(!announced.reply_markup, `no undo button nobody could tap: ${JSON.stringify(announced.reply_markup)}`);
       await ctx.close();
 
       // 3: over the cap: nobody gets a code, a Thai message, the administrators are told
@@ -1881,6 +1942,7 @@ async function main() {
       ctx = await newContext(browser);
       page = await ctx.newPage();
       await lineLogin(page, undefined, FILE_APP);
+      await chooseType(page, "RN");
       const files = outboxFiles().length;
       await page.fill("#phone", CAPPED);
       await page.click('button[type="submit"]');
@@ -1945,34 +2007,74 @@ async function main() {
       assert(refused.status() === 307 && to.startsWith("/login"), `session refused after the undo: ${refused.status()} ${to}`);
       await ctx.close();
 
-      // signing in again: the code works, but the claim page is blocked for 24 h (the API too), the request remains
+      // signing in again: the code works, but the claim page is blocked for 24 h (the API too); the way on is the
+      // administrator (no request button). The first login's code to this number and LINE account may be less than a
+      // minute old in a fast run: as if the minute had passed.
+      await db.query("UPDATE otp_codes SET created_at = created_at - interval '1 minute' WHERE line_sub = $1 AND phone = $2", [SUB_A, DOC1]);
       ctx = await newContext(browser);
       page = await ctx.newPage();
       await lineLogin(page);
       assert(new URL(page.url()).pathname === "/login/verify", `binding gone: ${page.url()}`);
+      await chooseType(page, "RN");
       const sms = await requestCode(page, DOC1);
       await page.fill("#code", sms.pin);
-      await page.waitForURL(`${APP}/login/claim`);
+      await page.waitForURL(`${APP}/login/claim?type=RN`);
       await page.waitForSelector('[data-testid="claim-blocked"]');
-      const blocked = (await page.textContent('[data-testid="claim-blocked"]')).replace(/ /g, " ");
-      assert(blocked.includes("24 ชั่วโมง"), `blocked text: ${blocked}`);
-      assert((await page.locator('[data-testid="claim-types"]').count()) === 0, "no names offered");
+      // the undone claim was this LINE account's: another number would end here too, so none is offered
+      const blocked = await plainText(page, '[data-testid="claim-blocked"] p');
+      assert(
+        blocked === "ผู้ดูแลยกเลิกการยืนยันชื่อของบัญชี LINE นี้แล้ว จึงเลือกชื่อใหม่ได้หลังจาก 24 ชั่วโมง หากต้องการใช้งานตอนนี้ กรุณาติดต่อผู้ดูแล",
+        `blocked text: ${blocked}`,
+      );
+      assert((await page.locator('[data-testid="claim-types"], [data-testid="claim-names-step"]').count()) === 0, "no names offered");
+      assert((await page.locator('[data-testid="claim-blocked"] a[href="/login/request"]').count()) === 0, "no access request button");
+      assert((await page.locator('[data-testid="claim-blocked"] [data-testid="other-phone"]').count()) === 0, "no other number offered");
       await touchTargets(page, "/login/claim (blocked)");
       await shoot(page, "claim-blocked");
       const headers = { origin: APP, "content-type": "application/json" };
       for (const name of [DOC1_NAME, "กมล ทองดี"]) {
         const c = await page.request.post(`${APP}/api/auth/claim`, { headers, data: { userId: Number(await userId(db, name)) } });
-        assert(c.status() === 403 && (await c.json()).reason === "blocked", `claim after an undo -> ${c.status()}`);
+        const cBody = await c.json();
+        assert(
+          c.status() === 403 && cBody.reason === "blocked" && cBody.by === "line" && cBody.error.replace(/\s+/g, " ") === blocked,
+          `claim after an undo -> ${c.status()} ${JSON.stringify(cBody)}`,
+        );
       }
       assert((await db.query("SELECT count(*)::int AS n FROM user_claims WHERE phone = $1 AND undone_at IS NULL", [DOC1])).rows[0].n === 0, "nothing claimed");
       assert((await db.query("SELECT 1 FROM login_events WHERE phone = $1 AND event = 'claim_refused'", [DOC1])).rowCount === 2, "refusals logged");
-      await page.click('[data-testid="claim-blocked"] a[href="/login/request"]');
-      await page.waitForURL(`${APP}/login/request`);
-      await page.waitForSelector('[data-testid="request-form"]');
       await ctx.close();
+
+      // the same number verified by another LINE account: the block is only the number's, so another number is offered
+      await db.query("UPDATE otp_codes SET created_at = created_at - interval '61 minutes'"); // as if an hour had passed (SMS limits)
+      await setIdentity({ sub: SUB_R, name: "อีกบัญชี" });
+      ctx = await newContext(browser);
+      page = await ctx.newPage();
+      await lineLogin(page);
+      assert(new URL(page.url()).pathname === "/login/verify", `another LINE account: ${page.url()}`);
+      await chooseType(page, "RN");
+      const smsOther = await requestCode(page, DOC1);
+      await page.fill("#code", smsOther.pin);
+      await page.waitForURL(`${APP}/login/claim?type=RN`);
+      await page.waitForSelector('[data-testid="claim-blocked"]');
+      const byNumber = await plainText(page, '[data-testid="claim-blocked"] p');
+      assert(
+        byNumber === "ผู้ดูแลยกเลิกการยืนยันชื่อของเบอร์นี้แล้ว จึงเลือกชื่อใหม่ได้หลังจาก 24 ชั่วโมง หากต้องการใช้งานตอนนี้ กรุณาติดต่อผู้ดูแล",
+        `blocked text (number): ${byNumber}`,
+      );
+      const otherPhone = page.locator('[data-testid="claim-blocked"] [data-testid="other-phone"]');
+      assert((await otherPhone.count()) === 1 && (await otherPhone.textContent()).trim() === "ใช้เบอร์อื่น", "another number offered");
+      await shoot(page, "claim-blocked-number");
+      const byNumberClaim = await page.request.post(`${APP}/api/auth/claim`, { headers, data: { userId: Number(await userId(db, DOC1_NAME)) } });
+      const byNumberBody = await byNumberClaim.json();
+      assert(
+        byNumberClaim.status() === 403 && byNumberBody.reason === "blocked" && byNumberBody.by === "phone" && byNumberBody.error.replace(/\s+/g, " ") === byNumber,
+        `claim after an undo, another LINE account -> ${byNumberClaim.status()} ${JSON.stringify(byNumberBody)}`,
+      );
+      await ctx.close();
+      await setIdentity({ sub: SUB_A, name: LINE_NAME_A });
     });
 
-    await t("doctor: LINE -> แพทย์ -> name -> code by email -> board; a Telegram notice without a button; next time LINE alone", async () => {
+    await t("doctor: LINE -> position แพทย์ -> name -> code by email -> board; a Telegram notice without a button; next time LINE alone", async () => {
       await db.query(
         "INSERT INTO user_emails (user_id, email) SELECT u.id, e FROM users u, unnest($2::text[]) e WHERE u.first_name || ' ' || u.last_name = $1",
         [EMAIL_DOC, EMAIL_DOC_ADDRESSES],
@@ -1987,9 +2089,12 @@ async function main() {
       const before = (await telegramMessages()).length;
       await lineLogin(page);
       assert(new URL(page.url()).pathname === "/login/verify", `at ${page.url()}`);
-      await page.click('[data-testid="doctor-email-link"]');
+      // doctors pick their position like everyone else, and are never offered the SMS form
+      await page.waitForSelector('[data-testid="verify-types"]');
+      await page.click('[data-testid="verify-type-DR"]');
       await page.waitForURL(`${APP}/login/doctor`);
       await page.waitForSelector('[data-testid="doctor-pick-step"]');
+      assert((await page.locator("#phone").count()) === 0, "no number field for a doctor");
       assert((await page.textContent("h1")).includes("แพทย์ ยืนยันตัวตนทางอีเมล"), `title: ${await page.textContent("h1")}`);
       const names = await page.$$eval('[data-testid="doctor-name"] .font-semibold', (els) => els.map((e) => e.textContent.trim()));
       assert(names.length === 4 && names.includes(EMAIL_DOC) && !names.includes(DOC1_NAME), `doctors only: ${JSON.stringify(names)}`);
@@ -1997,31 +2102,37 @@ async function main() {
       assert(!EMAIL_DOC_ADDRESSES.some((a) => html.includes(a)), "no address leaves the server with the list");
       const none = page.locator('[data-testid="doctor-name"]', { hasText: NO_EMAIL_DOC });
       assert((await none.isDisabled()) && (await none.getAttribute("data-no-email")) === "true", "a doctor without an address cannot be picked");
-      assert((await page.getAttribute('[data-testid="doctor-sms-link"]', "href")) === "/login/verify", "the way back to the SMS sign-in");
+      assert((await page.locator('[data-testid="doctor-name"][data-claimed="true"]').count()) === 0, "no doctor's name is held yet");
+      assert((await page.textContent("#doctor-count")).trim() === "4 รายชื่อ · เลือกได้ 1", `count: ${await page.textContent("#doctor-count")}`);
+      const smsLink = page.locator('[data-testid="doctor-sms-link"]');
+      assert((await smsLink.getAttribute("href")) === "/login/verify", "the way back to the positions");
+      assert((await smsLink.textContent()).trim() === "ไม่ใช่แพทย์? เลือกตำแหน่งอื่น", `back link: ${await smsLink.textContent()}`);
+      assert((await plainText(page, '[data-testid="doctor-pick-step"] [data-testid="ask-admin"]')) === ASK_ADMIN, "ask the administrator");
+      await noLineLogin(page, "/login/doctor (names)");
       await touchTargets(page, "/login/doctor (names)");
       await shoot(page, "doctor-names", { narrow: true });
+      // and back: the positions again, then แพทย์
+      await smsLink.click();
+      await page.waitForSelector('[data-testid="verify-types"]');
+      await page.click('[data-testid="verify-type-DR"]');
+      await page.waitForSelector('[data-testid="doctor-pick-step"]');
 
       await page.fill('[data-testid="doctor-search"]', "กมล");
       await page.locator('[data-testid="doctor-name"]', { hasText: EMAIL_DOC }).click();
       await page.waitForSelector('[data-testid="doctor-send-step"]');
       assert((await page.textContent('[data-testid="doctor-selected"]')).trim() === EMAIL_DOC, "the chosen name");
       await shoot(page, "doctor-send", { narrow: true });
+      const mailsBefore = emailFiles().length;
       await page.click('[data-testid="doctor-send"]');
       await page.waitForSelector('[data-testid="doctor-code-step"]');
       const sentTo = await page.textContent('[data-testid="doctor-sent-to"]');
       assert(sentTo.includes("ka•••@example.com") && sentTo.includes("k•••@example.org"), `masked addresses: ${sentTo}`);
       assert(!EMAIL_DOC_ADDRESSES.some((a) => sentTo.includes(a)), "only masked addresses are shown");
       assert((await page.evaluate(() => document.activeElement?.id)) === "email-code", "focus on the code field");
-      const mail = await waitUntil(() => {
-        const dir = join(OUTBOX, "email");
-        if (!existsSync(dir)) return null;
-        const files = readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
-        return files.length ? JSON.parse(readFileSync(join(dir, files[files.length - 1]), "utf8")) : null;
-      }, "the email in the outbox");
+      const mail = await waitForEmail(mailsBefore);
       assert(JSON.stringify(mail.to) === JSON.stringify(EMAIL_DOC_ADDRESSES), `one email to every address: ${JSON.stringify(mail.to)}`);
       assert(/^\d{6}$/.test(mail.code) && mail.subject === `รหัสเข้าสู่ระบบ ORSKH: ${mail.code}`, `subject: ${mail.subject}`);
       assert(mail.text.includes(EMAIL_DOC) && !/https?:/.test(mail.text), "the email names the doctor and has no link");
-      issuedCodes.push(mail.code);
       await touchTargets(page, "/login/doctor (code)");
       await shoot(page, "doctor-code", { narrow: true });
 
@@ -2061,11 +2172,164 @@ async function main() {
       await ctx.close();
     });
 
+    await t("doctors sign in by email only: a doctor's name held by number signs nobody in and locks nothing; an email claim locks the name for every other LINE account (no code is emailed)", async () => {
+      const phoneDocId = await userId(db, PHONE_DOC);
+      const raceId = await userId(db, RACE_DOC);
+      const emailDocId = await userId(db, EMAIL_DOC);
+      // a claim of a doctor's name by number, made by hand (as the doctors who claimed by SMS before the email sign-in)
+      await db.query("INSERT INTO user_claims (user_id, phone, line_sub, line_name, via) VALUES ($1, $2, $3, 'หมอสมใจ', 'phone')", [phoneDocId, PHONE_DOC_PHONE, SUB_P]);
+      await db.query("INSERT INTO line_bindings (line_sub, phone, display_name, verified_at, last_login_at) VALUES ($1, $2, 'หมอสมใจ', now(), now())", [SUB_P, PHONE_DOC_PHONE]);
+
+      // 1: that LINE account gets no fast path (a fresh binding to the number), and an SMS code for the number, under a
+      // nurses' position, signs nobody in either: the number is treated as holding no name
+      await setIdentity({ sub: SUB_P, name: "หมอสมใจ" });
+      let ctx = await newContext(browser);
+      let page = await ctx.newPage();
+      let mails = emailFiles().length;
+      await lineLogin(page);
+      assert(new URL(page.url()).pathname === "/login/verify", `no LINE fast path for a doctor's name held by number: ${page.url()}`);
+      assert(!(await cookie(ctx, "session")), "no session");
+      await chooseType(page, "RN");
+      const phoneSms = await requestCode(page, PHONE_DOC_PHONE);
+      await page.fill("#code", phoneSms.pin);
+      await page.waitForURL(`${APP}/login/claim?type=RN`);
+      await page.waitForSelector('[data-testid="claim-names"]');
+      assert(!(await cookie(ctx, "session")), "the SMS code gives no session for a doctor's name");
+      const unlisted = await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND phone = $2 AND event = 'otp_verified_unlisted'", [SUB_P, PHONE_DOC_PHONE]);
+      assert(unlisted.rowCount === 1, "verified as a number that holds no name");
+      const headers = { origin: APP, "content-type": "application/json" };
+      const byNumber = await page.request.post(`${APP}/api/auth/claim`, { headers, data: { userId: Number(phoneDocId) } });
+      const byNumberBody = await byNumber.json();
+      assert(byNumber.status() === 409 && byNumberBody.reason === "unavailable", `the doctor's own name by number -> ${byNumber.status()} ${JSON.stringify(byNumberBody)}`);
+      assert(!(await cookie(ctx, "session")), "still no session");
+      const left = await db.query("SELECT via, phone FROM user_claims WHERE user_id = $1 AND undone_at IS NULL", [phoneDocId]);
+      assert(JSON.stringify(left.rows) === JSON.stringify([{ via: "phone", phone: PHONE_DOC_PHONE }]), `the claim made by hand is left as it was: ${JSON.stringify(left.rows)}`);
+      await ctx.close();
+
+      // 2: any other LINE account: the name held by email is taken and no code is emailed for it; the name held by
+      // number is not taken (here it has no address, so it still cannot be picked)
+      await setIdentity({ sub: SUB_Q, name: "หมออีกคน" });
+      ctx = await newContext(browser);
+      page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await lineLogin(page);
+      await page.waitForSelector('[data-testid="verify-types"]');
+      await page.click('[data-testid="verify-type-DR"]');
+      await page.waitForSelector('[data-testid="doctor-pick-step"]');
+      const held = page.locator('[data-testid="doctor-name"]', { hasText: EMAIL_DOC });
+      assert((await held.getAttribute("data-claimed")) === "true", `${EMAIL_DOC} is marked as held`);
+      assert(await held.isDisabled(), `${EMAIL_DOC} cannot be picked`);
+      assert((await held.textContent()).includes("มีผู้เลือกแล้ว"), `${EMAIL_DOC}: taken badge`);
+      const byPhone = page.locator('[data-testid="doctor-name"]', { hasText: PHONE_DOC });
+      assert((await byPhone.getAttribute("data-claimed")) === null && (await byPhone.getAttribute("data-no-email")) === "true", "held by number: not taken, only no address");
+      assert((await page.locator('[data-testid="doctor-name"][data-claimed="true"]').count()) === 1, "only the name held by email is marked");
+      assert((await page.textContent("#doctor-count")).trim() === "4 รายชื่อ · เลือกได้ 0", `count: ${await page.textContent("#doctor-count")}`);
+      await held.click({ force: true });
+      await sleep(300);
+      assert((await page.locator('[data-testid="doctor-send-step"]').count()) === 0, "a held name opens nothing");
+      const html = await page.content();
+      assert(!html.includes(SUB_DOC) && !html.includes(SUB_P) && !html.includes(PHONE_DOC_PHONE), "who holds a name never leaves the server");
+      await touchTargets(page, "/login/doctor (taken)");
+      await shoot(page, "doctor-names-taken", { narrow: true });
+      const refused = await page.request.post(`${APP}/api/auth/email/send`, { headers, data: { userId: Number(emailDocId) } });
+      const refusedBody = await refused.json();
+      assert(refused.status() === 409 && refusedBody.reason === "taken" && refusedBody.error === EMAIL_TAKEN, `send for a held name -> ${refused.status()} ${JSON.stringify(refusedBody)}`);
+      await sleep(300);
+      assert(emailFiles().length === mails, "no email written for a held name");
+      assert((await db.query("SELECT count(*)::int AS n FROM email_codes WHERE line_sub = $1", [SUB_Q])).rows[0].n === 0, "no code stored");
+      assert((await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND event = 'email_refused'", [SUB_Q])).rowCount === 1, "email_refused logged");
+      assert((await currentClaim(db, EMAIL_DOC))?.line_sub === SUB_DOC, "the email claim is untouched");
+
+      // a name taken by email between loading the page and sending the code: refused, and the page marks it as taken
+      const takeByHand = () =>
+        db.query("INSERT INTO user_claims (user_id, phone, line_sub, via, email_verified_at) VALUES ($1, NULL, 'U-nat-by-hand', 'email', now())", [raceId]);
+      const releaseByHand = () => db.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE line_sub = 'U-nat-by-hand' AND undone_at IS NULL");
+      const racePicked = async () => {
+        const b = page.locator('[data-testid="doctor-name"]', { hasText: RACE_DOC });
+        return { claimed: await b.getAttribute("data-claimed"), disabled: await b.isDisabled() };
+      };
+      await db.query("INSERT INTO user_emails (user_id, email) VALUES ($1, 'nat.w@example.com')", [raceId]);
+      await page.reload();
+      await page.waitForSelector('[data-testid="doctor-pick-step"]');
+      assert((await page.textContent("#doctor-count")).trim() === "4 รายชื่อ · เลือกได้ 1", "a free doctor with an address");
+      await page.locator('[data-testid="doctor-name"]', { hasText: RACE_DOC }).click();
+      await page.waitForSelector('[data-testid="doctor-send-step"]');
+      await takeByHand();
+      await page.click('[data-testid="doctor-send"]');
+      await page.waitForSelector('[data-testid="doctor-pick-step"] [data-testid="doctor-error"]');
+      assert((await plainText(page, '[data-testid="doctor-error"]')) === EMAIL_TAKEN, `taken before the code: ${await plainText(page, '[data-testid="doctor-error"]')}`);
+      assert(JSON.stringify(await racePicked()) === '{"claimed":"true","disabled":true}', `marked as taken: ${JSON.stringify(await racePicked())}`);
+      assert((await page.textContent("#doctor-count")).trim() === "4 รายชื่อ · เลือกได้ 0", "nothing left to pick");
+      assert(emailFiles().length === mails, "no email for it");
+      await releaseByHand();
+
+      // ... and between the emailed code and typing it in: refused, the first holder keeps it (no takeover), and the
+      // page is back at the names with the name marked as taken
+      await page.reload();
+      await page.waitForSelector('[data-testid="doctor-pick-step"]');
+      await page.locator('[data-testid="doctor-name"]', { hasText: RACE_DOC }).click();
+      await page.waitForSelector('[data-testid="doctor-send-step"]');
+      await page.click('[data-testid="doctor-send"]');
+      await page.waitForSelector('[data-testid="doctor-code-step"]');
+      const raceMail = await waitForEmail(mails);
+      mails += 1;
+      assert(JSON.stringify(raceMail.to) === '["nat.w@example.com"]', `to the doctor's address: ${JSON.stringify(raceMail.to)}`);
+      await takeByHand();
+      await page.fill("#email-code", raceMail.code);
+      await page.waitForSelector('[data-testid="doctor-pick-step"] [data-testid="doctor-error"]');
+      assert((await plainText(page, '[data-testid="doctor-error"]')) === EMAIL_TAKEN, `taken after the code: ${await plainText(page, '[data-testid="doctor-error"]')}`);
+      assert(JSON.stringify(await racePicked()) === '{"claimed":"true","disabled":true}', `marked as taken: ${JSON.stringify(await racePicked())}`);
+      assert(!(await cookie(ctx, "session")), "no session");
+      assert((await currentClaim(db, RACE_DOC))?.line_sub === "U-nat-by-hand", "the first holder keeps the name");
+      assert((await db.query("SELECT 1 FROM user_claims WHERE line_sub = $1", [SUB_Q])).rowCount === 0, "nothing claimed by this account");
+      // released by hand (the repair phase below claims this name again)
+      await releaseByHand();
+      await db.query("DELETE FROM user_emails WHERE user_id = $1", [raceId]);
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+
+      // 3: the doctor, from the LINE account of the claim by number: the email code replaces that claim (the number's
+      // LINE bindings go), and the name is held by email from then on
+      await db.query("INSERT INTO user_emails (user_id, email) VALUES ($1, 'somjai.j@example.com')", [phoneDocId]);
+      await setIdentity({ sub: SUB_P, name: "หมอสมใจ" });
+      ctx = await newContext(browser);
+      page = await ctx.newPage();
+      await lineLogin(page);
+      assert(new URL(page.url()).pathname === "/login/verify", `no fast path: ${page.url()}`);
+      await page.click('[data-testid="verify-type-DR"]');
+      await page.waitForSelector('[data-testid="doctor-pick-step"]');
+      const own = page.locator('[data-testid="doctor-name"]', { hasText: PHONE_DOC });
+      assert((await own.getAttribute("data-claimed")) === null && !(await own.isDisabled()), "the name held by number is free to prove by email");
+      assert((await page.locator('[data-testid="doctor-name"]', { hasText: EMAIL_DOC }).getAttribute("data-claimed")) === "true", "the name held by email still is not");
+      await own.click();
+      await page.waitForSelector('[data-testid="doctor-send-step"]');
+      await page.click('[data-testid="doctor-send"]');
+      await page.waitForSelector('[data-testid="doctor-code-step"]');
+      const ownMail = await waitForEmail(mails);
+      assert(JSON.stringify(ownMail.to) === '["somjai.j@example.com"]', `to the doctor's address: ${JSON.stringify(ownMail.to)}`);
+      await page.fill("#email-code", ownMail.code);
+      await page.waitForURL(`${APP}/`);
+      assert((await boardName(page)) === PHONE_DOC, `signed in by email: ${await boardName(page)}`);
+      assert((await page.locator('[data-testid="account-phone"]').count()) === 0, "no number");
+      const claims = (await db.query("SELECT phone, via, line_sub, undo_reason, undone_at IS NULL AS current FROM user_claims WHERE user_id = $1 ORDER BY id", [phoneDocId])).rows;
+      assert(
+        JSON.stringify(claims) ===
+          JSON.stringify([
+            { phone: PHONE_DOC_PHONE, via: "phone", line_sub: SUB_P, undo_reason: "replaced", current: false },
+            { phone: null, via: "email", line_sub: SUB_P, undo_reason: null, current: true },
+          ]),
+        `the claim by number became an email claim: ${JSON.stringify(claims)}`,
+      );
+      assert((await db.query("SELECT 1 FROM line_bindings WHERE phone = $1", [PHONE_DOC_PHONE])).rowCount === 0, "the number's binding is gone");
+      await ctx.close();
+    });
+
     // ---- The repair phase: MX's HOSxP upload, doctors' bookings with HN, the 16:00 turnover, on the fake clock ----
 
     /** Moves the app's clock: lib/clock.ts reads NOW_FILE on every call (an ISO time with its offset). */
     const setNow = (iso) => writeFileSync(NOW_FILE, iso);
-    const sessionOf = (person) => sessionToken(person.phone, SESSION_SECRET, person.sub);
+    const sessionOf = (person) => sessionToken(person.phone, SESSION_SECRET, person.sub, person.userId ?? null);
     /** A browser signed in as `person`: a phone, 390 x 844 at 2x. */
     async function contextAs(person) {
       const ctx = await newContext(browser);
@@ -2105,11 +2369,18 @@ async function main() {
 
     await t("repair phase: the board's day follows the app's clock and the Bank of Thailand holidays (16:00 turnover, a holiday stepped over)", async () => {
       for (const [key, person] of Object.entries(RP)) {
-        const r = await db.query(
-          "INSERT INTO user_claims (user_id, phone, line_sub, line_name) SELECT id, $2, $3, $4 FROM users WHERE first_name || ' ' || last_name = $1 AND active",
-          [person.name, person.phone, person.sub, `e2e-${key}`],
-        );
+        const r = person.phone
+          ? await db.query(
+              "INSERT INTO user_claims (user_id, phone, line_sub, line_name) SELECT id, $2, $3, $4 FROM users WHERE first_name || ' ' || last_name = $1 AND active RETURNING user_id::text AS uid",
+              [person.name, person.phone, person.sub, `e2e-${key}`],
+            )
+          : await db.query(
+              `INSERT INTO user_claims (user_id, phone, line_sub, line_name, via, email_verified_at)
+               SELECT id, NULL, $2, $3, 'email', now() FROM users WHERE first_name || ' ' || last_name = $1 AND active AND type = 'DR' RETURNING user_id::text AS uid`,
+              [person.name, person.sub, `e2e-${key}`],
+            );
         assert(r.rowCount === 1, `a claim by hand for ${key}`);
+        if (!person.phone) person.userId = r.rows[0].uid;
       }
       const ctx = await contextAs(RP.nurse);
       const page = await ctx.newPage();

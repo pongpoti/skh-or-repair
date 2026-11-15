@@ -13,8 +13,8 @@ import { signSession } from "@/lib/tokens";
 
 /**
  * POST {userId, code}: checks a doctor's email code for the LINE account of this browser. A good code makes this LINE
- * account the holder of the doctor's name (lib/email-otp.ts signInByEmail()) and signs it in; the administrators get a
- * notice (no undo button: the code went to the doctor's own addresses).
+ * account the holder of the doctor's name (lib/email-otp.ts signInByEmail(); refused when another LINE account holds it)
+ * and signs it in; the administrators get a notice (no undo button: the code went to the doctor's own addresses).
  */
 export async function POST(req: NextRequest) {
   const blocked = guardPost(req);
@@ -62,6 +62,10 @@ export async function POST(req: NextRequest) {
     if (signed.status === "line_has_claim") {
       await event("email_refused");
       return json({ ok: false, error: MSG.emailLineHasName, reason: "line_has_claim" }, 409);
+    }
+    if (signed.status === "taken") {
+      await event("email_refused");
+      return json({ ok: false, error: MSG.emailTaken, reason: "taken" }, 409);
     }
 
     noteDoctorAuthorized(userId, login.sub);

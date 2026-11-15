@@ -2,8 +2,9 @@ import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { specialtyOf } from "./specialties.ts";
 
 /**
- * User types and their Thai labels: the `type` column of the `users` table (db/schema.sql), the claim page's step 1
- * (/login/claim) and the positions of an access request (lib/access.ts). Isomorphic: no server-only imports.
+ * User types and their Thai labels: the `type` column of the `users` table (db/schema.sql), the position step of
+ * /login/verify, the claim page's step 1 (/login/claim) and the doctors' page (/login/doctor). Isomorphic: no
+ * server-only imports.
  */
 export const USER_TYPES = ["DR", "RN", "PN", "PCA"] as const;
 export type UserType = (typeof USER_TYPES)[number];
@@ -17,6 +18,13 @@ export const TYPE_LABELS: Record<UserType, string> = {
 
 export function isUserType(v: unknown): v is UserType {
   return typeof v === "string" && (USER_TYPES as readonly string[]).includes(v);
+}
+
+/** The types that sign in with an SMS code to their mobile number: everyone but doctors, who use email only. */
+export type PhoneUserType = Exclude<UserType, "DR">;
+
+export function isPhoneType(v: unknown): v is PhoneUserType {
+  return isUserType(v) && v !== "DR";
 }
 
 /** Nursing units of RN, PN and PCA users. */

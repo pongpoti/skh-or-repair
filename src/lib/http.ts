@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { appUrl } from "./env";
-import { CLAIM_BLOCKED } from "./claim-text";
+import { CLAIM_BLOCKED, CLAIM_BLOCKED_LINE } from "./claim-text";
 import { isJsonRequest, isSameOrigin } from "./security";
 
 export const MSG = {
@@ -24,25 +24,16 @@ export const MSG = {
   locked: "ใส่รหัสผิดเกินจำนวนครั้งที่กำหนด กรุณาขอรหัสใหม่",
   expired: "รหัสหมดอายุหรือใช้ไปแล้ว กรุณาขอรหัสใหม่",
   failed: "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง",
-  // access requests (/login/request)
-  firstName: "กรุณากรอกชื่อเป็นตัวอักษร (ใช้ได้เฉพาะตัวอักษร ช่องว่าง . - ' ไม่เกิน 60 ตัว)",
-  lastName: "กรุณากรอกนามสกุลเป็นตัวอักษร (ใช้ได้เฉพาะตัวอักษร ช่องว่าง . - ' ไม่เกิน 60 ตัว)",
-  position: "กรุณาเลือกตำแหน่ง",
-  requestTooMany: "ส่งคำขอบ่อยเกินไป กรุณาลองใหม่ภายหลัง",
-  requestRejected: "คำขอนี้ไม่ได้รับอนุมัติ กรุณาติดต่อผู้ดูแลระบบ",
-  notApproved: "คำขอยังไม่ได้รับอนุมัติ",
   // name claims (/login/claim)
   claimPick: "กรุณาเลือกชื่อของคุณ",
   claimType: "กรุณาเลือกตำแหน่ง",
-  claimTaken: "ชื่อนี้มีผู้เลือกแล้ว หากเป็นชื่อของคุณ กรุณาส่งคำขอเข้าใช้งาน",
+  claimTaken: "ชื่อนี้มีผู้เลือกแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล",
   claimUnavailable: "ไม่พบชื่อนี้ในรายชื่อแล้ว กรุณาเลือกใหม่",
-  claimHasName: "เบอร์นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล หรือส่งคำขอเข้าใช้งาน",
-  claimLineHasName: "บัญชี LINE นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล หรือส่งคำขอเข้าใช้งาน",
-  // claims need Telegram with an administrator (lib/telegram.ts claimsEnabled())
-  claimsOff: "ขณะนี้ยังเลือกชื่อเองไม่ได้ กรุณาส่งคำขอเข้าใช้งาน",
+  claimHasName: "เบอร์นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล",
+  claimLineHasName: "บัญชี LINE นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล",
   claimBlocked: CLAIM_BLOCKED,
-  claimTooMany: "เลือกชื่อบ่อยเกินไป กรุณาลองใหม่ภายหลัง หรือส่งคำขอเข้าใช้งาน",
-  claimRequested: "เบอร์นี้ส่งคำขอเข้าใช้งานไว้แล้ว",
+  claimBlockedLine: CLAIM_BLOCKED_LINE,
+  claimTooMany: "เลือกชื่อบ่อยเกินไป กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล",
   // doctors' email codes (/login/doctor)
   emailPick: "กรุณาเลือกชื่อของคุณ",
   emailNotDoctor: "ไม่พบชื่อนี้ในรายชื่อแพทย์ กรุณาเลือกใหม่",
@@ -50,6 +41,8 @@ export const MSG = {
   emailDailyCap: "ระบบส่งอีเมลครบจำนวนของวันนี้แล้ว กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล",
   emailFailed: "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
   emailLineHasName: "บัญชี LINE นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล",
+  // the doctor's name is held by another LINE account: only an administrator can free it
+  emailTaken: "ชื่อนี้มีผู้ยืนยันตัวตนแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล",
 } as const;
 
 export function json(body: unknown, status = 200, init?: { headers?: Record<string, string> }): NextResponse {

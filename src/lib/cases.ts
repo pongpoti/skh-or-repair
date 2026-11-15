@@ -49,8 +49,8 @@ function toCase(r: CaseRow): AddedCase {
 }
 
 /**
- * The doctor whose current claim holds this number (or this session: a doctor signed in by email), or null for anyone
- * else (nurses, approved requests, ALLOWED_PHONES).
+ * The doctor this session holds (a doctor signed in by email), or null for anyone else (nurses, ALLOWED_PHONES, and any
+ * number: a doctor's name never signs in by number, see userForPhone()).
  */
 export async function doctorFor(pool: Q, who: string | SessionIdentity): Promise<ListedUser | null> {
   const user = typeof who === "string" ? await userForPhone(pool, who) : await userForSession(pool, who);
