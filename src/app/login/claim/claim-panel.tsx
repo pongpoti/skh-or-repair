@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Notice } from "@/components/auth-shell";
-import { CLAIM_BLOCKED } from "@/lib/claim-text";
-import { isUserType, matchesName, USER_TYPES, TYPE_LABELS, type UserType } from "@/lib/user-labels";
-import { EXPIRED_MESSAGE, H2, HELP, LABEL, OtherPhone, StateIcon } from "../request/request-panel";
+import { CLAIM_BLOCKED, CLAIM_BLOCKED_LINE } from "@/lib/claim-text";
+import { isUserType, matchesName, USER_TYPES, TYPE_LABELS, type PhoneUserType, type UserType } from "@/lib/user-labels";
+import { AskAdmin, Chevron, EXPIRED_MESSAGE, H2, HELP, LABEL, OtherPhone, StateIcon } from "../shared";
 import { NETWORK_ERROR, postJson } from "../verify/verify-form";
 
 /** How the page starts: the picker, the 24 h block after an undo, or a database problem. */
@@ -22,38 +22,45 @@ interface Name {
 const DIALOG =
   "m-auto w-[min(26rem,calc(100%-2rem))] rounded-[18px] border border-line bg-surface p-5 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px] sm:p-6";
 
-function Chevron() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-muted">
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  );
-}
+/**
+ * Step 2 has its own history entry (state {claimType}), so the phone's Back button returns to step 1. The names opened
+ * from the address (?type=) get one too, with an entry for step 1 put under them (state {claimTypes: true}).
+ */
+type ClaimHistory = { claimType?: unknown; claimTypes?: unknown } | null;
 
-/** The way out for someone who is not on the list, or whose name someone else took. */
-function RequestLink({ className = "", testId = "claim-request-link" }: { className?: string; testId?: string }) {
-  return (
-    <a className={`text-btn h-auto min-h-11 py-2 text-left leading-6 ${className}`} href="/login/request" data-testid={testId}>
-      <span>
-        <span className="font-medium text-ink-2">ไม่พบชื่อ หรือชื่อมีผู้เลือกแล้ว?</span>{" "}
-        <span className="whitespace-nowrap">ส่งคำขอเข้าใช้งาน</span>
-      </span>
-    </a>
-  );
-}
-
-/** Step 2 has its own history entry (state {claimType}), so the phone's Back button returns to step 1. */
 function historyType(): UserType | null {
-  const t = (window.history.state as { claimType?: unknown } | null)?.claimType;
+  const t = (window.history.state as ClaimHistory)?.claimType;
   return isUserType(t) ? t : null;
 }
 
-export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string }) {
-  const [blocked, setBlocked] = useState(start === "blocked");
-  const [type, setType] = useState<UserType | null>(null);
+/** True on the step-1 entry put under names opened from the address. */
+function atTypesEntry(): boolean {
+  return (window.history.state as ClaimHistory)?.claimTypes === true;
+}
+
+/**
+ * `initialType`: the position chosen before the number (/login/verify?as=), whose names open at once; "เปลี่ยน" and
+ * Back still lead to the other positions. `undo`: an administrator is told of every claim in Telegram and may undo it.
+ * `blockedBy` (with start "blocked"): whose claim an administrator undid, this LINE account's or only this number's.
+ */
+export function ClaimPanel({
+  start,
+  blockedBy = null,
+  phone,
+  initialType = null,
+  undo = false,
+}: {
+  start: ClaimStart;
+  blockedBy?: "line" | "phone" | null;
+  phone: string;
+  initialType?: PhoneUserType | null;
+  undo?: boolean;
+}) {
+  const [blocked, setBlocked] = useState<"line" | "phone" | null>(start === "blocked" ? (blockedBy ?? "phone") : null);
+  const [type, setType] = useState<UserType | null>(start === "pick" ? initialType : null);
   const [names, setNames] = useState<Name[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(start === "pick" && initialType !== null);
   const [reload, setReload] = useState(0);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Name | null>(null);
@@ -67,6 +74,10 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
   const searchRef = useRef<HTMLInputElement>(null);
   const focusSearchOnLoad = useRef(false);
   const firstRender = useRef(true);
+  /** The names opened from the address (?type=) on the first render, if any. */
+  const openedFromAddress = useRef(start === "pick" ? initialType : null);
+  /** Whether the first render shows the positions or names (not a blocked number or an error). */
+  const choosing = useRef(start === "pick");
 
   // A new step or state: its heading takes focus (not on the first render, which must not steal focus).
   useEffect(() => {
@@ -90,17 +101,36 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
     }
   }, [names]);
 
-  // The phone's Back (and Forward) button moves between the two steps. A step-2 entry left over from before a reload
-  // is cleared, since the page starts again at step 1.
+  // The phone's Back (and Forward) button moves between the two steps. The entries keep the page's address (a new
+  // ?type= would make Next.js fetch the page again), so on a reload, or a return that reloads the page, the entry's own
+  // state decides the step: its position, or step 1. Only names opened from the address on a first arrival get the
+  // entry for step 1 put under them. Written once hydration is over: Next.js wraps history.pushState/replaceState (to
+  // keep its own state in each entry) only in its own effects, which run after this one, and an entry without that
+  // state makes Back reload the page.
   useEffect(() => {
-    if (historyType()) window.history.replaceState({}, "");
+    const timer = window.setTimeout(() => {
+      if (!choosing.current) return;
+      const opened = openedFromAddress.current;
+      const entry = historyType();
+      if (entry) {
+        if (entry !== opened) openType(entry);
+      } else if (atTypesEntry()) {
+        if (opened) closeTypes();
+      } else if (opened) {
+        window.history.replaceState({ claimTypes: true }, "");
+        window.history.pushState({ claimType: opened }, "");
+      }
+    }, 0);
     const onPop = (e: PopStateEvent) => {
       const t = (e.state as { claimType?: unknown } | null)?.claimType;
       if (isUserType(t)) openType(t);
       else closeTypes();
     };
     window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("popstate", onPop);
+    };
   }, []);
 
   // The names of the chosen type, read fresh each time (whether a name is taken changes). A re-read keeps the shown
@@ -113,7 +143,8 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
         const res = await fetch(`/api/auth/claim/list?type=${type}`, { cache: "no-store" });
         const data = (await res.json().catch(() => ({}))) as { names?: Name[]; error?: string; reason?: string; redirect?: string };
         if (!alive) return;
-        if (data.reason === "claims_off" && data.redirect) {
+        // Doctors sign in by email (never by number).
+        if (data.reason === "doctor_email" && data.redirect) {
           window.location.assign(data.redirect);
           return;
         }
@@ -195,12 +226,9 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
       if (status === 401) {
         dialogRef.current?.close();
         setRestart(data.error ?? EXPIRED_MESSAGE);
-      } else if ((data.reason === "requested" || data.reason === "claims_off") && data.redirect) {
-        window.location.assign(data.redirect);
-        return;
       } else if (data.reason === "blocked") {
         dialogRef.current?.close();
-        setBlocked(true);
+        setBlocked(data.by === "line" ? "line" : "phone");
       } else if (
         data.reason === "taken" ||
         data.reason === "unavailable" ||
@@ -257,11 +285,9 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
         <h2 className={H2} ref={headingRef} tabIndex={-1}>
           เลือกชื่อไม่ได้ในขณะนี้
         </h2>
-        <p className={`${HELP} text-left`}>{CLAIM_BLOCKED}</p>
-        <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login/request">
-          ส่งคำขอเข้าใช้งาน
-        </a>
-        <OtherPhone />
+        <p className={`${HELP} text-left`}>{blocked === "line" ? CLAIM_BLOCKED_LINE : CLAIM_BLOCKED}</p>
+        {/* Another number helps only when the block is this number's, not this LINE account's. */}
+        {blocked === "phone" ? <OtherPhone /> : null}
       </div>
     );
   }
@@ -273,7 +299,7 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
           เลือกตำแหน่งของคุณ
         </h2>
         <p className={HELP}>
-          ทำครั้งเดียว <span className="whitespace-nowrap">ครั้งต่อไปเข้าด้วย LINE</span> <span className="whitespace-nowrap">ได้ทันที</span>
+          ทำครั้งเดียว <span className="whitespace-nowrap">ครั้งต่อไปไม่ต้องยืนยันอีก</span>
         </p>
         <ul className="mt-4 grid gap-2">
           {USER_TYPES.map((t) => (
@@ -296,7 +322,7 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
             </li>
           ))}
         </ul>
-        <RequestLink className="mt-3" />
+        <AskAdmin className="mt-4" />
         <div>
           <OtherPhone />
         </div>
@@ -358,21 +384,7 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
         {error ? (
           <div className="mt-2 outline-none" data-testid="claim-error" ref={errorRef} tabIndex={-1}>
             <Notice tone="warning" role="alert">
-              {error.reason === "taken" ? (
-                // MSG.claimTaken, with its last words as the link (kept on one line)
-                <>
-                  ชื่อนี้มีผู้เลือกแล้ว หากเป็นชื่อของคุณ กรุณา
-                  <a
-                    className="font-semibold whitespace-nowrap text-ink underline underline-offset-2"
-                    href="/login/request"
-                    data-testid="claim-error-request"
-                  >
-                    ส่งคำขอเข้าใช้งาน
-                  </a>
-                </>
-              ) : (
-                error.text
-              )}
+              {error.text}
             </Notice>
           </div>
         ) : null}
@@ -441,7 +453,7 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
         </p>
       )}
 
-      <RequestLink className="mt-3" />
+      <AskAdmin className="mt-4" />
       <div>
         <OtherPhone />
       </div>
@@ -469,8 +481,16 @@ export function ClaimPanel({ start, phone }: { start: ClaimStart; phone: string 
         </div>
         <Notice tone="info" className="mt-3">
           <span id="claim-confirm-note">
-            ผู้ดูแลจะได้รับแจ้งชื่อนี้พร้อมเบอร์ <strong className="whitespace-nowrap text-ink tabular-nums">{phone}</strong>{" "}
-            ทันที หากไม่ใช่ชื่อของคุณ ผู้ดูแลจะยกเลิก และเบอร์นี้จะเลือกชื่อใหม่ไม่ได้ 24&nbsp;ชั่วโมง
+            ชื่อนี้จะผูกกับเบอร์ <strong className="whitespace-nowrap text-ink tabular-nums">{phone}</strong> และบัญชี LINE นี้
+            แล้วผู้อื่นจะเลือกชื่อนี้ไม่ได้อีก
+            {undo ? (
+              <> ผู้ดูแลจะได้รับแจ้งทันที หากไม่ใช่ชื่อของคุณ ผู้ดูแลจะยกเลิก และเบอร์นี้กับบัญชี LINE นี้จะเลือกชื่อใหม่ไม่ได้ 24&nbsp;ชั่วโมง</>
+            ) : (
+              <>
+                {" "}
+                หากเลือกผิด <span className="whitespace-nowrap">กรุณาติดต่อผู้ดูแล</span>
+              </>
+            )}
           </span>
         </Notice>
         {dialogError ? (

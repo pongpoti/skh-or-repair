@@ -7,7 +7,7 @@
 // (first_name, last_name), the table's unique constraint, after the names are cleaned (NFC, single spaces, invisible
 // characters removed); a person whose type changes keeps their row, with the new type and subtype. Prints counts per
 // type and what changes: added, changed (type or subtype), reactivated, deactivated (active rows missing from the
-// CSV), and which deactivated names hold a current claim (those numbers stop signing in). Writes only with --apply, in
+// CSV), and which deactivated names hold a current claim (their holders stop signing in). Writes only with --apply, in
 // one transaction. It never deletes a row, never sets an id (users.id is an identity column, so ids stay stable), sets
 // updated_at = now() on every row it changes, and never touches user_claims (a claim survives a sync; a deactivated
 // claimed name stops authorizing, and authorizes again when it comes back). --apply refuses to deactivate more than 5

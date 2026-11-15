@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, describe, test } from "node:test";
-import { createRequest, getRequest, saveTelegramRefs, type AccessRequest } from "@/lib/access";
 import { isAuthorizedPhone, resetAuthzCache } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { upsertBinding } from "@/lib/otp";
@@ -13,18 +12,12 @@ import {
   buildClaimMessage,
   CLAIM_RETRY_MS,
   buildClaimUndoneMessage,
-  buildDecidedMessage,
   claimCallbackData,
   claimKeyboard,
   parseClaimCallbackData,
   sendClaimMessages,
-  buildRequestMessage,
-  callbackData,
   ensureWebhook,
-  parseCallbackData,
-  requestKeyboard,
   resetWebhookMemo,
-  sendRequestMessages,
   TELEGRAM_WEBHOOK_PATH,
   webhookSecret,
   webhookUrl,
@@ -36,103 +29,6 @@ const TOKEN = "123456789:AAtestTOKENtestTOKENtestTOKEN_x-y";
 const ADMIN = 111;
 const ADMIN_2 = 222;
 const GROUP = "-1001234567890";
-
-const REQUEST: AccessRequest = {
-  id: "42",
-  phone: "0910000003",
-  lineSub: "U1",
-  lineName: "Som",
-  firstName: "สมชาย",
-  lastName: "ใจดี",
-  position: "RN",
-  status: "pending",
-  createdAt: new Date("2026-10-25T09:30:00Z"), // 16:30 in Bangkok
-  decidedAt: null,
-  decidedBy: null,
-  tgMessages: [],
-};
-
-describe("Telegram request message", () => {
-  test("exact layout (HTML, Bangkok time)", () => {
-    assert.equal(
-      buildRequestMessage(REQUEST),
-      [
-        "📝 <b>คำขอเข้าใช้งาน (เบอร์ไม่อยู่ในรายชื่อ)</b>",
-        "ORSKH.APP ตารางห้องผ่าตัด",
-        "",
-        "👤 ชื่อ-นามสกุล: สมชาย ใจดี",
-        "💼 ตำแหน่ง: พยาบาล",
-        "📱 เบอร์: 091-000-0003 (ยืนยันรหัสแล้ว)",
-        "💬 ชื่อ LINE: Som",
-        "🕒 เวลา: 25 ต.ค. 2569 16:30 น.",
-      ].join("\n"),
-    );
-    assert.match(buildRequestMessage({ ...REQUEST, position: "DR" }), /\n💼 ตำแหน่ง: แพทย์\n/);
-    assert.match(buildRequestMessage({ ...REQUEST, position: "PN" }), /\n💼 ตำแหน่ง: ผู้ช่วยพยาบาล\n/);
-    assert.match(buildRequestMessage({ ...REQUEST, position: "PCA" }), /\n💼 ตำแหน่ง: พนักงานช่วยเหลือคนไข้\n/);
-    assert.match(buildRequestMessage({ ...REQUEST, lineName: null }), /\n💬 ชื่อ LINE: ไม่ระบุ\n/);
-    assert.match(buildRequestMessage({ ...REQUEST, lineName: " ‮ " }), /\n💬 ชื่อ LINE: ไม่ระบุ\n/);
-  });
-
-  test("every value is escaped and flattened to one line", () => {
-    const html = buildRequestMessage({
-      ...REQUEST,
-      lineName: '<a href="https://evil.test">x</a>\n📱 เบอร์: 081-234-5678‮',
-    });
-    const lines = html.split("\n");
-    assert.equal(lines.length, 8);
-    assert.equal(lines.filter((l) => l.startsWith("📱")).length, 1, "no injected line");
-    assert.ok(lines[6].includes("&lt;a href=") && !lines[6].includes("<a"), lines[6]);
-    assert.ok(!html.includes("‮"));
-    assert.equal(lines[5], "📱 เบอร์: 091-000-0003 (ยืนยันรหัสแล้ว)");
-  });
-
-  test("long names are shown in full and the number is always formatted the same way", () => {
-    const first = "ก".repeat(60);
-    const last = "ข".repeat(60);
-    const at = new Date("2026-10-25T10:05:00Z");
-    for (const phone of ["0812345678", "0611111111"]) {
-      const r = { ...REQUEST, phone, firstName: first, lastName: last };
-      const shown = `${phone.slice(0, 3)}-${phone.slice(3, 6)}-${phone.slice(6)}`;
-      for (const html of [buildRequestMessage(r), buildDecidedMessage(r, "approved", at), buildDecidedMessage(r, "rejected", at)]) {
-        assert.ok(html.includes(`\n📱 เบอร์: ${shown} (ยืนยันรหัสแล้ว)\n`), html);
-        assert.ok(html.includes(`\n👤 ชื่อ-นามสกุล: ${first} ${last}\n`), "the whole name");
-        assert.ok(!html.includes("…"), "nothing shortened");
-      }
-    }
-  });
-
-  test("two buttons in one row; callback_data names the request and the action in <= 64 bytes", () => {
-    assert.deepEqual(requestKeyboard("42"), {
-      inline_keyboard: [
-        [
-          { text: "✅ อนุมัติ", callback_data: "ox:42:a" },
-          { text: "❌ ไม่อนุมัติ", callback_data: "ox:42:r" },
-        ],
-      ],
-    });
-    for (const action of ["approve", "reject"] as const) {
-      const data = callbackData("999999999999999", action);
-      assert.ok(Buffer.byteLength(data) <= 64, data);
-      assert.deepEqual(parseCallbackData(data), { id: "999999999999999", action });
-    }
-  });
-
-  test("callback_data parsing refuses anything else", () => {
-    assert.deepEqual(parseCallbackData("ox:7:a"), { id: "7", action: "approve" });
-    assert.deepEqual(parseCallbackData("ox:7:r"), { id: "7", action: "reject" });
-    // "ar:7:a" is skh-or-schedule's format: a tap on its messages must not decide a request here.
-    for (const bad of ["", "ox:7", "ox:7:x", "ox:0:a", "ox:07:a", "ox:-7:a", "ox:7:a ", "xx:7:a", "ar:7:a", "ar:7:r", "ox:1234567890123456:a", "ox:7:a:b", null, 7, {}]) {
-      assert.equal(parseCallbackData(bad), null, JSON.stringify(bad));
-    }
-  });
-
-  test("decided edit: the same text, a blank line and the verdict with its Bangkok time", () => {
-    const at = new Date("2026-10-25T10:05:00Z");
-    assert.equal(buildDecidedMessage(REQUEST, "approved", at), `${buildRequestMessage(REQUEST)}\n\n✅ <b>อนุมัติแล้ว</b> · 25 ต.ค. 2569 17:05 น.`);
-    assert.equal(buildDecidedMessage(REQUEST, "rejected", at), `${buildRequestMessage(REQUEST)}\n\n❌ <b>ไม่อนุมัติ</b> · 25 ต.ค. 2569 17:05 น.`);
-  });
-});
 
 describe("Telegram claim message", () => {
   const user: ListedUser = { id: "9", firstName: "สมชาย", lastName: "ใจดี", type: "DR", subtype: "ORTHO" };
@@ -160,7 +56,7 @@ describe("Telegram claim message", () => {
     );
   });
 
-  test("one undo button; callback_data oc:<claim id>:u, parsed strictly and never confused with a request", () => {
+  test("one undo button; callback_data oc:<claim id>:u, parsed strictly (the former request buttons ox: are not claims)", () => {
     assert.deepEqual(claimKeyboard("42"), { inline_keyboard: [[{ text: "↩️ ยกเลิกการยืนยัน", callback_data: "oc:42:u" }]] });
     const max = claimCallbackData("999999999999999");
     assert.ok(Buffer.byteLength(max) <= 64);
@@ -169,8 +65,8 @@ describe("Telegram claim message", () => {
     for (const bad of ["", "oc:7", "oc:7:a", "oc:0:u", "oc:07:u", "oc:-7:u", "oc:7:u ", " oc:7:u", "ox:7:u", "oc:1234567890123456:u", "oc:7:u:x", null, 7]) {
       assert.equal(parseClaimCallbackData(bad), null, JSON.stringify(bad));
     }
-    assert.equal(parseCallbackData("oc:7:u"), null, "not a request decision");
     assert.equal(parseClaimCallbackData("ox:7:a"), null);
+    assert.equal(parseClaimCallbackData("ox:7:r"), null);
   });
 });
 
@@ -277,27 +173,21 @@ describe("Telegram webhook and Bot API (mock)", () => {
     return { ...reply, read };
   }
 
-  async function newRequest(phone: string, sub = "U1"): Promise<AccessRequest> {
-    const r = await createRequest(await db(), {
-      phone,
-      sub,
-      lineName: "Som",
-      firstName: "สมชาย",
-      lastName: "ใจดี",
-      position: "RN",
-      ip: "203.0.113.5",
-    });
-    assert.ok(r.status === "created");
-    return r.request;
-  }
-
   const answers = () => calls.filter((c) => c.method === "answerCallbackQuery").map((c) => c.body.text);
 
+  /** A fresh users list and one claimed name (see newClaim() below). */
+  async function freshClaim(phone: string, sub: string, first: string) {
+    await (await db()).query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    return newClaim(phone, sub, first);
+  }
+  const current = async (id: string) => (await getClaim(await db(), id))?.undoneAt === null;
+
   test("wrong or missing secret: 401, body not read, nothing changes (the webhook is registered again once)", async () => {
-    const r = await newRequest("0900000011");
+    const { claim } = await freshClaim("0900000011", "U-s1", "ลับ");
     webhook = { url: "", allowed_updates: [] };
+    calls.length = 0;
     for (const header of [null, "", "wrong", `${secret()}x`, secret().slice(1)]) {
-      const res = await post(tap(callbackData(r.id, "approve")), header);
+      const res = await post(tap(claimCallbackData(claim.id)), header);
       assert.equal(res.status, 401, String(header));
       assert.deepEqual(res.body, { ok: false });
       assert.equal(res.read, false, "the update is not even read");
@@ -308,16 +198,16 @@ describe("Telegram webhook and Bot API (mock)", () => {
       "only a re-registration (at most once a minute), no answer, edit or message",
     );
     assert.equal(calls[1].body.secret_token, secret());
-    assert.equal((await getRequest(await db(), r.id))?.status, "pending");
+    assert.equal(await current(claim.id), true, "the claim stands");
     // registered on this instance: later refused calls cost nothing, even after the minute
     resetWebhookMemo();
     await ensureWebhook();
     calls.length = 0;
-    await post(tap(callbackData(r.id, "approve")), "wrong");
+    await post(tap(claimCallbackData(claim.id)), "wrong");
     assert.deepEqual(calls.map((c) => c.method), [], "memoized");
     // Telegram not configured: nothing to authenticate against
     delete process.env.TELEGRAM_BOT_TOKEN;
-    assert.equal((await post(tap(callbackData(r.id, "approve")))).status, 404);
+    assert.equal((await post(tap(claimCallbackData(claim.id)))).status, 404);
   });
 
   test("malformed or other updates: 200 and ignored", async () => {
@@ -339,167 +229,85 @@ describe("Telegram webhook and Bot API (mock)", () => {
     assert.deepEqual(answers(), [ANSWERS.invalid]);
   });
 
-  test("a tap on skh-or-schedule's buttons (same bot, same numbering) is refused and the same-numbered request stays pending", async () => {
-    const r = await newRequest("0900000012", "U-skh");
+  test("a tap on skh-or-schedule's buttons (same bot, same numbering) is refused and nothing is edited", async () => {
     const tapped = { message_id: 501, chat: { id: ADMIN, type: "private" }, date: 0, text: "skh request" };
-    for (const data of [`ar:${r.id}:a`, `ar:${r.id}:r`]) {
+    for (const data of ["ar:7:a", "ar:7:r"]) {
       const res = await post(tap(data, ADMIN, tapped));
       assert.equal(res.status, 200);
       assert.deepEqual(res.body, { ok: true });
     }
     assert.deepEqual(answers(), [ANSWERS.invalid, ANSWERS.invalid]);
     assert.equal(calls.filter((c) => c.method !== "answerCallbackQuery").length, 0, "the other app's message is not edited");
-    assert.equal((await getRequest(await db(), r.id))?.status, "pending");
   });
 
-  test("a tapper whose id is not in TELEGRAM_CHAT_ID is refused and nothing changes", async () => {
-    const r = await newRequest("0900000013");
-    for (const from of [333, Number(GROUP), "111", null, 1.5]) {
-      const res = await post(tap(callbackData(r.id, "approve"), from));
-      assert.equal(res.status, 200);
-    }
-    assert.deepEqual(answers(), Array(5).fill(ANSWERS.notAdmin));
-    assert.equal(calls.filter((c) => c.method !== "answerCallbackQuery").length, 0, "no edit");
-    assert.equal((await getRequest(await db(), r.id))?.status, "pending");
-  });
-
-  test("approve: decided atomically, messages edited without buttons, number authorized, nothing sent to the requester", async () => {
-    const r = await newRequest("0900000014");
-    await saveTelegramRefs(await db(), r.id, [
-      { chat_id: String(ADMIN), message_id: 77 },
-      { chat_id: String(ADMIN_2), message_id: 78 },
-    ]);
+  test("the approve and reject buttons of the former access requests do nothing: invalid, the row unchanged, nobody authorized", async () => {
+    const pool = await db();
+    await pool.query("TRUNCATE access_requests RESTART IDENTITY");
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO access_requests (phone, line_sub, line_name, first_name, last_name, position, tg_messages)
+       VALUES ('0900000014', 'U1', 'Som', 'พิมพ์', 'เอง', 'RN', '[{"chat_id":"111","message_id":77}]') RETURNING id::text AS id`,
+    );
+    const id = rows[0].id;
     resetAuthzCache();
-    assert.equal(await isAuthorizedPhone(r.phone), false);
     const tapped = { message_id: 77, chat: { id: ADMIN, type: "private" }, date: 0, text: "…" };
-    const res = await post(tap(callbackData(r.id, "approve"), ADMIN, tapped));
-    assert.equal(res.status, 200);
-    assert.deepEqual(res.body, { ok: true }, "nothing from the update is echoed");
-
-    const row = await getRequest(await db(), r.id);
-    assert.equal(row?.status, "approved");
-    assert.equal(row?.decidedBy, String(ADMIN));
-    assert.ok(row?.decidedAt instanceof Date);
-    assert.deepEqual(answers(), [ANSWERS.approved]);
-    // no SMS or other message goes to the requester: the waiting page signs them in by itself
-    assert.equal(ANSWERS.approved, "อนุมัติแล้ว หน้ารออนุมัติของผู้ขอจะเข้าสู่ระบบให้เอง");
-    const edits = calls.filter((c) => c.method === "editMessageText");
-    assert.deepEqual(
-      edits.map((e) => [e.body.chat_id, e.body.message_id]),
-      [
-        [String(ADMIN), 77],
-        [String(ADMIN_2), 78],
-      ],
-      "each stored message once (the tapped one is not edited twice)",
-    );
-    for (const e of edits) {
-      assert.equal(e.body.parse_mode, "HTML");
-      assert.equal(e.body.reply_markup, undefined, "buttons removed");
-      assert.match(String(e.body.text), /\n\n✅ <b>อนุมัติแล้ว<\/b> · \d{1,2} \S+ \d{4} \d{2}:\d{2} น\.$/);
-      assert.ok(String(e.body.text).startsWith(buildRequestMessage(r)));
+    for (const data of [`ox:${id}:a`, `ox:${id}:r`]) {
+      const res = await post(tap(data, ADMIN, tapped));
+      assert.equal(res.status, 200);
+      assert.deepEqual(res.body, { ok: true });
     }
-    assert.deepEqual(
-      [...new Set(calls.map((c) => c.method))].sort(),
-      ["answerCallbackQuery", "editMessageText"],
-      "only the answer and the edits",
-    );
-    assert.equal(await isAuthorizedPhone(r.phone), true, "this instance knows at once");
-    const ev = await (await db()).query("SELECT line_sub FROM login_events WHERE event = 'access_approved' AND phone = $1", [r.phone]);
-    assert.deepEqual(ev.rows, [{ line_sub: "U1" }]);
-
-    // second tap (any button, any admin): already decided, nothing changes
-    calls.length = 0;
-    const again = await post(tap(callbackData(r.id, "reject"), ADMIN_2));
-    assert.equal(again.status, 200);
-    assert.deepEqual(answers(), [ANSWERS.alreadyApproved]);
-    assert.equal(calls.length, 1, "no edit");
-    assert.equal((await getRequest(await db(), r.id))?.status, "approved");
+    assert.deepEqual(answers(), [ANSWERS.invalid, ANSWERS.invalid]);
+    assert.equal(calls.filter((c) => c.method !== "answerCallbackQuery").length, 0, "no edit");
+    const row = await pool.query("SELECT status, decided_at FROM access_requests WHERE id = $1", [id]);
+    assert.deepEqual(row.rows, [{ status: "pending", decided_at: null }]);
+    assert.equal(await isAuthorizedPhone("0900000014"), false);
+    assert.equal(await isAuthorizedPhone("0900000014", { fresh: true }), false);
+    // an approved one from before authorizes nothing either
+    await pool.query("UPDATE access_requests SET status = 'approved', decided_at = now(), decided_by = 111 WHERE id = $1", [id]);
+    resetAuthzCache();
+    assert.equal(await isAuthorizedPhone("0900000014"), false);
+    const ev = await pool.query("SELECT count(*)::int AS n FROM login_events WHERE event IN ('access_approved', 'access_rejected')");
+    assert.equal(ev.rows[0].n, 0);
   });
 
-  test("reject: edited with the verdict; the tapped message is edited even if none was stored", async () => {
-    const r = await newRequest("0900000015", "U2");
-    const tapped = { message_id: 91, chat: { id: ADMIN_2, type: "private" }, date: 0 };
-    await post(tap(callbackData(r.id, "reject"), ADMIN_2, tapped));
-    assert.equal((await getRequest(await db(), r.id))?.status, "rejected");
-    assert.deepEqual(answers(), [ANSWERS.rejected]);
-    const edits = calls.filter((c) => c.method === "editMessageText");
-    assert.equal(edits.length, 1);
-    assert.deepEqual([edits[0].body.chat_id, edits[0].body.message_id], [String(ADMIN_2), 91]);
-    assert.match(String(edits[0].body.text), /\n\n❌ <b>ไม่อนุมัติ<\/b> · /);
-    calls.length = 0;
-    await post(tap(callbackData(r.id, "approve")));
-    assert.deepEqual(answers(), [ANSWERS.alreadyRejected]);
-    assert.equal((await getRequest(await db(), r.id))?.status, "rejected");
-  });
-
-  test("unknown request id; Telegram errors are logged without the token and never thrown", async () => {
-    await post(tap(callbackData("987654", "approve")));
-    assert.deepEqual(answers(), [ANSWERS.missing]);
-
-    const r = await newRequest("0900000016", "U3");
-    await saveTelegramRefs(await db(), r.id, [{ chat_id: String(ADMIN), message_id: 5 }]);
+  test("Telegram errors during an undo are logged without the token and never thrown; the undo stands", async () => {
+    const { claim } = await freshClaim("0900000016", "U-e1", "ผิดพลาด");
+    await saveClaimTelegramRefs(await db(), claim.id, [{ chat_id: String(ADMIN), message_id: 5 }]);
     failing.add("editMessageText");
     failing.add("answerCallbackQuery");
     const logged: string[] = [];
     const orig = console.error;
     console.error = (...a: unknown[]) => void logged.push(a.map(String).join(" "));
     try {
-      const res = await post(tap(callbackData(r.id, "approve")));
+      const res = await post(tap(claimCallbackData(claim.id)));
       assert.equal(res.status, 200);
     } finally {
       console.error = orig;
     }
-    assert.equal((await getRequest(await db(), r.id))?.status, "approved", "the decision stands");
+    assert.equal(await current(claim.id), false, "the undo stands");
     assert.equal(logged.length, 2, logged.join(" | "));
     for (const l of logged) assert.ok(!l.includes(TOKEN) && /HTTP 400/.test(l), l);
   });
 
-  test("request messages go to every chat with the buttons; a failing chat is skipped", async () => {
-    const sent = await sendRequestMessages(REQUEST);
-    assert.equal(sent.length, 3);
-    const msgs = calls.filter((c) => c.method === "sendMessage");
-    assert.deepEqual(
-      msgs.map((m) => m.body.chat_id),
-      [String(ADMIN), String(ADMIN_2), GROUP],
-    );
-    for (const m of msgs) {
-      assert.equal(m.token, TOKEN);
-      assert.equal(m.body.parse_mode, "HTML");
-      assert.equal(m.body.text, buildRequestMessage(REQUEST));
-      assert.deepEqual(m.body.reply_markup, requestKeyboard(REQUEST.id));
-    }
-    calls.length = 0;
-    failing.add("sendMessage");
-    const orig = console.error;
-    console.error = () => {};
-    try {
-      assert.deepEqual(await sendRequestMessages(REQUEST), []);
-    } finally {
-      console.error = orig;
-    }
-    assert.equal(calls.length, 3, "every chat was tried");
-  });
-
-  test("after a secret rotation the first refused tap registers the new secret, and Telegram's retry decides", async () => {
+  test("after a secret rotation the first refused tap registers the new secret, and Telegram's retry undoes", async () => {
+    const { claim } = await freshClaim("0900000017", "U-r1", "หมุนเวียน");
     webhook = { url: "", allowed_updates: [] };
     await ensureWebhook(); // registered before the rotation
     const old = secret();
-    const r = await newRequest("0900000017", "U4");
     process.env.SESSION_SECRET = `${TEST_SESSION_SECRET}-rotated`; // redeployed with a new SESSION_SECRET
-    const current = webhookSecret(TOKEN, process.env.SESSION_SECRET);
+    const rotated = webhookSecret(TOKEN, process.env.SESSION_SECRET);
     calls.length = 0;
-    const refused = await post(tap(callbackData(r.id, "approve")), old);
+    const refused = await post(tap(claimCallbackData(claim.id)), old);
     assert.equal(refused.status, 401);
     assert.deepEqual(calls.map((c) => c.method), ["getWebhookInfo", "setWebhook"]);
-    assert.equal(calls[1].body.secret_token, current);
-    assert.equal(calls[1].body.url, webhookUrl("http://localhost:3999", current));
-    assert.equal((await getRequest(await db(), r.id))?.status, "pending");
+    assert.equal(calls[1].body.secret_token, rotated);
+    assert.equal(calls[1].body.url, webhookUrl("http://localhost:3999", rotated));
+    assert.equal(await current(claim.id), true);
     calls.length = 0;
-    await post(tap(callbackData(r.id, "approve")), old);
+    await post(tap(claimCallbackData(claim.id)), old);
     assert.equal(calls.length, 0, "no more Bot API calls for refused calls");
-    const retried = await post(tap(callbackData(r.id, "approve")), current);
+    const retried = await post(tap(claimCallbackData(claim.id)), rotated);
     assert.equal(retried.status, 200);
-    assert.equal((await getRequest(await db(), r.id))?.status, "approved");
+    assert.equal(await current(claim.id), false);
   });
 
   test("ensureWebhook: registers once per instance; again when the secret changes", async () => {
@@ -572,6 +380,22 @@ describe("Telegram webhook and Bot API (mock)", () => {
     assert.deepEqual((await getClaim(await db(), claim.id))?.tgMessages, sent);
   });
 
+  test("to groups or channels only (nobody may undo): the claim is a notice, without a button nobody could press", async () => {
+    await (await db()).query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    process.env.TELEGRAM_CHAT_ID = `${GROUP}, @orskh_test`;
+    const { claim, user } = await newClaim("0900000036", "U-c6", "กลุ่ม");
+    const sent = await sendClaimMessages(user, claim);
+    const msgs = calls.filter((c) => c.method === "sendMessage");
+    assert.equal(sent.length, 2);
+    assert.deepEqual(
+      msgs.map((m) => [m.body.chat_id, m.body.text, "reply_markup" in m.body]),
+      [
+        [GROUP, buildClaimMessage(user, claim), false],
+        ["@orskh_test", buildClaimMessage(user, claim), false],
+      ],
+    );
+  });
+
   test("undo by someone not in TELEGRAM_CHAT_ID: refused, the claim stands", async () => {
     await (await db()).query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const { claim } = await newClaim("0900000032", "U-c2", "คนแปลก");
@@ -612,7 +436,7 @@ describe("Telegram webhook and Bot API (mock)", () => {
     assert.deepEqual(usersBefore, (await pool.query("SELECT * FROM users ORDER BY id")).rows, "users is never written");
     assert.equal((await pool.query("SELECT 1 FROM line_bindings WHERE phone = '0900000033'")).rowCount, 0, "binding deleted");
     assert.equal(await isAuthorizedPhone("0900000033"), false, "this instance refuses the session at once");
-    assert.equal(await claimBlocked(pool, "0900000033", "U-other"), true, "no new claim for 24 h");
+    assert.equal(await claimBlocked(pool, "0900000033", "U-other"), "phone", "no new claim for 24 h");
     assert.deepEqual(answers(), [ANSWERS.claimUndone]);
     const edits = calls.filter((c) => c.method === "editMessageText");
     assert.deepEqual(
@@ -647,7 +471,7 @@ describe("Telegram webhook and Bot API (mock)", () => {
     await post(tap(claimCallbackData(first.claim.id), ADMIN));
     assert.deepEqual(answers(), [ANSWERS.claimAlready]);
     assert.equal((await getClaim(pool, first.claim.id))?.undoReason, "manual", "not turned into an admin undo (no 24 h block)");
-    assert.equal(await claimBlocked(pool, "0900000034", "U-c4"), false);
+    assert.equal(await claimBlocked(pool, "0900000034", "U-c4"), null);
     const cur = await pool.query("SELECT phone FROM user_claims WHERE user_id = $1 AND undone_at IS NULL", [first.user.id]);
     assert.equal(cur.rows[0].phone, "0900000035", "the newer claim stands");
     calls.length = 0;
@@ -656,19 +480,18 @@ describe("Telegram webhook and Bot API (mock)", () => {
     assert.equal(calls.filter((c) => c.method === "editMessageText").length, 0);
   });
 
-  test("undo of a number that stays authorized another way (approved request, ALLOWED_PHONES) says so instead of 'signed out'", async () => {
+  test("undo of a break-glass number (ALLOWED_PHONES) says it stays authorized; an old approved request keeps nobody in", async () => {
     await (await db()).query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const pool = await db();
-    // an approved request made before claims and requests excluded each other (or set by hand)
-    const { claim } = await newClaim("0900000036", "U-c6", "ยังเข้าได้");
+    const { claim } = await newClaim("0900000036", "U-c6", "ออกแล้ว");
     await pool.query(
       `INSERT INTO access_requests (phone, line_sub, first_name, last_name, position, status, decided_at)
        VALUES ('0900000036', 'U-c6', 'ยัง', 'เข้าได้', 'RN', 'approved', now())`,
     );
     await post(tap(claimCallbackData(claim.id), ADMIN));
-    assert.deepEqual(answers(), [ANSWERS.claimUndoneStillAllowed]);
+    assert.deepEqual(answers(), [ANSWERS.claimUndone]);
     resetAuthzCache();
-    assert.equal(await isAuthorizedPhone("0900000036"), true, "the approved request still authorizes it");
+    assert.equal(await isAuthorizedPhone("0900000036"), false, "an approved typed name does not keep the number in");
     // a break-glass number (ALLOWED_PHONES has 081-234-5678)
     calls.length = 0;
     const glass = await newClaim("0812345678", "U-c7", "ฉุกเฉิน");

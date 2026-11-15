@@ -1,7 +1,7 @@
 import { AuthShell, Notice } from "@/components/auth-shell";
 
 const MESSAGES: Record<string, { title: string; body: string }> = {
-  cancelled: { title: "ยกเลิกการเข้าสู่ระบบ", body: "คุณยกเลิกการเข้าสู่ระบบด้วย LINE" },
+  cancelled: { title: "ยกเลิกการเข้าสู่ระบบ", body: "คุณยกเลิกก่อนยืนยันตัวตนเสร็จ" },
   state: {
     title: "ลิงก์เข้าสู่ระบบหมดอายุ",
     body: "ลิงก์เข้าสู่ระบบหมดอายุหรือไม่ถูกต้อง กรุณาเริ่มเข้าสู่ระบบใหม่อีกครั้ง",

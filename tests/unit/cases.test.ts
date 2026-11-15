@@ -10,29 +10,38 @@ describe("added cases (database)", () => {
   let doctor = "";
   let nurse = "";
   let other = "";
+  let byNumber = "";
+  /** A doctor's session: signed in by email, so it holds the user id and no number. */
+  const session = (userId: string, sub: string) => ({ sub, phone: null, userId });
 
   before(async () => {
     await ensureSchema(pool);
     await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const { rows } = await pool.query<{ id: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype) VALUES
-         ('สมชาย', 'ใจดี', 'DR', 'ORTHO'), ('สมหญิง', 'รักงาน', 'RN', 'OR'), ('สมศักดิ์', 'มีสุข', 'DR', 'GENSX')
+         ('สมชาย', 'ใจดี', 'DR', 'ORTHO'), ('สมหญิง', 'รักงาน', 'RN', 'OR'), ('สมศักดิ์', 'มีสุข', 'DR', 'GENSX'),
+         ('ประวิทย์', 'เบอร์เดิม', 'DR', 'URO')
        RETURNING id::text AS id`,
     );
-    [doctor, nurse, other] = rows.map((r) => r.id);
+    [doctor, nurse, other, byNumber] = rows.map((r) => r.id);
+    // doctors hold their names by email; the last one only by a number (made by hand), which holds nothing
     await pool.query(
-      `INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0812345678', 'U1'), ($2, '0900000001', 'U2'), ($3, '0900000002', 'U3')`,
-      [doctor, nurse, other],
+      `INSERT INTO user_claims (user_id, phone, line_sub, via, email_verified_at) VALUES
+         ($1, NULL, 'U1', 'email', now()), ($2, '0900000001', 'U2', 'phone', NULL), ($3, NULL, 'U3', 'email', now()),
+         ($4, '0812345678', 'U4', 'phone', NULL)`,
+      [doctor, nurse, other, byNumber],
     );
   });
   after(() => pool.end());
 
-  test("only a doctor with a current claim can add cases", async () => {
-    assert.equal((await doctorFor(pool, "0812345678"))?.id, doctor);
+  test("only a doctor with a current claim (by email) can add cases", async () => {
+    assert.equal((await doctorFor(pool, session(doctor, "U1")))?.id, doctor);
+    assert.equal(await doctorFor(pool, session(doctor, "U-other")), null, "another LINE account");
     assert.equal(await doctorFor(pool, "0900000001"), null, "a nurse");
     assert.equal(await doctorFor(pool, "0611111111"), null, "no claim");
+    assert.equal(await doctorFor(pool, "0812345678"), null, "a doctor's name held by a number");
     await pool.query("UPDATE users SET active = false WHERE id = $1", [other]);
-    assert.equal(await doctorFor(pool, "0900000002"), null, "an inactive doctor");
+    assert.equal(await doctorFor(pool, session(other, "U3")), null, "an inactive doctor");
     await pool.query("UPDATE users SET active = true WHERE id = $1", [other]);
   });
 

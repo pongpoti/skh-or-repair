@@ -9,6 +9,7 @@ describe("roles: MX and admins (database)", () => {
   const pool = createPool(TEST_DB);
   const ids: Record<string, string> = {};
   const phone = (number: string, sub: string) => ({ sub, phone: number, userId: null });
+  const byEmail = (userId: string, sub: string) => ({ sub, phone: null, userId });
 
   before(async () => {
     await ensureSchema(pool);
@@ -20,14 +21,12 @@ describe("roles: MX and admins (database)", () => {
        RETURNING id::text AS id, first_name`,
     );
     for (const r of rows) ids[r.first_name] = r.id;
+    await pool.query(`INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0812345678', 'U-nurse')`, [ids["สมหญิง"]]);
+    // Doctors sign in by email: claims with no number.
     await pool.query(
-      `INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0812345678', 'U-nurse'), ($2, '0900000001', 'U-doctor')`,
-      [ids["สมหญิง"], ids["กมล"]],
-    );
-    // A doctor signed in by email: a claim with no number.
-    await pool.query(
-      `INSERT INTO user_claims (user_id, phone, line_sub, via, email_verified_at) VALUES ($1, NULL, 'U-email', 'email', now())`,
-      [ids["ประเสริฐ"]],
+      `INSERT INTO user_claims (user_id, phone, line_sub, via, email_verified_at) VALUES
+         ($1, NULL, 'U-email', 'email', now()), ($2, NULL, 'U-doctor', 'email', now())`,
+      [ids["ประเสริฐ"], ids["กมล"]],
     );
   });
   afterEach(() => setTestEnv());
@@ -91,7 +90,7 @@ describe("roles: MX and admins (database)", () => {
     process.env.AUTH_ADMIN_LINE_IDS = "U-admin";
     assert.equal(await canUpload(pool, phone("0899999999", "U-admin")), true, "an admin with no claim");
     assert.equal(await canUpload(pool, phone("0812345678", "U-nurse")), true, "MX");
-    assert.equal(await canUpload(pool, phone("0900000001", "U-doctor")), false, "a doctor");
+    assert.equal(await canUpload(pool, byEmail(ids["กมล"], "U-doctor")), false, "a doctor");
     delete process.env.AUTH_ADMIN_LINE_IDS;
     assert.equal(await canUpload(pool, phone("0899999999", "U-admin")), false, "no admin list");
   });
@@ -99,7 +98,7 @@ describe("roles: MX and admins (database)", () => {
   test("the board's viewer: every HN for MX and admins, the user's id for their own bookings", async () => {
     process.env.AUTH_ADMIN_LINE_IDS = "U-admin";
     assert.deepEqual(await boardViewer(pool, phone("0812345678", "U-nurse")), { allHn: true, userId: ids["สมหญิง"] });
-    assert.deepEqual(await boardViewer(pool, phone("0900000001", "U-doctor")), { allHn: false, userId: ids["กมล"] });
+    assert.deepEqual(await boardViewer(pool, byEmail(ids["กมล"], "U-doctor")), { allHn: false, userId: ids["กมล"] });
     assert.deepEqual(await boardViewer(pool, phone("0899999999", "U-admin")), { allHn: true, userId: null });
     assert.deepEqual(await boardViewer(pool, phone("0899999999", "U-x")), { allHn: false, userId: null });
   });

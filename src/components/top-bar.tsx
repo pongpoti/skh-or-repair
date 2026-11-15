@@ -38,7 +38,7 @@ export function TopBar({
   adminHref = null,
   uploadHref = null,
 }: {
-  /** The person's full name (claimed user, else the approved request, else the LINE name). */
+  /** The person's full name (claimed user, else the LINE name). */
   name: string;
   /** Type and subtype in Thai ("แพทย์ · ออร์โธปิดิกส์"), shown under the name in the account menu. */
   role?: string | null;

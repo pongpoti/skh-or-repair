@@ -1,11 +1,16 @@
 import "server-only";
 import type { Pool, PoolClient } from "pg";
-import { latestRequest, viewFor, type TelegramRef } from "./access";
 import { withTx } from "./db";
 import { upsertBinding } from "./otp";
 import type { UserType } from "./user-labels";
 
 type Q = Pool | PoolClient;
+
+/** One Telegram message that announced a claim (edited once the claim is undone). */
+export interface TelegramRef {
+  chat_id: string;
+  message_id: number;
+}
 
 /**
  * The list of people who may claim their name: table `users` (db/schema.sql), shared with the rest of the project and
@@ -13,7 +18,8 @@ type Q = Pool | PoolClient;
  * code, someone whose number is not authorized claims their own name on /login/claim: the first claim wins and is
  * stored in `user_claims` with the verified number and LINE account. A user's current claim is their user_claims row
  * with undone_at IS NULL; it authorizes its number while the user is active (lib/authz.ts) and names it on the board and
- * in alerts. Every claim is announced in Telegram with an undo button (lib/telegram-webhook.ts).
+ * in alerts. This list is the only way in: there are no typed names. When Telegram is set up, every claim is announced
+ * there with an undo button (lib/telegram-webhook.ts).
  */
 
 export const CLAIM_LIMITS = {
@@ -26,8 +32,9 @@ export const CLAIM_LIMITS = {
 export const UNDO_BLOCK_MS = 24 * 3600 * 1000;
 
 /**
- * Why a claim ended: the Telegram undo button, closed by a new claim while its user was inactive, by hand in SQL, or
- * (doctors) because the name was proven again by an email code from another LINE account (lib/email-otp.ts).
+ * Why a claim ended: the Telegram undo button, closed by a new claim while its user was inactive, by hand in SQL, or a
+ * claim that held nothing (HOLDS, e.g. a doctor's name by number) ended by a new claim of its name, number or LINE
+ * account (a doctor's email code, lib/email-otp.ts, or a claim on /login/claim).
  */
 export type UndoReason = "admin" | "inactive" | "manual" | "replaced";
 
@@ -125,11 +132,20 @@ export function fullName(s: { firstName: string; lastName: string }): string {
   return `${s.firstName} ${s.lastName}`;
 }
 
+/**
+ * A current claim holds its name only the way that name's type signs in: a doctor's (DR) by email (lib/email-otp.ts),
+ * everyone else's by number. A claim made the other way (a doctor's name by number, made by hand or left from before
+ * the email sign-in; an email claim on a name that sync-users later moved off DR) holds nothing: it signs nobody in,
+ * names nobody, locks nothing, and the next claim of that name, number or LINE account ends it ('replaced'). SQL over a
+ * claim `c` joined to its user `u`.
+ */
+export const HOLDS = "((u.type = 'DR') = (c.via = 'email'))";
+
 /** The active names of one type, in Thai order, each with whether it is taken. Nothing else leaves the tables. */
 export async function listClaimable(pool: Q, type: UserType): Promise<ClaimableName[]> {
   const { rows } = await pool.query<ClaimableName>(
     `SELECT u.id::text AS id, u.first_name, u.last_name, u.subtype,
-            EXISTS (SELECT 1 FROM user_claims c WHERE c.user_id = u.id AND c.undone_at IS NULL) AS claimed
+            EXISTS (SELECT 1 FROM user_claims c WHERE c.user_id = u.id AND c.undone_at IS NULL AND ${HOLDS}) AS claimed
      FROM users u WHERE u.active AND u.type = $1`,
     [type],
   );
@@ -138,30 +154,32 @@ export async function listClaimable(pool: Q, type: UserType): Promise<ClaimableN
     .sort((a, b) => a.first_name.localeCompare(b.first_name, "th") || a.last_name.localeCompare(b.last_name, "th"));
 }
 
-/** The active user whose current claim holds this number, or null. */
+
+/** The active user (never a doctor) whose current claim holds this number, or null. */
 export async function userForPhone(pool: Q, phone: string): Promise<ListedUser | null> {
   const { rows } = await pool.query<UserRow>(
     `SELECT ${USER_COLUMNS} FROM user_claims c JOIN users u ON u.id = c.user_id
-     WHERE c.phone = $1 AND c.undone_at IS NULL AND u.active`,
+     WHERE c.phone = $1 AND c.undone_at IS NULL AND u.active AND ${HOLDS}`,
     [phone],
   );
   return rows.length ? toUser(rows[0]) : null;
 }
 
-/** True when this number holds a current claim on an active user (unique index lookup). */
+/** True when this number holds a current claim on an active user who is not a doctor (unique index lookup). */
 export async function holdsActiveName(pool: Q, phone: string): Promise<boolean> {
   const { rowCount } = await pool.query(
     `SELECT 1 FROM user_claims c JOIN users u ON u.id = c.user_id
-     WHERE c.phone = $1 AND c.undone_at IS NULL AND u.active`,
+     WHERE c.phone = $1 AND c.undone_at IS NULL AND u.active AND ${HOLDS}`,
     [phone],
   );
   return rowCount === 1;
 }
 
-/** Every number with a current claim on an active user. */
+/** Every number with a current claim on an active user who is not a doctor. */
 export async function activePhones(pool: Q): Promise<Set<string>> {
   const { rows } = await pool.query<{ phone: string }>(
-    "SELECT c.phone FROM user_claims c JOIN users u ON u.id = c.user_id WHERE c.undone_at IS NULL AND u.active AND c.phone IS NOT NULL",
+    `SELECT c.phone FROM user_claims c JOIN users u ON u.id = c.user_id
+     WHERE c.undone_at IS NULL AND u.active AND c.phone IS NOT NULL AND ${HOLDS}`,
   );
   return new Set(rows.map((r) => r.phone));
 }
@@ -170,7 +188,7 @@ export async function activePhones(pool: Q): Promise<Set<string>> {
 export async function activeEmailClaims(pool: Q): Promise<Array<[string, string]>> {
   const { rows } = await pool.query<{ user_id: string; line_sub: string }>(
     `SELECT c.user_id::text AS user_id, c.line_sub FROM user_claims c JOIN users u ON u.id = c.user_id
-     WHERE c.undone_at IS NULL AND u.active AND c.via = 'email'`,
+     WHERE c.undone_at IS NULL AND u.active AND c.via = 'email' AND ${HOLDS}`,
   );
   return rows.map((r) => [r.user_id, r.line_sub]);
 }
@@ -179,7 +197,7 @@ export async function activeEmailClaims(pool: Q): Promise<Array<[string, string]
 export async function userForEmailClaim(pool: Q, userId: string, sub: string): Promise<ListedUser | null> {
   const { rows } = await pool.query<UserRow>(
     `SELECT ${USER_COLUMNS} FROM user_claims c JOIN users u ON u.id = c.user_id
-     WHERE c.user_id = $1 AND c.line_sub = $2 AND c.via = 'email' AND c.undone_at IS NULL AND u.active`,
+     WHERE c.user_id = $1 AND c.line_sub = $2 AND c.via = 'email' AND c.undone_at IS NULL AND u.active AND ${HOLDS}`,
     [userId, sub],
   );
   return rows.length ? toUser(rows[0]) : null;
@@ -198,17 +216,22 @@ export async function userForSession(pool: Q, who: SessionIdentity): Promise<Lis
   return who.phone ? userForPhone(pool, who.phone) : null;
 }
 
+/** What blocks a new claim after an administrator's undo: this LINE account (any number), or only this number. */
+export type ClaimBlock = "line" | "phone";
+
 /**
- * True when an administrator undid a claim of this number, or by this LINE account, less than 24 h ago. Only
+ * Set when an administrator undid a claim of this number, or by this LINE account, less than 24 h ago: "line" when this
+ * LINE account's claim was undone (another number does not help), else "phone". Null when nothing blocks. Only
  * undo_reason 'admin' counts: a claim the app closed ('inactive') or one released by hand ('manual') never blocks.
  */
-export async function claimBlocked(pool: Q, phone: string, sub: string): Promise<boolean> {
-  const { rowCount } = await pool.query(
-    `SELECT 1 FROM user_claims
-     WHERE (phone = $1 OR line_sub = $2) AND undo_reason = 'admin' AND undone_at > now() - make_interval(secs => $3) LIMIT 1`,
+export async function claimBlocked(pool: Q, phone: string, sub: string): Promise<ClaimBlock | null> {
+  const { rows } = await pool.query<{ by_line: boolean }>(
+    `SELECT line_sub = $2 AS by_line FROM user_claims
+     WHERE (phone = $1 OR line_sub = $2) AND undo_reason = 'admin' AND undone_at > now() - make_interval(secs => $3)
+     ORDER BY (line_sub = $2) DESC LIMIT 1`,
     [phone, sub, UNDO_BLOCK_MS / 1000],
   );
-  return rowCount === 1;
+  return rows.length ? (rows[0].by_line ? "line" : "phone") : null;
 }
 
 export async function getClaim(pool: Q, id: string): Promise<UserClaim | null> {
@@ -233,10 +256,8 @@ export type ClaimResult =
   | { status: "phone_has_claim" }
   /** This LINE account already holds another (active) name, through another number. */
   | { status: "line_has_claim" }
-  /** The number has an access request (pending, approved, or rejected less than 24 h ago): it goes to that instead. */
-  | { status: "requested" }
   /** An administrator undid a claim of this number or LINE account less than 24 h ago. */
-  | { status: "blocked" }
+  | { status: "blocked"; by: ClaimBlock }
   | { status: "limited"; retryAfterS: number };
 
 const DAY_S = 24 * 3600;
@@ -248,17 +269,17 @@ const DAY_S = 24 * 3600;
  * One LINE account, one number, one name. In the same transaction the LINE account is bound to the number
  * (line_bindings, so nothing between the claim and the sign-in can fail on its own) and the attempt is logged in
  * login_events ('claim' or 'claim_failed'). Refused before any attempt: a number or LINE account whose claim an
- * administrator undid less than 24 h ago, a number with an access request (claims and requests exclude each other:
- * both take the 'access-phone:' lock), and more than CLAIM_LIMITS attempts in 24 h. Attempts of one LINE account and of
- * one number are serialized by advisory locks, so double taps cannot get round the limits. `users` is only read.
+ * administrator undid less than 24 h ago, and more than CLAIM_LIMITS attempts in 24 h. Attempts of one LINE account and
+ * of one number are serialized by advisory locks, so double taps cannot get round the limits. `users` is only read.
+ * A taken name stays taken: only an administrator frees it (the Telegram undo, or by hand in SQL).
  *
  * A current claim of this number or LINE account on a user that is no longer active (e.g. a name whose spelling was
  * corrected in the CSV) is closed first (undo_reason 'inactive', no 24 h block), so the person can claim the corrected
- * name. A failed attempt leaves it as it was (savepoint).
+ * name; so is a current claim of this number, LINE account or name that holds nothing (HOLDS: 'replaced'). A failed
+ * attempt leaves them as they were (savepoint).
  *
  * Doctors (type DR) are never claimed here: they prove their name by an email code (lib/email-otp.ts), so a doctor's
- * name reads "unavailable". A number that already holds a doctor's name (claimed before the switch) still gets
- * "own_claim".
+ * name reads "unavailable", also for a number that holds a claim of it made by hand (never "own_claim").
  */
 export async function claimUser(
   pool: Pool,
@@ -267,10 +288,8 @@ export async function claimUser(
   return withTx(pool, async (c) => {
     await c.query("SELECT pg_advisory_xact_lock(hashtext('claim-sub:' || $1))", [r.sub]);
     await c.query("SELECT pg_advisory_xact_lock(hashtext('claim-phone:' || $1))", [r.phone]);
-    // the lock createRequest() takes: a claim and a request of one number never both go through
-    await c.query("SELECT pg_advisory_xact_lock(hashtext('access-phone:' || $1))", [r.phone]);
-    if (await claimBlocked(c, r.phone, r.sub)) return { status: "blocked" };
-    if (viewFor(await latestRequest(c, r.phone), r.sub) !== "form") return { status: "requested" };
+    const block = await claimBlocked(c, r.phone, r.sub);
+    if (block) return { status: "blocked", by: block };
     const { rows: counts } = await c.query<{ sub_n: number; sub_oldest_s: number | null; phone_n: number; phone_oldest_s: number | null }>(
       `SELECT
          count(*) FILTER (WHERE line_sub = $2)::int AS sub_n,
@@ -298,7 +317,7 @@ export async function claimUser(
     // already this number's (active) name: no new claim, no attempt counted (the caller finishes the sign-in)
     const { rows: own } = await c.query<UserRow>(
       `SELECT ${USER_COLUMNS} FROM user_claims c JOIN users u ON u.id = c.user_id
-       WHERE c.user_id = $1 AND c.phone = $2 AND c.undone_at IS NULL AND u.active`,
+       WHERE c.user_id = $1 AND c.phone = $2 AND c.undone_at IS NULL AND u.active AND ${HOLDS}`,
       [r.userId, r.phone],
     );
     if (own.length) {
@@ -309,12 +328,15 @@ export async function claimUser(
     await c.query("SAVEPOINT claim_attempt");
     let claim: ClaimRow | undefined;
     try {
-      // current claims of this number or LINE account on inactive users end (kept only if the claim below fails)
+      // current claims of this number, LINE account or name that hold nothing end: on an inactive user ('inactive'), or
+      // made the other way (HOLDS: 'replaced'). They are kept only if the claim below fails.
       await c.query(
-        `UPDATE user_claims c SET undone_at = now(), undone_by = NULL, undo_reason = 'inactive'
-         WHERE c.undone_at IS NULL AND (c.phone = $1 OR c.line_sub = $2)
-           AND EXISTS (SELECT 1 FROM users u WHERE u.id = c.user_id AND NOT u.active)`,
-        [r.phone, r.sub],
+        `UPDATE user_claims c SET undone_at = now(), undone_by = NULL,
+                undo_reason = CASE WHEN u.active THEN 'replaced' ELSE 'inactive' END
+         FROM users u
+         WHERE u.id = c.user_id AND c.undone_at IS NULL AND (c.phone = $1 OR c.line_sub = $2 OR c.user_id = $3)
+           AND NOT (u.active AND ${HOLDS})`,
+        [r.phone, r.sub, r.userId],
       );
       // doctors (DR) prove their name by an email code instead (lib/email-otp.ts): no new claim by number
       const ins = await c.query<ClaimRow>(

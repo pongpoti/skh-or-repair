@@ -20,7 +20,9 @@ import {
   doctorWithEmails,
   EMAIL_LIMITS,
   freshEmailClaim,
+  hashEmailCode,
   hasLiveEmailCode,
+  heldByOther,
   listDoctors,
   maskEmail,
   sendEmailCode,
@@ -32,7 +34,7 @@ import { MSG } from "@/lib/http";
 import { MAX_ATTEMPTS, upsertBinding } from "@/lib/otp";
 import { buildClaimMessage, buildEmailSignInMessage } from "@/lib/telegram";
 import { signPending, signSession, verifySession } from "@/lib/tokens";
-import { claimUser, getListedUser } from "@/lib/user-list";
+import { claimUser, getListedUser, listClaimable } from "@/lib/user-list";
 import { setTestEnv, TEST_PEPPER as PEPPER, TEST_SESSION_SECRET as SECRET } from "./_setup";
 
 // Invented names, numbers and addresses only.
@@ -242,18 +244,28 @@ describe("doctors sign in by email (database)", () => {
     for (const bad of ["Upper@Example.com", " pad@example.com", "no-at.example.com", "a@b", "two@@example.com"]) {
       await assert.rejects(pool.query("INSERT INTO user_emails (user_id, email) VALUES ($1, $2)", [ids["กมล"], bad]), bad);
     }
-    const list = await listDoctors(pool);
+    const list = await listDoctors(pool, "U-a");
     assert.deepEqual(
-      list.map((d) => [d.first_name, d.has_email]),
+      list.map((d) => [d.first_name, d.has_email, d.claimed]),
       [
-        ["กมล", true],
-        ["ไม่มี", false],
-        ["สมชาย", true],
+        ["กมล", true, false],
+        ["ไม่มี", false, false],
+        ["สมชาย", true, false],
       ],
       "active doctors only, in Thai order",
     );
-    for (const d of list) assert.deepEqual(Object.keys(d).sort(), ["first_name", "has_email", "id", "last_name", "subtype"]);
+    for (const d of list) assert.deepEqual(Object.keys(d).sort(), ["claimed", "first_name", "has_email", "id", "last_name", "subtype"]);
     assert.ok(!JSON.stringify(list).includes("@"));
+    // a name held by a LINE account is taken for every other LINE account, not for its holder; an ended claim frees it
+    await pool.query("INSERT INTO user_claims (user_id, phone, line_sub, via, email_verified_at) VALUES ($1, NULL, 'U-held', 'email', now())", [
+      ids["กมล"],
+    ]);
+    const taken = (who: string) => listDoctors(pool, who).then((l) => l.filter((d) => d.claimed).map((d) => d.first_name));
+    assert.deepEqual(await taken("U-a"), ["กมล"]);
+    assert.deepEqual(await taken("U-held"), []);
+    await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual'");
+    assert.deepEqual(await taken("U-a"), []);
+    await pool.query("TRUNCATE user_claims RESTART IDENTITY");
     assert.deepEqual((await doctorWithEmails(pool, ids["สมชาย"]))?.emails, ["sj@example.org", "somchai.j@example.com"]);
     assert.equal(await doctorWithEmails(pool, ids["เกษียณ"]), null, "inactive");
     assert.equal(await doctorWithEmails(pool, ids["ปราณี"]), null, "not a doctor");
@@ -383,28 +395,60 @@ describe("doctors sign in by email (database)", () => {
     ]);
   });
 
-  test("the name proven from another LINE account (or held by a number) moves there: the old holder is signed out", async () => {
+  test("a name held by one LINE account by email is locked for every other: no code is sent, a code from before is refused", async () => {
+    const { sent, transport } = fakeTransport();
+    // U-new asked for a code before the name was taken
+    assert.equal((await sendEmailCode(pool, args(ids["สมชาย"], "U-new", transport))).status, "sent");
     await signIn(ids["สมชาย"], "U-old");
-    const moved = await signIn(ids["สมชาย"], "U-new");
-    assert.ok(moved.status === "signed_in" && moved.created);
-    assert.deepEqual(moved.replaced, { phone: null, lineSub: "U-old", lineName: "LINE U-old" });
+    assert.deepEqual(await sendEmailCode(pool, args(ids["สมชาย"], "U-new", transport)), { status: "taken" });
+    assert.equal(sent.length, 1, "no email for a taken name");
+    assert.deepEqual(await signIn(ids["สมชาย"], "U-new"), { status: "taken" });
     resetAuthzCache();
-    assert.equal(await isAuthorizedDoctor(ids["สมชาย"], "U-old"), false);
-    assert.equal(await isAuthorizedDoctor(ids["สมชาย"], "U-new"), true);
-    const old = await pool.query("SELECT undo_reason FROM user_claims WHERE line_sub = 'U-old'");
-    assert.deepEqual(old.rows, [{ undo_reason: "replaced" }]);
+    assert.equal(await isAuthorizedDoctor(ids["สมชาย"], "U-old"), true, "the first holder keeps the name");
+    assert.equal(await isAuthorizedDoctor(ids["สมชาย"], "U-new"), false);
+    assert.deepEqual(await currentClaim(ids["สมชาย"]), { phone: null, line_sub: "U-old", via: "email", verified: true });
+    // once an administrator ends the claim, the name is free again
+    await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE line_sub = 'U-old'");
+    await pool.query("UPDATE email_codes SET created_at = created_at - interval '61 seconds'"); // past the cooldown
+    assert.equal((await sendEmailCode(pool, args(ids["สมชาย"], "U-new", transport))).status, "sent");
+    const moved = await signIn(ids["สมชาย"], "U-new");
+    assert.ok(moved.status === "signed_in" && moved.created && moved.replaced === null);
+  });
 
-    // a doctor registered by number before the switch: the number keeps working until the doctor uses email
+  test("a doctor's name claimed by number holds nothing: it signs nobody in, locks nothing, and the email code replaces it", async () => {
+    // claims by number made by hand (as before the switch): one from the doctor's own LINE account, one from another
     await pool.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0900000301', 'U-phone')", [ids["กมล"]]);
+    await pool.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0900000309', 'U-num')", [ids["สมชาย"]]);
     await upsertBinding(pool, "U-phone", "0900000301", "x");
     resetAuthzCache();
-    assert.equal(await isAuthorizedPhone("0900000301"), true);
+    assert.equal(await isAuthorizedPhone("0900000301"), false, "no sign-in by number for a doctor");
+    assert.equal(await isAuthorizedPhone("0900000301", { fresh: true }), false);
+    const names = await listDoctors(pool, "U-new");
+    assert.deepEqual(
+      names.filter((n) => n.id === ids["กมล"] || n.id === ids["สมชาย"]).map((n) => n.claimed),
+      [false, false],
+      "neither name is taken",
+    );
+    assert.equal(await heldByOther(pool, ids["สมชาย"], "U-new"), false);
+    // the doctor's own LINE account: the claim moves to email, the number's binding goes
     const r = await signIn(ids["กมล"], "U-phone");
-    assert.ok(r.status === "signed_in" && r.replaced?.phone === "0900000301");
+    assert.ok(r.status === "signed_in" && r.created && r.replaced?.phone === "0900000301" && r.replaced.lineSub === "U-phone");
     assert.deepEqual(await currentClaim(ids["กมล"]), { phone: null, line_sub: "U-phone", via: "email", verified: true });
-    resetAuthzCache();
-    assert.equal(await isAuthorizedPhone("0900000301"), false, "the number no longer holds the name");
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM line_bindings")).rows[0].n, 0, "its LINE binding is gone");
+    // another LINE account proving the other name by email replaces that claim by number too
+    const { sent, transport } = fakeTransport();
+    assert.equal((await sendEmailCode(pool, args(ids["สมชาย"], "U-new", transport))).status, "sent");
+    assert.equal(sent.length, 1);
+    const other = await signIn(ids["สมชาย"], "U-new");
+    assert.ok(other.status === "signed_in" && other.created && other.replaced?.phone === "0900000309" && other.replaced.lineSub === "U-num");
+    assert.deepEqual(await currentClaim(ids["สมชาย"]), { phone: null, line_sub: "U-new", via: "email", verified: true });
+    const reasons = await pool.query("SELECT phone, undo_reason FROM user_claims WHERE via = 'phone' ORDER BY phone");
+    assert.deepEqual(reasons.rows, [
+      { phone: "0900000301", undo_reason: "replaced" },
+      { phone: "0900000309", undo_reason: "replaced" },
+    ]);
+    // from then on the name is held by email: locked for everyone else
+    assert.deepEqual(await sendEmailCode(pool, args(ids["สมชาย"], "U-num", transport)), { status: "taken" });
   });
 
   test("a LINE account holding another active name is refused; one holding an inactive name moves on", async () => {
@@ -420,12 +464,13 @@ describe("doctors sign in by email (database)", () => {
     assert.deepEqual(await signIn(ids["ปราณี"], "U-z"), { status: "unavailable" }, "not a doctor");
   });
 
-  test("doctors no longer claim by number; one who did before keeps it", async () => {
+  test("doctors never claim by number, not even a name the number holds by hand", async () => {
     const claim = (userId: string, phone: string, sub: string) =>
       claimUser(pool, { userId, phone, sub, lineName: "x", ip: "203.0.113.9", userAgent: "test" });
     assert.equal((await claim(ids["สมชาย"], "0900000303", "U-c")).status, "unavailable");
     await pool.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0900000304', 'U-d')", [ids["กมล"]]);
-    assert.equal((await claim(ids["กมล"], "0900000304", "U-d")).status, "own_claim");
+    assert.equal((await claim(ids["กมล"], "0900000304", "U-d")).status, "unavailable", "no own_claim sign-in for a doctor");
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM line_bindings WHERE phone = '0900000304'")).rows[0].n, 0, "nothing bound");
     // the constraint: an email claim holds no number and is verified; a number claim holds a number
     await assert.rejects(
       pool.query("INSERT INTO user_claims (user_id, phone, line_sub, via) VALUES ($1, '0900000305', 'U-e', 'email')", [ids["สมชาย"]]),
@@ -437,7 +482,59 @@ describe("doctors sign in by email (database)", () => {
     );
   });
 
-  test("the session of a doctor signed in by email: board name and role, the add-case form, and sign-out when the name moves", async () => {
+  test("a claim that holds nothing never stands in the way: its number, LINE account or name claims again ('replaced')", async () => {
+    const claim = (userId: string, phone: string, sub: string) =>
+      claimUser(pool, { userId, phone, sub, lineName: "x", ip: "203.0.113.9", userAgent: "test" });
+    const reasons = async (userId: string) =>
+      (await pool.query("SELECT undo_reason FROM user_claims WHERE user_id = $1 ORDER BY id", [userId])).rows.map((r) => r.undo_reason);
+    // a doctor's name given by hand to a nurse's number and LINE account: she still claims her own name
+    await pool.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0900000311', 'U-nurse')", [ids["กมล"]]);
+    assert.equal((await claim(ids["ปราณี"], "0900000311", "U-nurse")).status, "claimed");
+    assert.deepEqual(await reasons(ids["กมล"]), ["replaced"]);
+    // a LINE account with another doctor's name by number proves its own doctor's name by email
+    await pool.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0900000312', 'U-dr')", [ids["กมล"]]);
+    const r = await signIn(ids["สมชาย"], "U-dr");
+    assert.ok(r.status === "signed_in" && r.replaced === null, JSON.stringify(r));
+    assert.deepEqual(await reasons(ids["กมล"]), ["replaced", "replaced"]);
+
+    // the roster moves a doctor signed in by email to RN: the email claim signs nobody in and the name is free
+    await pool.query("UPDATE users SET type = 'RN', subtype = 'OR' WHERE id = $1", [ids["สมชาย"]]);
+    resetAuthzCache();
+    assert.equal(await freshEmailClaim(pool, "U-dr"), null, "no LINE sign-in without an SMS code");
+    assert.equal(await isAuthorizedDoctor(ids["สมชาย"], "U-dr", { fresh: true }), false);
+    assert.equal((await listClaimable(pool, "RN")).find((n) => n.id === ids["สมชาย"])?.claimed, false, "free on the claim page");
+    assert.equal((await claim(ids["สมชาย"], "0900000313", "U-sms")).status, "claimed", "claimed by number like any RN");
+    assert.deepEqual(await reasons(ids["สมชาย"]), ["replaced", null]);
+  });
+
+  test("an administrator's undo that lands while an email sign-in replaces the same claim is kept as it is", async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      "INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, '0900000321', 'U-old') RETURNING id::text AS id",
+      [ids["กมล"]],
+    );
+    const admin = await pool.connect();
+    try {
+      // the undo holds the row; the sign-in has read the claim as current and waits on it
+      await admin.query("BEGIN");
+      await admin.query("UPDATE user_claims SET undone_at = now(), undone_by = 4242, undo_reason = 'admin' WHERE id = $1", [rows[0].id]);
+      const pending = signIn(ids["กมล"], "U-new");
+      for (let i = 0; i < 100; i++) {
+        const waiting = await pool.query("SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'UPDATE user_claims%'");
+        if (waiting.rowCount) break;
+        await new Promise((res) => setTimeout(res, 50));
+      }
+      await admin.query("COMMIT");
+      const r = await pending;
+      assert.ok(r.status === "signed_in" && r.replaced === null, JSON.stringify(r));
+    } finally {
+      await admin.query("ROLLBACK").catch(() => {});
+      admin.release();
+    }
+    const row = await pool.query("SELECT undone_by::text AS undone_by, undo_reason FROM user_claims WHERE id = $1", [rows[0].id]);
+    assert.deepEqual(row.rows[0], { undone_by: "4242", undo_reason: "admin" }, "the undo and its 24 h block stay");
+  });
+
+  test("the session of a doctor signed in by email: board name and role, the add-case form, and sign-out when the claim ends", async () => {
     await signIn(ids["สมชาย"], "U-s");
     const token = await signSession({ sub: "U-s", phone: null, userId: ids["สมชาย"], name: "LINE", picture: null }, SECRET);
     const user = await userFromToken(token);
@@ -449,9 +546,14 @@ describe("doctors sign in by email (database)", () => {
     assert.equal(await userFromToken(other), null);
     assert.deepEqual(await profileFor({ sub: "U-s", phone: null, userId: ids["กมล"] }, "LINE"), { name: "LINE", role: null });
 
-    await signIn(ids["สมชาย"], "U-elsewhere");
+    // another LINE account cannot take the name over: the session stands
+    assert.deepEqual(await signIn(ids["สมชาย"], "U-elsewhere"), { status: "taken" });
     resetAuthzCache();
-    assert.equal(await userFromToken(token), null, "signed out once the name was proven from another LINE account");
+    assert.ok(await userFromToken(token), "the first holder stays signed in");
+    // an administrator ends the claim: signed out
+    await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE line_sub = 'U-s'");
+    resetAuthzCache();
+    assert.equal(await userFromToken(token), null, "signed out once the claim ended");
     assert.equal(await doctorFor(pool, user), null);
   });
 
@@ -522,6 +624,27 @@ describe("doctors sign in by email (database)", () => {
       const session = cookies.find((c) => c.startsWith("session="))!.split(";")[0].slice("session=".length);
       assert.deepEqual(await verifySession(session, SECRET), { sub: "U-r", phone: null, userId: ids["สมชาย"], name: "x", picture: null });
       assert.ok(cookies.some((c) => c.startsWith("pending=;")), "the pending cookie is cleared");
+    });
+
+    test("a name another LINE account holds: send answers 409 taken and no email is written; verify refuses too", async () => {
+      await signIn(ids["กมล"], "U-holder");
+      const before = readdirSync(outbox).length;
+      const pending = `pending=${await signPending({ sub: "U-late", name: "x", picture: null, next: "/" }, SECRET)}`;
+      const res = await post(sendRoute, "/api/auth/email/send", { userId: ids["กมล"] }, pending);
+      assert.equal(res.status, 409);
+      assert.deepEqual(await res.json(), { error: MSG.emailTaken, reason: "taken" });
+      assert.equal(readdirSync(outbox).length, before, "no email");
+      assert.ok(MSG.emailTaken.includes("ติดต่อผู้ดูแล"));
+      // a code from before the name was taken (set by hand here) is refused at sign-in
+      await pool.query(
+        "INSERT INTO email_codes (user_id, line_sub, code_hash, expires_at) VALUES ($1, 'U-late', $2, now() + interval '10 minutes')",
+        [ids["กมล"], hashEmailCode(PEPPER, ids["กมล"], "U-late", "246810")],
+      );
+      const late = await post(verifyRoute, "/api/auth/email/verify", { userId: ids["กมล"], code: "246810" }, pending);
+      assert.equal(late.status, 409);
+      assert.equal((await late.json()).reason, "taken");
+      assert.ok(!late.headers.getSetCookie().some((c) => c.startsWith("session=") && !c.startsWith("session=;")), "no session");
+      assert.equal((await currentClaim(ids["กมล"]))?.line_sub, "U-holder");
     });
   });
 });

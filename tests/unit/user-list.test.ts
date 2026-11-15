@@ -5,7 +5,6 @@ import { NextRequest } from "next/server";
 import type { Pool } from "pg";
 import { POST as claimRoute } from "@/app/api/auth/claim/route";
 import { GET as listRoute } from "@/app/api/auth/claim/list/route";
-import { createRequest, decideRequest } from "@/lib/access";
 import { isAuthorizedPhone, resetAuthzCache } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { upsertBinding } from "@/lib/otp";
@@ -22,7 +21,7 @@ import {
   userForPhone,
 } from "@/lib/user-list";
 import { MSG } from "@/lib/http";
-import { claimsEnabled } from "@/lib/telegram";
+import { claimUndoAvailable } from "@/lib/telegram";
 import { signAccess } from "@/lib/tokens";
 import { setTestEnv, TEST_SESSION_SECRET } from "./_setup";
 
@@ -216,14 +215,14 @@ describe("users and claims (database)", () => {
     assert.ok(closed?.undoneAt instanceof Date);
     assert.equal(closed?.undoReason, "inactive");
     assert.equal(closed?.undoneBy, null);
-    assert.equal(await claimBlocked(pool, "0900000205", "U-c"), false, "'inactive' never blocks");
+    assert.equal(await claimBlocked(pool, "0900000205", "U-c"), null, "'inactive' never blocks");
     assert.deepEqual(await userForPhone(pool, "0900000205"), r.status === "claimed" ? r.user : null);
     // the same for a LINE account whose only name went inactive
     await pool.query("UPDATE users SET active = false WHERE id = $1", [ids["PCA:ชัยวัฒน์"]]);
     assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000251", "U-c"))).status, "claimed");
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM user_claims WHERE line_sub = 'U-c' AND undone_at IS NULL");
     assert.equal(rows[0].n, 1);
-    assert.equal(await claimBlocked(pool, "0900000251", "U-c"), false);
+    assert.equal(await claimBlocked(pool, "0900000251", "U-c"), null);
     // users was only read (the test's own deactivation aside)
     await pool.query("UPDATE users SET active = true WHERE id = $1", [ids["PCA:ชัยวัฒน์"]]);
     const after = await usersSnapshot();
@@ -278,30 +277,29 @@ describe("users and claims (database)", () => {
     assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000271", "U-other"))).status, "taken");
   });
 
-  test("a claim and an access request of one number exclude each other (in either order and at once)", async () => {
-    const req = (phone: string, sub: string) =>
-      createRequest(pool, { phone, sub, lineName: "x", firstName: "ทดสอบ", lastName: "ระบบ", position: "RN", ip: "203.0.113.7" });
-    // claim first: the request is refused, the number signs in with its name
-    assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000280", "U-cr"))).status, "claimed");
-    assert.deepEqual(await req("0900000280", "U-cr"), { status: "exists", view: "signin" });
-    // request first: the claim is refused (pending, approved, recently rejected) and no attempt is counted
-    const pending = await req("0900000281", "U-rc");
-    assert.equal(pending.status, "created");
-    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000281", "U-rc"))).status, "requested");
-    assert.ok(pending.status === "created");
-    await decideRequest(pool, pending.request.id, "approved", "111");
-    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000281", "U-rc"))).status, "requested");
-    assert.equal((await pool.query("SELECT count(*)::int AS n FROM login_events WHERE phone = '0900000281'")).rows[0].n, 0);
-    // at once: exactly one goes through
-    for (let i = 0; i < 4; i++) {
-      await load();
-      const phone = `09000002${90 + i}`;
-      const [c, q] = await Promise.all([claimUser(pool, args(ids["RN:ปราณี"], phone, `U-x${i}`)), req(phone, `U-x${i}`)]);
-      const claimed = c.status === "claimed";
-      const requested = q.status === "created";
-      assert.ok(claimed !== requested, `${c.status} / ${q.status}`);
-      assert.equal(claimed ? q.status : c.status, claimed ? "exists" : "requested");
-    }
+  test("an old access request (pending or approved) neither blocks a claim nor authorizes the number", async () => {
+    await pool.query(
+      `INSERT INTO access_requests (phone, line_sub, line_name, first_name, last_name, position, status, decided_at, decided_by)
+       VALUES ('0900000281', 'U-rc', 'x', 'ทดสอบ', 'ระบบ', 'RN', 'approved', now(), 111),
+              ('0900000282', 'U-rp', 'x', 'พิมพ์', 'เอง', 'DR', 'pending', NULL, NULL)`,
+    );
+    resetAuthzCache();
+    assert.equal(await isAuthorizedPhone("0900000281"), false, "an approved typed name is not on the list");
+    assert.equal(await isAuthorizedPhone("0900000282", { fresh: true }), false);
+    assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000281", "U-rc"))).status, "claimed");
+    assert.equal((await claimUser(pool, args(ids["RN:ปราณี"], "0900000282", "U-rp"))).status, "claimed");
+    resetAuthzCache();
+    assert.equal(await isAuthorizedPhone("0900000281"), true, "authorized by the claimed name");
+  });
+
+  test("a taken name stays taken: no other number or LINE account can claim it, at once or later", async () => {
+    const results = await Promise.all(
+      [0, 1, 2, 3].map((i) => claimUser(pool, args(ids["RN:ปราณี"], `09000002${90 + i}`, `U-race${i}`))),
+    );
+    assert.deepEqual(results.map((r) => r.status).sort(), ["claimed", "taken", "taken", "taken"]);
+    assert.equal((await claimUser(pool, args(ids["RN:ปราณี"], "0900000299", "U-later"))).status, "taken");
+    const listed = (await listClaimable(pool, "RN")).find((n) => n.id === ids["RN:ปราณี"]);
+    assert.equal(listed?.claimed, true, "shown as taken on the claim page");
   });
 
   test("inactive and unknown names are refused", async () => {
@@ -351,13 +349,15 @@ describe("users and claims (database)", () => {
     // the name is free for its real owner at once
     assert.equal((await listClaimable(pool, "PCA")).find((n) => n.id === ids["PCA:สมชาย"])?.claimed, false);
     // the undone number and LINE account cannot claim again for 24 h, any name
-    assert.equal(await claimBlocked(pool, "0900000207", "U-x"), true);
-    assert.equal(await claimBlocked(pool, "0900000209", "U-e"), true);
-    assert.equal((await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000207", "U-new"))).status, "blocked");
-    assert.equal((await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000209", "U-e"))).status, "blocked");
+    // (which of the two: this LINE account's claim was undone, so no other number helps; or only the number's)
+    assert.equal(await claimBlocked(pool, "0900000207", "U-x"), "phone");
+    assert.equal(await claimBlocked(pool, "0900000209", "U-e"), "line");
+    assert.equal(await claimBlocked(pool, "0900000207", "U-e"), "line", "the LINE account wins over the number");
+    assert.deepEqual(await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000207", "U-new")), { status: "blocked", by: "phone" });
+    assert.deepEqual(await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000209", "U-e")), { status: "blocked", by: "line" });
     assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000210", "U-owner"))).status, "claimed", "others may claim");
     await pool.query("UPDATE user_claims SET undone_at = now() - interval '25 hours' WHERE id = $1", [r.claim.id]);
-    assert.equal(await claimBlocked(pool, "0900000207", "U-e"), false);
+    assert.equal(await claimBlocked(pool, "0900000207", "U-e"), null);
     assert.equal((await claimUser(pool, args(ids["PCA:ชัยวัฒน์"], "0900000207", "U-e"))).status, "claimed");
   });
 
@@ -366,8 +366,8 @@ describe("users and claims (database)", () => {
     await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE id = $1", [a.rows[0].id]);
     const b = await hold(ids["PCA:กมล"], "0900000218", "U-n");
     await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'inactive' WHERE id = $1", [b.rows[0].id]);
-    assert.equal(await claimBlocked(pool, "0900000217", "U-m"), false);
-    assert.equal(await claimBlocked(pool, "0900000218", "U-n"), false);
+    assert.equal(await claimBlocked(pool, "0900000217", "U-m"), null);
+    assert.equal(await claimBlocked(pool, "0900000218", "U-n"), null);
     assert.equal((await claimUser(pool, args(ids["PCA:สมชาย"], "0900000217", "U-m"))).status, "claimed");
     assert.equal((await claimUser(pool, args(ids["PCA:กมล"], "0900000218", "U-n"))).status, "claimed");
   });
@@ -389,7 +389,7 @@ describe("users and claims (database)", () => {
     const old = await undoClaim(pool, first.claim.id, "111");
     assert.equal(old.outcome, "already");
     assert.equal((await getClaim(pool, first.claim.id))?.undoReason, "manual", "the reason stays");
-    assert.equal(await claimBlocked(pool, "0900000212", "U-g"), false, "no block from a tap on an ended claim");
+    assert.equal(await claimBlocked(pool, "0900000212", "U-g"), null, "no block from a tap on an ended claim");
     assert.deepEqual(await userForPhone(pool, "0900000213"), second.user, "the newer claim stands");
   });
 
@@ -401,44 +401,61 @@ describe("users and claims (database)", () => {
     if (chatIds !== null) Object.assign(process.env, TG, { TELEGRAM_CHAT_ID: chatIds });
   }
 
-  test("claims are open only with Telegram and at least one numeric admin id; otherwise both claim endpoints send to the request", async () => {
-    const grant = await signAccess({ sub: "U-off", name: "x", picture: null, phone: "0900000216" }, TEST_SESSION_SECRET);
-    const cookie = `access=${grant}`;
-    const post = (userId: unknown = Number(ids["PCA:สมชาย"])) =>
-      claimRoute(
+  test("claims work without Telegram (names come only from the list); claimUndoAvailable() only says whether an admin can undo", async () => {
+    const post = async (phone: string, sub: string, userId: unknown = Number(ids["PCA:สมชาย"])) => {
+      const grant = await signAccess({ sub, name: "x", picture: null, phone }, TEST_SESSION_SECRET);
+      return claimRoute(
         new NextRequest("http://localhost:3999/api/auth/claim", {
           method: "POST",
-          headers: { cookie, origin: "http://localhost:3999", "content-type": "application/json" },
+          headers: { cookie: `access=${grant}`, origin: "http://localhost:3999", "content-type": "application/json" },
           body: JSON.stringify({ userId }),
         }),
       );
-    const list = () => listRoute(new NextRequest("http://localhost:3999/api/auth/claim/list?type=PCA", { headers: { cookie } }));
+    };
+    const list = async () => {
+      const grant = await signAccess({ sub: "U-list", name: "x", picture: null, phone: "0900000219" }, TEST_SESSION_SECRET);
+      return listRoute(new NextRequest("http://localhost:3999/api/auth/claim/list?type=PCA", { headers: { cookie: `access=${grant}` } }));
+    };
     try {
-      // unset, only a group and a channel (nobody may tap undo), malformed
+      // unset, only a group and a channel (nobody may tap undo), malformed: no undo, but claims and the list work
       for (const chats of [null, "-1001234567890, @orskh_alerts", "not a chat"]) {
         telegram(chats);
-        assert.equal(claimsEnabled(), false, String(chats));
-        for (const res of [await post(), await list()]) {
-          assert.equal(res.status, 503, String(chats));
-          assert.deepEqual(await res.json(), { error: MSG.claimsOff, reason: "claims_off", redirect: "/login/request" });
-        }
+        assert.equal(claimUndoAvailable(), false, String(chats));
+        assert.equal((await list()).status, 200, String(chats));
       }
-      assert.equal((await pool.query("SELECT count(*)::int AS n FROM user_claims")).rows[0].n, 0, "nothing claimed");
-      assert.equal((await pool.query("SELECT count(*)::int AS n FROM login_events")).rows[0].n, 0, "no attempt counted");
+      telegram(null);
+      const ok = await post("0900000216", "U-off");
+      assert.equal(ok.status, 200);
+      assert.ok(ok.headers.get("set-cookie")?.includes("session="), "signed in");
+      assert.equal((await current(ids["PCA:สมชาย"]))?.phone, "0900000216");
+      // the name is now locked for everyone else
+      const other = await post("0900000217", "U-off2");
+      assert.equal(other.status, 409);
+      assert.deepEqual(await other.json(), { error: MSG.claimTaken, reason: "taken" });
+      assert.ok(!MSG.claimTaken.includes("คำขอ") && MSG.claimTaken.includes("ติดต่อผู้ดูแล"));
+      // a doctor's name cannot be claimed by number
+      const dr = await post("0900000218", "U-dr", Number(ids["DR:หมอ"]));
+      assert.equal(dr.status, 409);
+      assert.equal((await dr.json()).reason, "unavailable");
       telegram("-1001234567890, 111");
-      assert.equal(claimsEnabled(), true, "one person id is enough");
-      assert.equal((await list()).status, 200);
+      assert.equal(claimUndoAvailable(), true, "one person id is enough");
+      // after an administrator's undo the refusal says whose claim it was: another number helps only with "phone"
+      const held = await pool.query<{ id: string }>("SELECT id::text AS id FROM user_claims WHERE phone = '0900000216' AND undone_at IS NULL");
+      assert.equal((await undoClaim(pool, held.rows[0].id, "111")).outcome, "undone");
+      const byPhone = await post("0900000216", "U-off3", Number(ids["PCA:กมล"]));
+      assert.equal(byPhone.status, 403);
+      assert.deepEqual(await byPhone.json(), { error: MSG.claimBlocked, reason: "blocked", by: "phone" });
+      const byLine = await post("0900000220", "U-off", Number(ids["PCA:กมล"]));
+      assert.equal(byLine.status, 403);
+      assert.deepEqual(await byLine.json(), { error: MSG.claimBlockedLine, reason: "blocked", by: "line" });
+      assert.ok(MSG.claimBlockedLine.includes("บัญชี LINE นี้") && MSG.claimBlocked.includes("เบอร์นี้"));
+      assert.equal(await current(ids["PCA:กมล"]), null, "nothing claimed");
       // ids outside users.id's range (an integer column), or not whole numbers, are refused before the database
       for (const bad of [2147483648, "2147483648", "99999999999", 0, -1, 1.5, "1; DROP TABLE users", "", null, "01"]) {
-        const res = await post(bad);
+        const res = await post("0900000216", "U-off", bad);
         assert.equal(res.status, 400, JSON.stringify(bad));
         assert.equal((await res.json()).error, MSG.claimPick);
       }
-      // a number with an access request goes to it (checked inside the claim transaction): 409 and the redirect
-      await createRequest(pool, { phone: "0900000216", sub: "U-off", lineName: "x", firstName: "ทดสอบ", lastName: "ระบบ", position: "DR", ip: "" });
-      const r = await post();
-      assert.equal(r.status, 409);
-      assert.deepEqual(await r.json(), { error: MSG.claimRequested, reason: "requested", redirect: "/login/request" });
     } finally {
       telegram(null);
     }

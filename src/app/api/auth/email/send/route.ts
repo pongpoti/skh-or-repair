@@ -14,7 +14,8 @@ const MIN_RESPONSE_MS = 700;
 
 /**
  * POST {userId}: emails a new sign-in code to every address of this doctor (lib/email-otp.ts), for the LINE account of
- * this browser. Answers the addresses masked ("so•••@gmail.com") and the wait before another code.
+ * this browser; refused for a name another LINE account holds. Answers the addresses masked ("so•••@gmail.com") and the
+ * wait before another code.
  */
 export async function POST(req: NextRequest) {
   const started = Date.now();
@@ -50,6 +51,10 @@ export async function POST(req: NextRequest) {
     await sleepUntil(started, MIN_RESPONSE_MS);
     if (result.status === "unavailable") return json({ error: MSG.emailNotDoctor, reason: "unavailable" }, 400);
     if (result.status === "no_email") return json({ error: MSG.emailNone, reason: "no_email" }, 400);
+    if (result.status === "taken") {
+      await event("email_refused");
+      return json({ error: MSG.emailTaken, reason: "taken" }, 409);
+    }
     if (result.status === "limited") {
       await event("email_rate_limited");
       // Whether this LINE account has a usable code for this doctor (it can then be typed in).

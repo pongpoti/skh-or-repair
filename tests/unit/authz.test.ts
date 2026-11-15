@@ -32,12 +32,15 @@ async function approve(phone: string, status = "approved") {
   );
 }
 
-/** A user (active or not) with a current claim of the number (each user gets its own invented name). */
-async function claimed(phone: string, active = true) {
+/**
+ * A user (active or not) with a current claim of the number (each user gets its own invented name): a nurse, or with
+ * `type` "DR" a doctor's name claimed by number by hand (which holds nothing: doctors sign in by email only).
+ */
+async function claimed(phone: string, active = true, type: "RN" | "DR" = "RN") {
   const p = await pool();
   const { rows } = await p.query<{ id: string }>(
-    "INSERT INTO users (first_name, last_name, type, subtype, active) VALUES ('ทดสอบ', $1, 'DR', 'ORTHO', $2) RETURNING id::text AS id",
-    [phone, active],
+    "INSERT INTO users (first_name, last_name, type, subtype, active) VALUES ('ทดสอบ', $1, $3, 'OR', $2) RETURNING id::text AS id",
+    [phone, active, type],
   );
   await p.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, $2, $3)", [rows[0].id, phone, `U-${phone}`]);
 }
@@ -74,7 +77,7 @@ async function clear() {
   await (await pool()).query("TRUNCATE access_requests, cases, mx_members, user_claims, email_codes, user_emails, users");
 }
 
-describe("authorization: a number with a current claim on an active user (a claimed name) or an approved access request (or ALLOWED_PHONES)", () => {
+describe("authorization: a number with a current claim on an active user (a claimed name from the list), or ALLOWED_PHONES", () => {
   before(clear);
   beforeEach(() => resetAuthzCache());
   afterEach(async () => {
@@ -126,18 +129,28 @@ describe("authorization: a number with a current claim on an active user (a clai
     assert.equal(await isAuthorizedPhone("0910000014", { fresh: true }), false, "an undone claim");
   });
 
-  test("approved requests authorize; pending and rejected ones do not", async () => {
+  test("a doctor's name claimed by number authorizes nobody (doctors sign in by email only), cached or read now", async () => {
+    await claimed("0910000021", true, "DR");
+    await claimed("0910000022");
+    assert.equal(await isAuthorizedPhone("0910000021"), false, "not in the cached list");
+    assert.equal(await isAuthorizedPhone("0910000021", { fresh: true }), false, "nor read now");
+    assert.equal(await isListedUser("0910000021"), false, "not listed either");
+    assert.equal(await isAuthorizedPhone("0910000022"), true, "a nurse's claim does");
+  });
+
+  test("access requests (typed names) authorize nobody, whatever their status", async () => {
     await approve("0910000002");
     await approve("0910000005", "pending");
     await approve("0910000006", "rejected");
-    assert.equal(await isAuthorizedPhone("+66910000002"), true);
-    assert.equal(await isAuthorizedPhone("0910000005"), false);
-    assert.equal(await isAuthorizedPhone("0910000006"), false);
+    for (const phone of ["+66910000002", "0910000005", "0910000006"]) {
+      assert.equal(await isAuthorizedPhone(phone), false, phone);
+      assert.equal(await isAuthorizedPhone(phone, { fresh: true }), false, phone);
+    }
   });
 
-  test("one cached list holds claimed names and approved requests", async () => {
+  test("one cached list holds the claimed names", async () => {
     await claimed("0910000001");
-    await approve("0910000002");
+    await claimed("0910000002");
     assert.equal(await isAuthorizedPhone("0910000001"), true); // loads the list
     process.env.DATABASE_URL = DOWN;
     const { value, logged } = await quietly(async () => [
@@ -168,10 +181,10 @@ describe("authorization: a number with a current claim on an active user (a clai
 
   test("cache: a fresh check that reads a removal also drops the number from this instance's cached list", async () => {
     await claimed("0910000001");
-    await approve("0910000002");
+    await claimed("0910000002");
     assert.equal(await isAuthorizedPhone("0910000001"), true); // loads the list
     await setActive("0910000001", false);
-    await (await pool()).query("UPDATE access_requests SET status = 'rejected' WHERE phone = '0910000002'");
+    await undo("0910000002");
     // e.g. the code check: the database says no ...
     assert.equal(await isAuthorizedPhone("0910000001", { fresh: true }), false);
     assert.equal(await isAuthorizedPhone("0910000002", { fresh: true }), false);
@@ -188,10 +201,10 @@ describe("authorization: a number with a current claim on an active user (a clai
     assert.equal(await isAuthorizedPhone("0910000001"), true, "still in the cached list");
   });
 
-  test("cache: a revoked request applies once the cached list expires", async () => {
-    await approve("0910000002");
+  test("cache: an ended claim applies once the cached list expires", async () => {
+    await claimed("0910000002");
     assert.equal(await isAuthorizedPhone("0910000002"), true);
-    await (await pool()).query("UPDATE access_requests SET status = 'rejected', decided_at = now() WHERE phone = '0910000002'");
+    await undo("0910000002");
     assert.equal(await isAuthorizedPhone("0910000002"), true, "still cached");
     advance(LIST_TTL_MS - 1000);
     assert.equal(await isAuthorizedPhone("0910000002"), true, "within the cache window");
@@ -199,21 +212,20 @@ describe("authorization: a number with a current claim on an active user (a clai
     assert.equal(await isAuthorizedPhone("0910000002"), false, "reloaded after the window");
   });
 
-  test("cache: a number added or approved after the list was loaded is found at once, by a lookup of that number", async () => {
-    // the list is loaded for another number (e.g. another approved user's request on this instance) ...
+  test("cache: a number that claims a name after the list was loaded is found at once, by a lookup of that number", async () => {
+    // the list is loaded for another number ...
     assert.equal(await isAuthorizedPhone("0910000007"), false);
-    // ... then someone claims a name or is approved elsewhere (the webhook and
-    // /api/auth/access/complete run in other functions than the proxy on Vercel, so noteAuthorized() never reaches
-    // this cache)
+    // ... then someone claims a name elsewhere (/api/auth/claim runs in another function than the proxy on Vercel,
+    // so noteAuthorized() never reaches this cache)
     await claimed("0910000008");
-    await approve("0910000009");
+    await claimed("0910000009");
     assert.equal(await isAuthorizedPhone("0910000008"), true, "no wait for a reload");
     assert.equal(await isAuthorizedPhone("0910000009"), true, "no wait for a reload");
     assert.equal(await isAuthorizedPhone("0910000009"), true, "now in the cached list");
     // fresh: true reads the database right away
-    await approve("0910000010");
+    await claimed("0910000010");
     assert.equal(await isAuthorizedPhone("0910000010", { fresh: true }), true);
-    // this instance learns about its own approvals immediately
+    // this instance learns about its own claims immediately
     process.env.DATABASE_URL = DOWN;
     noteAuthorized("091-000-0011");
     assert.equal(await isAuthorizedPhone("0910000011"), true);
@@ -237,22 +249,22 @@ describe("authorization: a number with a current claim on an active user (a clai
 
   test("concurrent checks while the list loads wait for that load (cold and expired cache)", async () => {
     await claimed("0910000001");
-    await approve("0910000002");
+    await claimed("0910000002");
     const four = (phone: string) => Promise.all(Array.from({ length: 4 }, () => isAuthorizedPhone(phone)));
     assert.deepEqual(await four("0910000002"), [true, true, true, true], "cold cache");
     advance(LIST_TTL_MS);
     assert.deepEqual(await four("0910000001"), [true, true, true, true], "expired cache being reloaded");
     // removed numbers are refused by all of them
-    await (await pool()).query("UPDATE access_requests SET status = 'rejected' WHERE phone = '0910000002'");
+    await undo("0910000002");
     await setActive("0910000001", false);
     advance(LIST_TTL_MS);
     assert.deepEqual(await four("0910000002"), [false, false, false, false]);
     assert.deepEqual(await four("0910000001"), [false, false, false, false]);
   });
 
-  test("fail closed: with the database down, table-only and approved-only numbers stop working after the cache window", async () => {
+  test("fail closed: with the database down, claimed numbers stop working after the cache window (ALLOWED_PHONES does not)", async () => {
     await claimed("0910000001");
-    await approve("0910000002");
+    await claimed("0910000002");
     assert.equal(await isAuthorizedPhone("0910000002"), true);
     process.env.DATABASE_URL = DOWN;
     assert.equal(await isAuthorizedPhone("0910000001"), true, "cached list still valid");

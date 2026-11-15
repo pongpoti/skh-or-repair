@@ -7,7 +7,7 @@ export type { SessionUser };
 
 /**
  * Authoritative session check: valid signed JWT AND the phone number is still authorized
- * (a claimed name on the users list, an approved access request, or ALLOWED_PHONES; see lib/authz.ts), or, for a
+ * (a claimed name on the users list or ALLOWED_PHONES; see lib/authz.ts), or, for a
  * doctor signed in by email, this LINE account still holds the doctor's (active) name.
  */
 export async function userFromToken(token: string | undefined): Promise<SessionUser | null> {

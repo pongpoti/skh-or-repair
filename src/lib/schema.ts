@@ -99,8 +99,10 @@ CREATE INDEX IF NOT EXISTS user_claims_user_idx ON user_claims (user_id, created
 -- Doctors (users of type DR) prove who they are with a code sent by email instead of an SMS code (lib/email-otp.ts).
 -- Such a claim is made by the doctor's LINE account and holds no number: via = 'email', phone NULL, and
 -- email_verified_at is when the last email code was checked (a LINE sign-in skips the code for 180 days after it).
--- 'replaced' ends a claim when the doctor proves the name by email from another LINE account (the code went to their
--- own address, so the newer proof wins). Applied to existing databases too: claims made before keep via = 'phone'.
+-- 'replaced' ends a claim that holds nothing (a doctor's name by number: doctors sign in by email only; an email claim
+-- on a name no longer DR) when its name, number or LINE account claims again. A name another LINE account holds by
+-- email is refused, never taken over.
+-- Applied to existing databases too: claims made before keep via = 'phone'.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'user_claims'::regclass AND attname = 'via' AND NOT attisdropped) THEN
@@ -159,9 +161,8 @@ CREATE INDEX IF NOT EXISTS email_codes_sub_created_idx ON email_codes (line_sub,
 CREATE INDEX IF NOT EXISTS email_codes_ip_created_idx ON email_codes (ip, created_at);
 CREATE INDEX IF NOT EXISTS email_codes_created_idx ON email_codes (created_at);
 
--- Access requests from verified numbers that hold no claimed name (decided in Telegram). position is a user type.
--- A number is authorized while it has an approved row; revoke with
--- UPDATE access_requests SET status = 'rejected', decided_at = now() WHERE phone = '0812345678' AND status = 'approved'.
+-- Access requests (typed names, decided in Telegram) from before 15 Nov 2026, kept as history only: names now come
+-- only from users, and no row here authorizes or names anyone. position is a user type.
 CREATE TABLE IF NOT EXISTS access_requests (
   id           bigserial   PRIMARY KEY,
   phone        text        NOT NULL,

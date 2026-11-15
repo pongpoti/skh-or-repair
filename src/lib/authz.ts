@@ -1,23 +1,23 @@
 import "server-only";
-import { approvedPhones, isApproved } from "./access";
 import { db } from "./db";
 import { isAllowedPhone, normalizePhone } from "./phone";
 import { activeEmailClaims, activePhones, holdsActiveName, userForEmailClaim } from "./user-list";
 
 /**
- * Who may open the board: a mobile number with a current claim on an active user of the `users` table (a claimed name) OR with an
- * approved access request, or one in the optional break-glass ALLOWED_PHONES (env, never needs the database). The
- * database part is one list (numbers of active claimed names + approved requests), cached per server instance:
- * - the list is reloaded at least every LIST_TTL_MS, so a removal (active = false), an undone claim or a revoked
- *   request applies within that time on every instance (at once on the instance that undid the claim:
+ * Who may open the board: a mobile number with a current claim on an active user of the `users` table (a claimed name
+ * from the staff list), or one in the optional break-glass ALLOWED_PHONES (env, never needs the database). Access
+ * requests (typed names) are gone: an approved one from before authorizes nothing. The database part is one list
+ * (numbers of active claimed names), cached per server instance:
+ * - the list is reloaded at least every LIST_TTL_MS, so a removal (active = false) or an undone claim applies within
+ *   that time on every instance (at once on the instance that undid the claim:
  *   noteRevoked(), shared by every route of the process); callers that arrive while a reload runs wait for it (never answered from a missing or expired
  *   list);
- * - a number missing from a current list is looked up on its own (two indexed queries): it may have been added or
- *   approved since, possibly on another instance (on Vercel the proxy never sees the webhook's noteAuthorized()).
+ * - a number missing from a current list is looked up on its own (two indexed queries): it may have been claimed
+ *   since, possibly on another instance (the claim route's noteAuthorized() reaches only its own instance).
  *   A miss is remembered for RETRY_MS, so a revoked session cannot query the database on every request. A lookup
  *   that reads "not authorized" (e.g. the fresh check after a code) also drops the number from this instance's list;
  * - fail closed: when the list cannot be loaded and the last copy is older than LIST_TTL_MS, only ALLOWED_PHONES
- *   is authorized (claimed names and approved requests are not).
+ *   is authorized (claimed names are not).
  * A doctor signed in by email (lib/email-otp.ts) holds no number: the same list holds the current email claims on
  * active users as emailKey(users.id, LINE account), checked by isAuthorizedDoctor() exactly like a number.
  */
@@ -47,11 +47,10 @@ function emailKey(userId: string, sub: string): string {
   return `email:${userId}:${sub}`;
 }
 
-/** Numbers of active claimed names and of approved requests, and the email claims of doctors, as one set. */
+/** Numbers of active claimed names and the email claims of doctors, as one set. */
 async function listed(): Promise<Set<string>> {
   const pool = await db();
-  const [claimed, approved, email] = await Promise.all([activePhones(pool), approvedPhones(pool), activeEmailClaims(pool)]);
-  for (const e of approved) claimed.add(e);
+  const [claimed, email] = await Promise.all([activePhones(pool), activeEmailClaims(pool)]);
   for (const [userId, sub] of email) claimed.add(emailKey(userId, sub));
   return claimed;
 }
@@ -78,9 +77,9 @@ function fresh(now: number): boolean {
 
 type Check = (pool: Awaited<ReturnType<typeof db>>) => Promise<boolean>;
 
-/** Whether the number holds an active name or an approved request, read now. */
+/** Whether the number holds an active name, read now. */
 function phoneCheck(e: string): Check {
-  return async (pool) => (await holdsActiveName(pool, e)) || (await isApproved(pool, e));
+  return (pool) => holdsActiveName(pool, e);
 }
 
 /**
@@ -159,7 +158,7 @@ export async function isListedUser(phone: string): Promise<boolean> {
   }
 }
 
-/** This instance learns about an approval or a claim immediately (other instances find it on their next miss). */
+/** This instance learns about a claim immediately (other instances find it on their next miss). */
 export function noteAuthorized(phone: string): void {
   const e = normalizePhone(phone);
   if (!e) return;

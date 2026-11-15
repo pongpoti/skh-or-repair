@@ -1,24 +1,13 @@
 import "server-only";
 import type { Pool } from "pg";
-import { decideRequest, isApproved, type DecideResult, type TelegramRef } from "./access";
-import { noteAuthorized, noteDoctorRevoked, noteRevoked } from "./authz";
+import { noteDoctorRevoked, noteRevoked } from "./authz";
 import { db } from "./db";
 import { ConfigError, sessionSecret, telegramConfig, type TelegramConfig } from "./env";
 import { logEvent } from "./otp";
 import { isAllowedPhone } from "./phone";
 import { safeEqual } from "./security";
-import { undoClaim, type UndoResult } from "./user-list";
-import {
-  adminIds,
-  answerCallback,
-  buildClaimUndoneMessage,
-  buildDecidedMessage,
-  healWebhook,
-  markDecided,
-  parseCallbackData,
-  parseClaimCallbackData,
-  webhookSecret,
-} from "./telegram";
+import { undoClaim, type TelegramRef, type UndoResult } from "./user-list";
+import { adminIds, answerCallback, buildClaimUndoneMessage, healWebhook, markDecided, parseClaimCallbackData, webhookSecret } from "./telegram";
 
 /** Largest update read (a callback_query carries the tapped message, a few KB). */
 export const WEBHOOK_MAX_BYTES = 64 * 1024;
@@ -35,19 +24,14 @@ const OK: WebhookReply = { status: 200, body: { ok: true } };
 
 // Shown to the person who tapped (answerCallbackQuery).
 export const ANSWERS = {
-  // Nothing is sent to the requester (no SMS, which would cost credit): their waiting page signs them in by itself.
-  approved: "อนุมัติแล้ว หน้ารออนุมัติของผู้ขอจะเข้าสู่ระบบให้เอง",
-  rejected: "บันทึกว่าไม่อนุมัติแล้ว",
-  notAdmin: "คุณไม่มีสิทธิ์พิจารณาคำขอนี้",
-  alreadyApproved: "คำขอนี้พิจารณาไปแล้ว (อนุมัติ)",
-  alreadyRejected: "คำขอนี้พิจารณาไปแล้ว (ไม่อนุมัติ)",
-  missing: "ไม่พบคำขอนี้",
+  notAdmin: "คุณไม่มีสิทธิ์ดำเนินการนี้",
+  // anything but the undo button, the approve and reject buttons of the former access requests ("ox:") included
   invalid: "คำสั่งไม่ถูกต้อง",
   failed: "บันทึกไม่สำเร็จ กรุณาลองใหม่",
   // undo of a claimed name ("oc:<claim id>:u")
   claimUndone: "ยกเลิกการยืนยันชื่อแล้ว ผู้ใช้นี้จะออกจากระบบภายใน 1 นาที",
-  // the number stays authorized by an approved access request or ALLOWED_PHONES (revoke those on their own)
-  claimUndoneStillAllowed: "ยกเลิกการยืนยันชื่อแล้ว แต่เบอร์นี้ยังเข้าใช้งานได้ เพราะมีคำขอที่อนุมัติแล้วหรืออยู่ใน ALLOWED_PHONES",
+  // the number stays authorized by ALLOWED_PHONES (remove it there)
+  claimUndoneStillAllowed: "ยกเลิกการยืนยันชื่อแล้ว แต่เบอร์นี้ยังเข้าใช้งานได้ เพราะอยู่ใน ALLOWED_PHONES",
   claimAlready: "ดำเนินการไปแล้ว",
   claimMissing: "ไม่พบการยืนยันชื่อนี้",
 } as const;
@@ -81,11 +65,10 @@ function tappedMessage(m: unknown): TelegramRef | null {
  * Handles one webhook call. Only Telegram knows the secret header (derived, see webhookSecret()); a wrong or
  * missing one is refused before the body is read, and the current secret is registered again in case Telegram
  * still sends one from before a rotation (healWebhook()). Authentic updates always get 200 quickly (Telegram
- * retries anything else): only callback_query taps by an id in TELEGRAM_CHAT_ID change anything: the approve and
- * reject buttons of access requests ("ox:") and the undo button of claimed names ("oc:", undoTap()). Each is a single
- * conditional UPDATE, so a second tap or a redelivered update changes nothing.
- * Telegram calls run after the response. Request content is never echoed. The requester is not messaged: the waiting
- * page signs in by itself, and someone who closed it signs in again with LINE and an SMS code.
+ * retries anything else): only the undo button of a claimed name ("oc:", undoTap()), tapped by an id in
+ * TELEGRAM_CHAT_ID, changes anything. It is a single conditional UPDATE, so a second tap or a redelivered update
+ * changes nothing. Anything else (the buttons of the former access requests among it) is answered as invalid.
+ * Telegram calls run after the response.
  */
 export async function handleTelegramWebhook(
   headers: Headers,
@@ -99,7 +82,7 @@ export async function handleTelegramWebhook(
     if (!cfg) return { status: 404, body: { ok: false } };
     expected = webhookSecret(cfg.token, sessionSecret());
   } catch (e) {
-    if (e instanceof ConfigError) console.error("[access] webhook not configured:", e.names.join(", "));
+    if (e instanceof ConfigError) console.error("[telegram] webhook not configured:", e.names.join(", "));
     return { status: 503, body: { ok: false } };
   }
   if (!safeEqual(headers.get("x-telegram-bot-api-secret-token") ?? "", expected)) {
@@ -122,43 +105,7 @@ export async function handleTelegramWebhook(
   if (claimTap) {
     return undoTap(claimTap.claimId, by, tapperName(cq.from as Record<string, unknown>), cq.message, queryId, reply, defer);
   }
-  const action = parseCallbackData(cq.data);
-  if (!action) {
-    reply(ANSWERS.invalid);
-    return OK;
-  }
-
-  let pool: Pool;
-  let result: DecideResult;
-  try {
-    pool = await db();
-    result = await decideRequest(pool, action.id, action.action === "approve" ? "approved" : "rejected", by);
-  } catch (e) {
-    console.error("[access] decision failed:", (e as Error).message);
-    reply(ANSWERS.failed);
-    return OK;
-  }
-  if (result.outcome === "missing") {
-    reply(ANSWERS.missing);
-    return OK;
-  }
-  const r = result.request;
-  if (result.outcome === "already") {
-    reply(r.status === "approved" ? ANSWERS.alreadyApproved : ANSWERS.alreadyRejected);
-    return OK;
-  }
-
-  const approved = r.status === "approved";
-  if (approved) noteAuthorized(r.phone);
-  await logEvent(pool, { event: approved ? "access_approved" : "access_rejected", sub: r.lineSub, phone: r.phone });
-  const refs = [...r.tgMessages];
-  const tapped = tappedMessage(cq.message);
-  if (tapped && !refs.some((x) => x.chat_id === tapped.chat_id && x.message_id === tapped.message_id)) refs.push(tapped);
-  const html = buildDecidedMessage(r, approved ? "approved" : "rejected", r.decidedAt ?? new Date());
-  defer(async () => {
-    await answerCallback(queryId, approved ? ANSWERS.approved : ANSWERS.rejected);
-    await markDecided(refs, html);
-  });
+  reply(ANSWERS.invalid);
   return OK;
 }
 
@@ -166,11 +113,10 @@ export async function handleTelegramWebhook(
  * "↩️ ยกเลิกการยืนยัน" on a claim message, by an id in TELEGRAM_CHAT_ID (checked by the caller): ends the claim (lib/user-list.ts
  * undoClaim(): one conditional UPDATE of user_claims, undo_reason 'admin'; users is never written), frees the name, deletes
  * the number's LINE bindings and drops it from this instance's authorization cache (other instances within 60 s), so
- * the person's session stops working and signing in again needs LINE and an SMS code; they cannot claim again for 24 h
- * (an access request stays possible). Each claim message is edited to say who undid it, without the button. A number
- * that stays authorized another way (ALLOWED_PHONES, an approved access request) is not signed out, and the answer
- * says so. A second tap, or a tap on a claim that already ended (undone, released by hand, or closed by a newer claim of
- * the same person), changes nothing.
+ * the person's session stops working and signing in again needs LINE and an SMS code; they cannot claim again for 24 h.
+ * Each claim message is edited to say who undid it, without the button. A number that stays authorized another way
+ * (ALLOWED_PHONES) is not signed out, and the answer says so. A second tap, or a tap on a claim that already ended
+ * (undone, released by hand, or closed by a newer claim of the same person), changes nothing.
  */
 async function undoTap(
   claimId: string,
@@ -204,8 +150,7 @@ async function undoTap(
   else noteDoctorRevoked(claim.userId, claim.lineSub);
   await logEvent(pool, { event: "claim_undone", sub: claim.lineSub, phone: claim.phone });
   // The person is signed out only if nothing else authorizes the number; say so when something does.
-  const stillAllowed =
-    claim.phone !== null && (isAllowedPhone(claim.phone) || (await isApproved(pool, claim.phone).catch(() => false)));
+  const stillAllowed = claim.phone !== null && isAllowedPhone(claim.phone);
   const refs = [...claim.tgMessages];
   const tapped = tappedMessage(message);
   if (tapped && !refs.some((x) => x.chat_id === tapped.chat_id && x.message_id === tapped.message_id)) refs.push(tapped);

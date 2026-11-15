@@ -7,6 +7,7 @@ import { getRepairPeriods } from "@/lib/repair-store";
 import { listActiveUsers, listMx, type MxMember } from "@/lib/roles";
 import { thaiDateTime } from "@/lib/telegram";
 import { roleLabel } from "@/lib/user-labels";
+import { HOLDS } from "@/lib/user-list";
 
 /**
  * What the admin page's two repair-phase sections show (components/repair-periods-form.tsx and mx-members.tsx), shaped
@@ -50,15 +51,15 @@ const addedOnFormat = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok
 
 /**
  * Who saved the dates last and when. repair_periods.updated_by is the admin's LINE sub, which means nothing to a reader,
- * so it is named as the board names people (lib/auth/display-name.ts): the name their LINE account currently holds,
- * else their LINE display name. Both halves are saved in one statement, so the newest row speaks for both; a row the
- * seed wrote has no updated_by and means nobody has changed the planned dates.
+ * so it is named as the board names people (lib/auth/display-name.ts): the active name their LINE account currently
+ * holds (user-list HOLDS), else their LINE display name. Both halves are saved in one statement, so the newest row speaks
+ * for both; a row the seed wrote has no updated_by and means nobody has changed the planned dates.
  */
 async function lastChange(pool: Pool): Promise<RepairView["changed"]> {
   const { rows } = await pool.query<{ updated_at: Date; updated_by: string | null; claimed: string | null; line_name: string | null }>(
     `SELECT r.updated_at, r.updated_by,
             (SELECT u.first_name || ' ' || u.last_name FROM user_claims c JOIN users u ON u.id = c.user_id
-             WHERE c.line_sub = r.updated_by AND c.undone_at IS NULL LIMIT 1) AS claimed,
+             WHERE c.line_sub = r.updated_by AND c.undone_at IS NULL AND u.active AND ${HOLDS} LIMIT 1) AS claimed,
             (SELECT b.display_name FROM line_bindings b WHERE b.line_sub = r.updated_by) AS line_name
      FROM repair_periods r
      ORDER BY r.updated_by IS NULL, r.updated_at DESC

@@ -37,8 +37,8 @@ const allowed = new Set(
 // Outside the break-glass list the app needs the database to accept the session (lib/authz.ts).
 if (!allowed.has(phone)) {
   console.error(
-    "note: the app accepts this session only while the number holds a current claim on an active user (or an " +
-      "approved access request); add it to ALLOWED_PHONES in .env.local to work without a database",
+    "note: the app accepts this session only while the number holds a current claim on an active user who is not a " +
+      "doctor; add it to ALLOWED_PHONES in .env.local to work without a database",
   );
 }
 

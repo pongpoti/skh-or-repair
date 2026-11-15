@@ -1,5 +1,4 @@
 import { after, NextResponse, type NextRequest } from "next/server";
-import { approvedRequest, latestRequest, viewFor } from "@/lib/access";
 import { isAuthorizedPhone } from "@/lib/authz";
 import { clearCookie, cookieName, setCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
@@ -9,9 +8,10 @@ import { countOtpPhones, logEvent, otpHistory, upsertBinding, verifyCode } from 
 import { normalizePhone } from "@/lib/phone";
 import { clientIp, readJsonBody, safeNextPath, userAgent } from "@/lib/security";
 import { smsTransport } from "@/lib/sms";
+import { isPhoneType } from "@/lib/user-labels";
 import { userForPhone } from "@/lib/user-list";
 import { alertsAfterVerify } from "@/lib/sms/alerts";
-import { claimsEnabled, notify, notifyVerified } from "@/lib/telegram";
+import { notify, notifyVerified } from "@/lib/telegram";
 import { signAccess, signSession, verifyPending } from "@/lib/tokens";
 
 export async function POST(req: NextRequest) {
@@ -57,15 +57,13 @@ export async function POST(req: NextRequest) {
       });
     }
     if (result.ok && !(await isAuthorizedPhone(phone, { fresh: true }))) {
-      // The number is proven but not authorized: no session. A short-lived access cookie lets this LINE account claim
-      // its name on the users list (/login/claim), or ask for access (/login/request) and wait for an administrator's
-      // decision. A number that already has a request (pending, approved or recently rejected) goes back to it, and
-      // every number goes to the request while claims are off (no Telegram administrator, claimsEnabled()).
+      // The number is proven but holds no name yet: no session. A short-lived access cookie lets this LINE account pick
+      // its own name from the staff list (/login/claim), opened at the position chosen before the number (body.as).
       await logEvent(pool, { event: "otp_verified_unlisted", sub: pending.sub, phone, ip, userAgent: ua });
-      const requested = !claimsEnabled() || viewFor(await latestRequest(pool, phone), pending.sub) !== "form";
+      const type = isPhoneType(body?.as) ? body.as : null;
       const grant = await signAccess({ sub: pending.sub, name: pending.name, picture: pending.picture, phone }, secret);
       const res = NextResponse.json(
-        { ok: true, redirect: requested ? "/login/request" : "/login/claim" },
+        { ok: true, redirect: type ? `/login/claim?type=${type}` : "/login/claim" },
         { headers: { "Cache-Control": "no-store" } },
       );
       clearCookie(res, "pending");
@@ -91,9 +89,7 @@ export async function POST(req: NextRequest) {
             console.error("[alert] user lookup failed:", (e as Error).message);
             return null;
           });
-          // No claimed name: the approved request (if any) gives the name and position the alert shows.
-          const requester = user ? null : await approvedRequest(pool, phone).catch(() => null);
-          await notifyVerified({ user, requester, lineName: pending.name, phone, at, history, verifiedPhones });
+          await notifyVerified({ user, lineName: pending.name, phone, at, history, verifiedPhones });
         });
       }
       const token = await signSession({ sub: pending.sub, phone, userId: null, name: pending.name, picture: pending.picture }, secret);

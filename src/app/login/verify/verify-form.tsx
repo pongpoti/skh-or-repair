@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Notice } from "@/components/auth-shell";
 import { waitText } from "@/lib/format";
+import { TYPE_LABELS, type PhoneUserType } from "@/lib/user-labels";
 
 type Step = "phone" | "code";
 
@@ -21,9 +22,10 @@ export interface ApiResult {
   ref?: string;
   /** a refused send: this LINE account has a usable code for the number, so it can still be typed in */
   codePending?: boolean;
-  /** access requests: the request's state and the form field an error refers to */
-  status?: string;
+  /** the form field an error refers to (a number the SMS cannot go to) */
   field?: string;
+  /** a refused claim (reason "blocked"): whose claim an administrator undid, this LINE account's or the number's */
+  by?: string;
 }
 
 export const NETWORK_ERROR = "เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่";
@@ -90,8 +92,28 @@ function StepCount({ n }: { n: 1 | 2 }) {
   );
 }
 
-/** `other`: the other way in (the doctors' email sign-in), shown under the number step only. */
-export function VerifyForm({ other }: { other?: React.ReactNode }) {
+/** The position chosen on step 1, with the way back to it (doctors are sent to the email sign-in from there). */
+function ChosenType({ type }: { type: PhoneUserType }) {
+  return (
+    <div className="mb-4 flex items-center justify-between gap-2 rounded-xl border border-line bg-white/70 py-0.5 pr-1 pl-3 text-sm">
+      <span className="min-w-0 text-ink-2">
+        <span className="max-[22.5rem]:sr-only">ตำแหน่ง </span>
+        <strong className="font-semibold text-ink" data-testid="verify-type">
+          {TYPE_LABELS[type]}
+        </strong>
+      </span>
+      <a className="text-btn shrink-0" href="/login/verify" data-testid="verify-change-type">
+        เปลี่ยน
+      </a>
+    </div>
+  );
+}
+
+/**
+ * The SMS sign-in of everyone but doctors: the number, then the code. `type` (the position picked on step 1) goes
+ * with the code, so a number that holds no name yet opens that position's names on /login/claim.
+ */
+export function VerifyForm({ type }: { type: PhoneUserType }) {
   const [step, setStep] = useState<Step>("phone");
   const [phone, setPhone] = useState("");
   // The number as the server read it (081-234-5678) and the reference printed in the SMS.
@@ -216,7 +238,7 @@ export function VerifyForm({ other }: { other?: React.ReactNode }) {
     setBusy(true);
     setError(null);
     try {
-      const { status, data } = await postJson("/api/auth/otp/verify", { phone, code: value });
+      const { status, data } = await postJson("/api/auth/otp/verify", { phone, code: value, as: type });
       if (status === 200 && data.ok) {
         window.location.assign(data.redirect ?? "/");
         return;
@@ -275,6 +297,7 @@ export function VerifyForm({ other }: { other?: React.ReactNode }) {
         }}
         noValidate
       >
+        <ChosenType type={type} />
         <StepCount n={1} />
         <label className={LABEL} htmlFor="phone">
           เบอร์มือถือ
@@ -312,7 +335,6 @@ export function VerifyForm({ other }: { other?: React.ReactNode }) {
         <button className="btn btn-primary mt-4 min-h-12 w-full" type="submit" disabled={busy || digits < 9 || phoneWait > 0}>
           {busy ? "กำลังส่ง…" : phoneWait > 0 ? `ส่งรหัสได้ใน ${waitText(phoneWait)}` : "ส่งรหัสทาง SMS"}
         </button>
-        {other}
       </form>
     );
   }

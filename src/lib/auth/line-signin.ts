@@ -11,7 +11,7 @@ import { signPending, signSession } from "@/lib/tokens";
  * SDK (/api/auth/line/liff) proved it:
  *   session - a doctor whose email code this LINE account checked within 180 days and who still holds the (active)
  *             name, or a LINE account whose SMS code was checked within 180 days for a number that is still authorized
- *             (a claimed name, an approved access request, or ALLOWED_PHONES);
+ *             (a claimed name or ALLOWED_PHONES);
  *   pending - anyone else, who proves a mobile number (or, for a doctor, a name by email code) at /login/verify.
  */
 export type LineSignIn = { kind: "session"; token: string } | { kind: "pending"; token: string };

@@ -4,16 +4,17 @@ import type { Pool, PoolClient } from "pg";
 import { withTx } from "./db";
 import { EMAIL_CODE_TTL_MIN, type EmailFailure, type EmailTransport } from "./email";
 import { generateCode, MAX_ATTEMPTS } from "./otp";
-import { fullName, getListedUser, type ListedUser } from "./user-list";
+import { fullName, getListedUser, HOLDS, type ListedUser } from "./user-list";
 
 type Q = Pool | PoolClient;
 
 /**
  * Doctors (users of type DR) sign in with a code sent to their own email addresses (table user_emails, from the
- * hospital's doctor directory) instead of an SMS code. After LINE, the doctor picks their name; the code goes to every
- * address on file for that name, and typing it proves the name: no number, no Telegram undo. The claim
- * (user_claims, via = 'email', phone NULL) belongs to the LINE account, which then signs in without a code for
- * EMAIL_BINDING_MAX_AGE_DAYS. Codes live in email_codes, as an HMAC only.
+ * hospital's doctor directory), never by SMS. After LINE, the doctor picks their name; the code goes to every address
+ * on file for that name, and typing it proves the name: no number, no Telegram undo. The claim (user_claims, via =
+ * 'email', phone NULL) belongs to the LINE account, which then signs in without a code for EMAIL_BINDING_MAX_AGE_DAYS.
+ * As for every name on the staff list, once a LINE account holds it the name is locked for everyone else: no code is
+ * sent for it to another LINE account, and only an administrator frees it. Codes live in email_codes, as an HMAC only.
  */
 
 export const EMAIL_LIMITS = {
@@ -32,23 +33,43 @@ export const EMAIL_BINDING_MAX_AGE_DAYS = 180;
 
 const DAY_S = 24 * 3600;
 
-/** One name on the doctor page. Whether it has an address is all that leaves the table (never the address). */
+/**
+ * One name on the doctor page. Whether it has an address, and whether another LINE account holds it, is all that leaves
+ * the tables (never the address, the number or who holds it).
+ */
 export interface DoctorName {
   id: string;
   first_name: string;
   last_name: string;
   subtype: string | null;
   has_email: boolean;
+  /** Held by another LINE account's email claim: cannot be picked. (A claim of it by number holds nothing.) */
+  claimed: boolean;
 }
 
-/** Active doctors in Thai order, each with whether an email code can be sent to them. */
-export async function listDoctors(pool: Q): Promise<DoctorName[]> {
+/** Active doctors in Thai order, each with whether an email code can be sent to them, as seen by this LINE account. */
+export async function listDoctors(pool: Q, sub: string): Promise<DoctorName[]> {
   const { rows } = await pool.query<DoctorName>(
     `SELECT u.id::text AS id, u.first_name, u.last_name, u.subtype,
-            EXISTS (SELECT 1 FROM user_emails e WHERE e.user_id = u.id) AS has_email
+            EXISTS (SELECT 1 FROM user_emails e WHERE e.user_id = u.id) AS has_email,
+            EXISTS (SELECT 1 FROM user_claims c
+                    WHERE c.user_id = u.id AND c.undone_at IS NULL AND c.via = 'email' AND c.line_sub <> $1) AS claimed
      FROM users u WHERE u.active AND u.type = 'DR'`,
+    [sub],
   );
   return rows.sort((a, b) => a.first_name.localeCompare(b.first_name, "th") || a.last_name.localeCompare(b.last_name, "th"));
+}
+
+/**
+ * True when a LINE account other than `sub` holds this doctor's name by email now (the name is then locked for `sub`).
+ * A claim of a doctor's name by number never locks it: it holds nothing (lib/user-list.ts), and the email code replaces it.
+ */
+export async function heldByOther(pool: Q, userId: string, sub: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    "SELECT 1 FROM user_claims WHERE user_id = $1 AND undone_at IS NULL AND via = 'email' AND line_sub <> $2",
+    [userId, sub],
+  );
+  return (rowCount ?? 0) > 0;
 }
 
 /** The active doctor with this id and their addresses (none: no code can be sent), or null for anyone else. */
@@ -164,14 +185,16 @@ export type EmailSendResult =
   | { status: "unavailable" }
   /** An active doctor with no address on file: the code cannot be sent. */
   | { status: "no_email" }
+  /** Another LINE account holds this name: no code is sent (only an administrator frees the name). */
+  | { status: "taken" }
   | { status: "limited"; reason: EmailLimitReason; retryAfterS: number }
   | { status: "capped"; sentToday: number; retryAfterS: number }
   | { status: "failed"; reason: EmailFailure };
 
 /**
- * Sends a new code to every address of this doctor, for this LINE account: limits and cap, then the email, then the
- * row is completed (older unused codes of the pair stop working). A failed send removes the reservation. `to` holds
- * the masked addresses, for the page.
+ * Sends a new code to every address of this doctor, for this LINE account: refused for a name another LINE account
+ * holds, then limits and cap, then the email, then the row is completed (older unused codes of the pair stop working).
+ * A failed send removes the reservation. `to` holds the masked addresses, for the page.
  */
 export async function sendEmailCode(
   pool: Pool,
@@ -181,6 +204,7 @@ export async function sendEmailCode(
   const doctor = await doctorWithEmails(pool, userId);
   if (!doctor) return { status: "unavailable" };
   if (!doctor.emails.length) return { status: "no_email" };
+  if (await heldByOther(pool, userId, sub)) return { status: "taken" };
   const reserved = await reserveEmailCode(pool, { userId, sub, ip, dailyCap });
   if (reserved.status !== "reserved") return reserved;
   const code = generateCode();
@@ -263,7 +287,7 @@ export async function verifyEmailCode(
   return remaining === 0 ? { ok: false, reason: "locked" } : { ok: false, reason: "invalid", remaining };
 }
 
-/** A claim the email sign-in ended because the doctor proved the name again (another LINE account or a number). */
+/** A claim of the doctor's name by number that the email sign-in ended (doctors sign in only by email). */
 export interface ReplacedClaim {
   phone: string | null;
   lineSub: string;
@@ -275,14 +299,18 @@ export type EmailSignInResult =
   /** Not an active doctor any more. */
   | { status: "unavailable" }
   /** This LINE account holds someone else's (active) name. */
-  | { status: "line_has_claim" };
+  | { status: "line_has_claim" }
+  /** Another LINE account holds this name by email (it was taken between the code and now): nothing changes. */
+  | { status: "taken" };
 
 /**
  * After a good email code: this LINE account holds the doctor's name (user_claims, via = 'email'), in one
- * transaction. Already so: only email_verified_at moves. A current claim of the name by another LINE account or by a
- * number ends ('replaced'; the number's LINE bindings go, so it signs out), since the code went to the doctor's own
- * addresses. A current claim of this LINE account on an inactive name ends ('inactive'); on another active name the
- * sign-in is refused. Logged as 'login_email' in login_events. `users` is only read.
+ * transaction. Already so: only email_verified_at moves. A name another LINE account holds by email is locked: "taken",
+ * and nothing changes (only an administrator frees it). A claim of the name by number (made by hand, or by SMS before
+ * the email sign-in) holds nothing: it ends ('replaced'; the number's LINE bindings go) and the email claim takes over.
+ * A current claim of this LINE account on another name ends when it holds nothing (an inactive name: 'inactive'; made
+ * the other way, user-list HOLDS: 'replaced'); when it holds another active name the sign-in is refused. Logged as
+ * 'login_email' in login_events. `users` is only read.
  */
 export async function signInByEmail(
   pool: Pool,
@@ -307,28 +335,40 @@ export async function signInByEmail(
       [r.userId],
     );
     const mine = current[0];
-    if (mine && mine.via === "email" && mine.line_sub === r.sub) {
+    // The first LINE account to prove the name by email keeps it.
+    if (mine && mine.via === "email" && mine.line_sub !== r.sub) return { status: "taken" };
+    if (mine && mine.via === "email") {
       await c.query("UPDATE user_claims SET email_verified_at = now(), line_name = $2 WHERE id = $1", [mine.id, lineName]);
       await log();
       return { status: "signed_in", user, created: false, replaced: null };
     }
 
-    // This LINE account's own current claim on another name: an inactive one ends, an active one refuses.
-    const { rows: held } = await c.query<{ id: string; active: boolean }>(
-      `SELECT c.id::text AS id, u.active FROM user_claims c JOIN users u ON u.id = c.user_id
+    // This LINE account's own current claim on another name: one that holds the name refuses; one on an inactive name
+    // ends ('inactive'), one that holds nothing (HOLDS, e.g. another doctor's name by number) ends ('replaced').
+    // `undone_at IS NULL` on each UPDATE: an administrator's undo in between is kept as it is.
+    const { rows: held } = await c.query<{ id: string; active: boolean; holds: boolean }>(
+      `SELECT c.id::text AS id, u.active, ${HOLDS} AS holds FROM user_claims c JOIN users u ON u.id = c.user_id
        WHERE c.line_sub = $1 AND c.undone_at IS NULL AND c.user_id <> $2`,
       [r.sub, r.userId],
     );
-    if (held.length && held[0].active) return { status: "line_has_claim" };
+    if (held.length && held[0].active && held[0].holds) return { status: "line_has_claim" };
     if (held.length) {
-      await c.query("UPDATE user_claims SET undone_at = now(), undone_by = NULL, undo_reason = 'inactive' WHERE id = $1", [held[0].id]);
+      await c.query("UPDATE user_claims SET undone_at = now(), undone_by = NULL, undo_reason = $2 WHERE id = $1 AND undone_at IS NULL", [
+        held[0].id,
+        held[0].active ? "replaced" : "inactive",
+      ]);
     }
 
     let replaced: ReplacedClaim | null = null;
     if (mine) {
-      await c.query("UPDATE user_claims SET undone_at = now(), undone_by = NULL, undo_reason = 'replaced' WHERE id = $1", [mine.id]);
-      if (mine.phone) await c.query("DELETE FROM line_bindings WHERE phone = $1", [mine.phone]);
-      replaced = { phone: mine.phone, lineSub: mine.line_sub, lineName: mine.line_name };
+      const ended = await c.query(
+        "UPDATE user_claims SET undone_at = now(), undone_by = NULL, undo_reason = 'replaced' WHERE id = $1 AND undone_at IS NULL",
+        [mine.id],
+      );
+      if (ended.rowCount) {
+        if (mine.phone) await c.query("DELETE FROM line_bindings WHERE phone = $1", [mine.phone]);
+        replaced = { phone: mine.phone, lineSub: mine.line_sub, lineName: mine.line_name };
+      }
     }
     await c.query(
       `INSERT INTO user_claims (user_id, phone, line_sub, line_name, ip, via, email_verified_at)
@@ -344,7 +384,7 @@ export async function signInByEmail(
 export async function holdsEmailClaim(pool: Q, userId: string, sub: string): Promise<boolean> {
   const { rowCount } = await pool.query(
     `SELECT 1 FROM user_claims c JOIN users u ON u.id = c.user_id
-     WHERE c.user_id = $1 AND c.line_sub = $2 AND c.via = 'email' AND c.undone_at IS NULL AND u.active`,
+     WHERE c.user_id = $1 AND c.line_sub = $2 AND c.via = 'email' AND c.undone_at IS NULL AND u.active AND ${HOLDS}`,
     [userId, sub],
   );
   return rowCount === 1;
@@ -354,7 +394,7 @@ export async function holdsEmailClaim(pool: Q, userId: string, sub: string): Pro
 export async function freshEmailClaim(pool: Q, sub: string): Promise<string | null> {
   const { rows } = await pool.query<{ user_id: string }>(
     `SELECT c.user_id::text AS user_id FROM user_claims c JOIN users u ON u.id = c.user_id
-     WHERE c.line_sub = $1 AND c.via = 'email' AND c.undone_at IS NULL AND u.active
+     WHERE c.line_sub = $1 AND c.via = 'email' AND c.undone_at IS NULL AND u.active AND ${HOLDS}
        AND c.email_verified_at > now() - make_interval(days => $2)`,
     [sub, EMAIL_BINDING_MAX_AGE_DAYS],
   );

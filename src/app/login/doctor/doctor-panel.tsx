@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Notice } from "@/components/auth-shell";
 import { waitText } from "@/lib/format";
 import { matchesName } from "@/lib/user-labels";
-import { EXPIRED_MESSAGE, H2, HELP, LABEL } from "../request/request-panel";
+import { AskAdmin, Chevron, EXPIRED_MESSAGE, H2, HELP, LABEL } from "../shared";
 import { cleanCode, NETWORK_ERROR, postJson, StepHeading } from "../verify/verify-form";
 
 /** One doctor on the page: no address, only whether one is on file. */
@@ -14,6 +14,8 @@ export interface DoctorChoice {
   last_name: string;
   subtype_label: string | null;
   has_email: boolean;
+  /** Another LINE account holds this name: it cannot be picked. */
+  claimed: boolean;
 }
 
 /** Answers of /api/auth/email/send and /verify (see verify-form ApiResult for the shared fields). */
@@ -31,21 +33,15 @@ interface EmailResult {
 
 type Step = "pick" | "send" | "code";
 
-function Chevron() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-muted">
-      <path d="M9 6l6 6-6 6" />
-    </svg>
-  );
-}
-
 async function post(url: string, body: unknown): Promise<{ status: number; data: EmailResult }> {
   const { status, data } = await postJson(url, body);
   return { status, data: data as EmailResult };
 }
 
-/** Pick your name, have a code emailed to you, type it in. `back` is the way to the SMS sign-in. */
-export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; back: string }) {
+/** Pick your name, have a code emailed to you, type it in. `back` is the way back to the position step. */
+export function DoctorPanel({ names: initialNames, back }: { names: DoctorChoice[] | null; back: string }) {
+  // Read on the server; a name another LINE account took since is marked here when the server answers "taken".
+  const [names, setNames] = useState(initialNames);
   const [step, setStep] = useState<Step>("pick");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DoctorChoice | null>(null);
@@ -58,6 +54,9 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
   const [restart, setRestart] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
+  /** Set when the chosen name was taken meanwhile: the list's message takes focus instead of the heading. */
+  const focusError = useRef(false);
   const firstRender = useRef(true);
 
   useEffect(() => {
@@ -66,20 +65,23 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
     return () => clearTimeout(t);
   }, [cooldown]);
 
-  // A new step: the code field, or the step's heading, takes focus (not on the first render).
+  // A new step: the code field, or the step's heading, takes focus (not on the first render). Back at the names because
+  // the name was taken meanwhile, the message does, so it is read where the user is.
   useEffect(() => {
     if (firstRender.current) {
       firstRender.current = false;
       return;
     }
     if (step === "code") codeRef.current?.focus();
+    else if (focusError.current) errorRef.current?.focus();
     else headingRef.current?.focus();
+    focusError.current = false;
   }, [step]);
 
   const shown = useMemo(() => (names ?? []).filter((n) => matchesName(query, n.first_name, n.last_name)), [names, query]);
 
   function pick(n: DoctorChoice) {
-    if (!n.has_email) return;
+    if (!n.has_email || n.claimed) return;
     if (selected?.id !== n.id) {
       setSentTo(null);
       setCooldown(0);
@@ -92,8 +94,23 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
   }
 
   function backToNames() {
+    if (busy) return; // an answer on its way is about the chosen name
     setStep("pick");
     setError(null);
+  }
+
+  /** Another LINE account took the chosen name meanwhile: it shows as taken, and the doctor is back at the list. */
+  function takenMeanwhile(text: string) {
+    const id = selected?.id;
+    setNames((list) => list?.map((n) => (n.id === id ? { ...n, claimed: true } : n)) ?? list);
+    setSelected(null);
+    setSentTo(null);
+    setCode("");
+    setCooldown(0);
+    setLocked(false);
+    focusError.current = true;
+    setStep("pick");
+    setError(text);
   }
 
   async function sendCode() {
@@ -113,6 +130,10 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
       }
       if (status === 401 || data.restart) {
         setRestart(data.error ?? EXPIRED_MESSAGE);
+        return;
+      }
+      if (data.reason === "taken") {
+        takenMeanwhile(data.error ?? NETWORK_ERROR);
         return;
       }
       setError(data.error ?? NETWORK_ERROR);
@@ -141,6 +162,10 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
       }
       if (status === 401 || data.restart) {
         setRestart(data.error ?? EXPIRED_MESSAGE);
+        return;
+      }
+      if (data.reason === "taken") {
+        takenMeanwhile(data.error ?? NETWORK_ERROR);
         return;
       }
       setError(data.error ?? NETWORK_ERROR);
@@ -176,7 +201,7 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
 
   const smsLink = (
     <a className="text-btn -ml-1.5 mt-3 h-auto min-h-11 py-2 text-left leading-6" href={back} data-testid="doctor-sms-link">
-      ไม่ใช่แพทย์? ยืนยันด้วยเบอร์มือถือ
+      ไม่ใช่แพทย์? เลือกตำแหน่งอื่น
     </a>
   );
 
@@ -199,14 +224,20 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
         </strong>
         {selected.subtype_label ? <span className="block text-[0.8125rem] leading-5 text-muted">{selected.subtype_label}</span> : null}
       </span>
-      <button type="button" className="text-btn shrink-0" onClick={backToNames} data-testid="doctor-change">
+      <button
+        type="button"
+        className="text-btn shrink-0"
+        onClick={backToNames}
+        aria-disabled={busy || undefined}
+        data-testid="doctor-change"
+      >
         เปลี่ยน
       </button>
     </div>
   ) : null;
 
   const errorBox = error ? (
-    <div className="mt-3" data-testid="doctor-error">
+    <div className="mt-3 outline-none" ref={errorRef} tabIndex={-1} data-testid="doctor-error">
       <Notice tone="warning" role="alert">
         {error}
       </Notice>
@@ -221,7 +252,7 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
         </h2>
         {selectedBox}
         <p className={HELP}>
-          รหัส 6&nbsp;หลักจะส่งไปที่อีเมลของคุณในรายชื่อแพทย์ ครั้งต่อไปเข้าด้วย LINE ได้ทันที
+          รหัส 6&nbsp;หลักจะส่งไปที่อีเมลของคุณในรายชื่อแพทย์ ครั้งต่อไปไม่ต้องยืนยันอีก
         </p>
         {errorBox}
         <button
@@ -333,36 +364,45 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
           data-testid="doctor-search"
         />
         <p id="doctor-count" className="mt-1.5 text-xs text-muted" role="status">
-          {q ? `พบ ${shown.length} จาก ${names.length} รายชื่อ` : `${names.length} รายชื่อ`}
+          {q ? `พบ ${shown.length} จาก ${names.length} รายชื่อ` : `${names.length} รายชื่อ · เลือกได้ ${names.filter((n) => n.has_email && !n.claimed).length}`}
         </p>
       </div>
+      <div aria-live="polite">{errorBox}</div>
       {shown.length ? (
         <ul className="choice-list mt-1 grid gap-1.5" data-testid="doctor-names">
-          {shown.map((n) => (
-            <li key={n.id}>
-              <button
-                type="button"
-                className="choice"
-                disabled={!n.has_email}
-                onClick={() => pick(n)}
-                data-testid="doctor-name"
-                data-no-email={n.has_email ? undefined : "true"}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block font-semibold break-words">
-                    {n.first_name} {n.last_name}
-                  </span>
-                  {n.subtype_label ? <span className="block text-[0.8125rem] leading-5 text-muted">{n.subtype_label}</span> : null}
-                  {n.has_email ? null : (
-                    <span className="mt-1 flex">
-                      <span className="badge badge-muted">ยังไม่มีอีเมลในระบบ ติดต่อผู้ดูแล</span>
+          {shown.map((n) => {
+            const open = n.has_email && !n.claimed;
+            return (
+              <li key={n.id}>
+                <button
+                  type="button"
+                  className="choice"
+                  disabled={!open}
+                  onClick={() => pick(n)}
+                  data-testid="doctor-name"
+                  data-no-email={n.has_email ? undefined : "true"}
+                  data-claimed={n.claimed ? "true" : undefined}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-semibold break-words">
+                      {n.first_name} {n.last_name}
                     </span>
-                  )}
-                </span>
-                {n.has_email ? <Chevron /> : null}
-              </button>
-            </li>
-          ))}
+                    {n.subtype_label ? <span className="block text-[0.8125rem] leading-5 text-muted">{n.subtype_label}</span> : null}
+                    {n.claimed ? (
+                      <span className="mt-1 flex">
+                        <span className="badge badge-muted">มีผู้เลือกแล้ว</span>
+                      </span>
+                    ) : n.has_email ? null : (
+                      <span className="mt-1 flex">
+                        <span className="badge badge-muted">ยังไม่มีอีเมลในระบบ ติดต่อผู้ดูแล</span>
+                      </span>
+                    )}
+                  </span>
+                  {open ? <Chevron /> : null}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="mt-1 rounded-xl border border-line bg-white/70 px-3 py-3 text-sm text-ink-2" data-testid="doctor-empty">
@@ -375,6 +415,7 @@ export function DoctorPanel({ names, back }: { names: DoctorChoice[] | null; bac
           )}
         </p>
       )}
+      <AskAdmin className="mt-4" />
       {smsLink}
     </div>
   );
