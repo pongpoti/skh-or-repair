@@ -96,7 +96,6 @@ export default async function AdminPage() {
               <div className="grid grid-cols-2 gap-2 sm:gap-3">
                 {([1, 2] as const).map((half) => {
                   const { from, to } = half === 1 ? repair.periods.half1 : repair.periods.half2;
-                  const dates = `${shortThaiDate(from)} – ${shortThaiDate(to)}`;
                   // A half with no day left to show (the board only goes from today on, on workdays).
                   return demoOn(half) === null ? (
                     <span key={half} className="btn btn-secondary cursor-not-allowed flex-col gap-0.5 py-2.5 opacity-55" aria-disabled="true" data-testid={`demo-half-${half}`}>
@@ -106,7 +105,10 @@ export default async function AdminPage() {
                   ) : (
                     <Link key={half} href={`/?demo=1&half=${half}`} className="btn btn-secondary flex-col gap-0.5 py-2.5" data-testid={`demo-half-${half}`}>
                       <span>{HALF_NAME[half]}</span>
-                      <span className="text-xs font-medium tabular-nums">{dates}</span>
+                      {/* Each date whole on its line when the two do not fit side by side. */}
+                      <span className="text-center text-xs font-medium tabular-nums">
+                        <span className="whitespace-nowrap">{shortThaiDate(from)} –</span> <span className="whitespace-nowrap">{shortThaiDate(to)}</span>
+                      </span>
                     </Link>
                   );
                 })}
