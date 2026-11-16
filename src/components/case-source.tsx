@@ -3,8 +3,8 @@ import type { DoneBy, RowSource } from "@/lib/board-rows";
 
 /**
  * The icon at the right end of a case row (lib/board-rows.ts), centred on the row's height, with no text (Pong, 15 Nov
- * 2026: "no text, move icon to right most of row increase size and align center vertically"). The words stay for a
- * pointer (the title) and a screen reader.
+ * 2026: "no text, move icon to right most of row increase size and align center vertically"). The words come in a
+ * bubble on a tap, and stay for a screen reader.
  *
  * In most rooms the icon says where the row comes from: the HOSxP workbook alone (a database; "For HosXP case without
  * booking, display only DB icon"), a doctor's booking before MX's upload (a calendar), or both matched by HN (a
@@ -139,20 +139,56 @@ export const DOER_TITLE: Record<DoneBy, string> = {
   scrub: "ฝาก scrub ทำ",
 };
 
-/** The row's icon: who does the dressing in the dressing room, else where the row comes from. */
-export function CaseIcon({ source, doneBy }: { source: RowSource; doneBy?: DoneBy }) {
-  if (doneBy) {
-    return (
-      <span className="case-icon case-icon-doer" title={DOER_TITLE[doneBy]} data-testid="row-icon" data-done-by={doneBy}>
-        <Portrait size={40}>{DOER_ICONS[doneBy]}</Portrait>
-        <span className="sr-only">{DOER_TITLE[doneBy]}</span>
-      </span>
-    );
-  }
+/** The bubble's colour: the icon's own (Pong, 16 Nov 2026: "nurse = pink, surgeon = green"). */
+type Tone = DoneBy | "matched" | "plain";
+
+/**
+ * The row's icon: who does the dressing in the dressing room, else where the row comes from. It is a button: a tap says
+ * what it means in a bubble beside it, in the icon's colour (Pong, 16 Nov 2026: "click to display meaning on dialog
+ * same bg color of icon"), as a phone has no pointer to show a title. The list (components/case-list.tsx) keeps which
+ * bubble is open and closes it on a tap elsewhere or Escape.
+ */
+export function CaseIcon({
+  source,
+  doneBy,
+  open = false,
+  tipId,
+  tipFor,
+  onToggle,
+}: {
+  source: RowSource;
+  doneBy?: DoneBy;
+  open?: boolean;
+  /** The bubble's id, for aria-controls. */
+  tipId?: string;
+  /** The list's key for this bubble: a tap on the button itself toggles it rather than closing it. */
+  tipFor?: string;
+  onToggle?: () => void;
+}) {
+  const label = doneBy ? DOER_TITLE[doneBy] : SOURCE_TITLE[source];
+  const tone: Tone = doneBy ?? (source === "matched" ? "matched" : "plain");
+  const look = doneBy ? " case-icon-doer" : source === "matched" ? " case-icon-matched" : "";
   return (
-    <span className={`case-icon${source === "matched" ? " case-icon-matched" : ""}`} title={SOURCE_TITLE[source]} data-testid="row-icon" data-source={source}>
-      <Stroke size={22}>{SOURCE_ICONS[source]}</Stroke>
-      <span className="sr-only">{SOURCE_TITLE[source]}</span>
+    <span className="case-icon-wrap">
+      <button
+        type="button"
+        className={`case-icon${look}`}
+        aria-expanded={open}
+        aria-controls={open ? tipId : undefined}
+        data-testid="row-icon"
+        data-source={doneBy ? undefined : source}
+        data-done-by={doneBy}
+        data-tip-for={tipFor}
+        onClick={onToggle}
+      >
+        {doneBy ? <Portrait size={40}>{DOER_ICONS[doneBy]}</Portrait> : <Stroke size={22}>{SOURCE_ICONS[source]}</Stroke>}
+        <span className="sr-only">{label}</span>
+      </button>
+      {open ? (
+        <span id={tipId} className="case-tip" data-tone={tone} data-case-bubble="" data-testid="row-icon-tip">
+          {label}
+        </span>
+      ) : null}
     </span>
   );
 }

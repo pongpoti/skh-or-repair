@@ -13,7 +13,8 @@ import type { XlsxCell } from "./xlsx.ts";
  * two), count a repeated case ID once, and cut the rows the board never shows whatever the rooms are (rule set C:
  * Tha Chalom, vascular on Tuesday to Thursday). Choosing a room is placeCase's job (lib/placement.ts).
  *
- * Privacy: the export holds patient name, age, AN, diagnosis, illnesses and costs. None of them is read into a
+ * Privacy: the export holds patient name, age, AN, diagnosis, illnesses and costs. Only the name is read (Pong, 16 Nov
+ * 2026: "Add patient name line above HN"), to show beside the HN to those who may see it; the rest are never read into a
  * WorkbookRow, so they cannot reach the database, the page or a log. HN is kept as written, for matching bookings.
  */
 
@@ -36,6 +37,9 @@ export const REQUIRED_HEADERS = [
   "สั่งผ่าตัดเวลา",
   "ห้องผ่าตัด",
 ] as const;
+
+/** The patient's name (column J). Optional: the board shows it when present. */
+export const PATIENT_HEADER = "ชื่อ";
 
 // ---------------------------------------------------------------------------------------------------------------
 // Cleaning (section 4)
@@ -279,6 +283,8 @@ export type WorkbookRow = {
   /** As written in the export (text, leading zeros kept). Matching against bookings normalises it elsewhere. */
   hn: string;
   operation: string;
+  /** The patient's name (ชื่อ, column J) as written, "" when blank or when the file has no such column. */
+  patientName: string;
   /** The surgeon's name without the title. */
   surgeon: string;
   /** นพ., พญ. … or "" (น.พ. and พ.ญ. normalised). */
@@ -346,6 +352,8 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
     bookedDate: col("สั่งผ่าตัดวันที่"),
     bookedTime: col("สั่งผ่าตัดเวลา"),
     room: col("ห้องผ่าตัด"),
+    // Not required: a file without it still reads, with no patient names.
+    patient: headerIndex(header, PATIENT_HEADER),
   };
   const lookUp = options.surgeonDept ?? surgeonDept;
 
@@ -365,6 +373,7 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
       caseId: text(at.id),
       hn: text(at.hn),
       operation,
+      patientName: at.patient >= 0 ? text(at.patient) : "",
       surgeon: name,
       title,
       status: statusOf(text(at.status)),

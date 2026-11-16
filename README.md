@@ -23,7 +23,7 @@ The old weekly export (`scripts/build_week.py`, `src/data/week-data.ts`) no long
 
 The rules for the workbook (`src/lib/workbook.ts`, `src/lib/placement.ts`):
 
-- **Only what the board needs is kept:** case ID, HN, operation name, surgeon (with the surgeon's team, for the SCOPE rule below), department, room, shift, status, urgency and booked time. Patient name, age, AN, diagnosis, illnesses and costs are never read into a row, stored or logged.
+- **Only what the board needs is kept:** case ID, HN, the patient's name (ชื่อ, for the row's name line, Pong, 16 Nov 2026; optional, so an export without it still reads), operation name, surgeon (with the surgeon's team, for the SCOPE rule below), department, room, shift, status, urgency and booked time. Age, AN, diagnosis, illnesses and costs are never read into a row, stored or logged, and neither the name nor the HN is ever logged.
 - **Every row's `สั่งผ่าตัดวันที่` must be the upload's day** (Buddhist years are converted). Otherwise the whole file is refused and the message lists the dates found.
 - **These rows are dropped,** and the upload's summary counts each reason:
   - cancelled;
@@ -130,7 +130,13 @@ If MX has not uploaded, every user sees "ยังไม่มีตาราง
 
 ### Case rows: source and matching
 
-**Each row** (Pong, 15 Nov 2026) shows its number, then the operation, the HN on the next line (only for who may see it, below), the surgeon at the same 15px as the HN, and a smaller line **วันเวลาที่จองคิว : 15 พ.ย. 69, 23:43**, when the booking was made in Bangkok time (`cases.created_at`; not on a HOSxP case nobody booked). นอกเวลา shows as a badge under them. At the row's right end, centred on its height, an icon alone in a round tile, with no word: its name is the title for a pointer and the spoken name for a screen reader (`src/components/case-source.tsx`). The icons differ in shape, so the colour is never the only sign:
+**Each row** (Pong, 15 and 16 Nov 2026; `src/components/case-list.tsx`) shows its number, then:
+- **the operation on one line** (16px). A name too long for the line ends in "…" and a chevron ⌄; a tap on it unfolds the whole name in place and turns the chevron, another tap folds it (Pong, 16 Nov 2026: "I want op name single line. How do I view full name ?"). Several can be open at once. Only a cut name is a button, measured in the browser after the fonts load and again when the sheet's width changes;
+- **the patient's name**, then **the HN**, each on its own line at 15px (both only for who may see the HN, below). The name comes from HOSxP's list, so a booking has none until MX's upload matches it, and an upload from before 16 Nov 2026 has none;
+- **the surgeon** at the same 15px, without นพ. or พญ. (Pong, 16 Nov 2026: "No นพ พญ prefix"). Without the title every doctor on the roster fits on one line down to a 320px-wide phone; a longer name would end in "…";
+- a smaller line **วันเวลาที่จองคิว : 15 พ.ย. 69, 23:43**, when the booking was made in Bangkok time (`cases.created_at`; not on a HOSxP case nobody booked). นอกเวลา shows as a badge under them.
+
+At the row's right end, centred on its height, an icon alone in a round tile, with no word (`src/components/case-source.tsx`). A tap on it says what it means in a bubble beside it, in the icon's own colour (Pong, 16 Nov 2026: "click to display meaning on dialog same bg color of icon : ie nurse = pink, surgeon = green"): green for the doctor, pink for the nurse, the handshake's green for a match, white for the others. One bubble shows at a time; a tap anywhere else (on the bubble too), Escape or moving the focus away closes it, and nothing in the row moves. A tap on the dimmed plan above the room closes only the bubble, not the room, as with the account menu. A screen reader hears the icon's name and whether its bubble is open. The icons differ in shape, so the colour is never the only sign:
 - **a database** (Lucide's, not the vendor's logo): a HOSxP case nobody booked.
 - **a calendar with a check** (Lucide's): a doctor's booking, before the day has an upload.
 - **a handshake** (Lucide's, green): a workbook case that matches a booking by HN on the same day.
@@ -146,12 +152,12 @@ If MX has not uploaded, every user sees "ยังไม่มีตาราง
 
 **Mismatches are shown to all users:** the HOSxP cases nobody booked outside the dressing room, as "ไม่ตรงกับการจอง {n} รายการ" in the notice strip above the plan, and an amber triangle with "!" in the corner of each room that has one. The room's spoken name gains "ข้อมูลไม่ตรงกับการจอง".
 
-**HN is shown only to:**
+**HN and the patient's name are shown only to:**
 - the doctor who made the booking (their own bookings);
 - MX;
 - admins.
 
-For anyone else the server leaves the HN out of the page's data altogether, not just off the screen. No HN or workbook row is ever logged.
+For anyone else the server leaves the HN and the name out of the page's data altogether, not just off the screen. No HN, name or workbook row is ever logged.
 
 ## Design
 
@@ -555,7 +561,7 @@ Both test runs drop and truncate tables, `users` among them, and `users` is shar
 - Codes: 6 digits, 5 minutes, single use, at most 5 attempts (counted before deeSMSX is asked). In deeSMSX mode the code never reaches the app's database; deeSMSX's token is stored encrypted. In local mode the code is stored as an HMAC with `OTP_PEPPER`. The API keys, tokens and codes are never logged. Limits and the daily cap are under Cost control. Every valid number gets a code and the same answer, so the page never shows whether a number is on the list before the code is checked.
 - `/admin`: a signed-in session whose `sub` is in `AUTH_ADMIN_LINE_IDS`; anyone else gets a 404, and every server action checks the admin list again.
 - `/upload`: MX (a row in `mx_members` for the session's user) or an admin; anyone else gets a 404 with no loading screen first. The upload action checks the role, the window (by the server's clock), the file's name, size and content, and the day again. The `.xlsx` reader caps sizes, entries, rows and columns, and refuses encrypted and `.xls` files.
-- Patient data: the HOSxP file's patient fields (name, age, AN, diagnosis, illnesses, costs) are never read into a row or stored. Each new upload deletes the uploads made more than 30 days before it (nothing else does, see HOSxP upload). A booking keeps its HN as long as the booking's row, cancelled ones included (`cases.hn`). The HN is sent only to MX, admins and the doctor who booked (the server filters the page's data), and no HN or workbook row is ever logged. The repository holds only the made-up sample workbooks.
+- Patient data: of the HOSxP file's patient fields only the HN and the name are read and stored (`workbook_cases.hn`, `workbook_cases.patient_name`); age, AN, diagnosis, illnesses and costs never are. Each new upload deletes the uploads made more than 30 days before it, with their cases, names included (nothing else does, see HOSxP upload). A booking keeps its HN as long as the booking's row, cancelled ones included (`cases.hn`), and holds no name. The HN and the name are sent only to MX, admins and the doctor who booked (the server filters the page's data), and no HN, name or workbook row is ever logged. The repository holds only the made-up sample workbooks.
 - The `access` cookie (a verified number with a name still to pick; 12 hours, own key) never grants a session; everything sent to Telegram is escaped.
 - Headers: CSP (nonce and `strict-dynamic`), HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options`, `X-Robots-Tag: noindex`, and `robots.txt` disallowing all.
 - Real names, real phone numbers, the users CSV, deeSMSX keys and other secrets never go in this public repository; examples, tests and screenshots use invented names and numbers only (`*.csv`, `outbox/` and `screens/` are gitignored as a safety net).

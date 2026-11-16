@@ -292,9 +292,10 @@ CREATE TABLE IF NOT EXISTS workbook_uploads (
 );
 CREATE INDEX IF NOT EXISTS workbook_uploads_cycle_idx ON workbook_uploads (cycle_day, target_date, uploaded_at DESC);
 
--- The kept cases of one upload, with only what the board needs: never the patient's name, age, AN, diagnosis,
--- illnesses or costs. hn is normalised (lib/hn.ts) for matching the bookings, and shown only to the doctor who booked
--- the case, MX and admins. room_id is where the case was placed at upload (NULL when it was not, e.g. obstetrics
+-- The kept cases of one upload, with only what the board needs: never the patient's age, AN, diagnosis, illnesses or
+-- costs. hn is normalised (lib/hn.ts) for matching the bookings; it and patient_name (the export's ชื่อ, NULL when the
+-- file has no such column; Pong, 16 Nov 2026: "Add patient name line above HN") are shown only to the doctor who
+-- booked the case, MX and admins, and go with the upload when it is deleted after 30 days. room_id is where the case was placed at upload (NULL when it was not, e.g. obstetrics
 -- during the repair); the board places the case again when it is read, from dept, team (the surgeon's team, for the
 -- SCOPE rule) and urgency, so a change of the repair's dates after the upload moves it. position is its order in the
 -- file.
@@ -312,7 +313,10 @@ CREATE TABLE IF NOT EXISTS workbook_cases (
   status       text        NOT NULL CHECK (status IN ('scheduled', 'in-progress', 'delayed', 'done', 'cancelled', 'recovery')),
   urgency      text,
   booked_time  text,
-  position     integer     NOT NULL
+  position     integer     NOT NULL,
+  patient_name text
 );
 CREATE INDEX IF NOT EXISTS workbook_cases_upload_idx ON workbook_cases (upload_id);
+-- Applied to existing databases too.
+ALTER TABLE workbook_cases ADD COLUMN IF NOT EXISTS patient_name text;
 `;

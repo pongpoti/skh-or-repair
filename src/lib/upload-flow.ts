@@ -87,6 +87,7 @@ function placedCase(row: WorkbookRow, roomId: string | null, position: number): 
     caseId: capped(row.caseId, 64),
     hn: capped(row.hn, 32),
     operation: capped(row.operation, 500),
+    patientName: row.patientName ? capped(row.patientName, 200) : null,
     // Title first, as the board writes doctors ("นพ. ชื่อ นามสกุล").
     surgeon: capped([row.title, row.surgeon].filter(Boolean).join(" "), 200),
     dept: row.dept,

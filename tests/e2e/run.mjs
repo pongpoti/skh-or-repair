@@ -2998,7 +2998,14 @@ async function main() {
       const icon = board.locator('.case-row [data-testid="row-icon"]');
       assert((await icon.getAttribute("data-source")) === "booking" && (await icon.locator("svg").count()) === 1, "the booking's icon");
       assert((await icon.textContent()) === "แพทย์จองห้อง" && (await icon.locator(".sr-only").textContent()) === "แพทย์จองห้อง", "only the spoken name");
-      assert((await icon.getAttribute("title")) === "แพทย์จองห้อง", "the name for a pointer");
+      // a tap says what it means in a bubble beside it (Pong, 16 Nov 2026), white like the icon; Escape closes only it
+      await icon.click();
+      const tip = board.locator('[data-testid="row-icon-tip"]');
+      assert((await tip.textContent()) === "แพทย์จองห้อง" && (await tip.getAttribute("data-tone")) === "plain", "the booking's meaning in a bubble");
+      assert((await icon.getAttribute("aria-expanded")) === "true", "the icon says its bubble is open");
+      await board.keyboard.press("Escape");
+      await tip.waitFor({ state: "detached" });
+      assert((await board.locator(".case-row").count()) === 1, "Escape closed the bubble, not the room");
       // when it was booked, smaller, under the surgeon: Bangkok time in Thai (the database's clock, not the app's)
       const bookedAt = await textOf(board, '.case-row [data-testid="row-booked-at"]');
       assert(/^วันเวลาที่จองคิว : \d{1,2} [ก-๙]+\.(?:[ก-๙]+\.)? \d{2}, \d{2}:\d{2}$/.test(bookedAt), `the booking's time: ${bookedAt}`);
@@ -3007,7 +3014,12 @@ async function main() {
       await board.goto(`${APP}/?date=2026-11-17&room=or-10`, { waitUntil: "networkidle" });
       await board.waitForSelector(".case-row");
       assert(JSON.stringify(await rowIcons(board)) === JSON.stringify(["scrub"]), `OR 10's icon: ${JSON.stringify(await rowIcons(board))}`);
-      assert((await board.getAttribute('.case-row [data-testid="row-icon"]', "title")) === "ฝาก scrub ทำ", "the scrub's name");
+      await board.click('.case-row [data-testid="row-icon"]');
+      const scrubTip = board.locator('[data-testid="row-icon-tip"]');
+      assert((await scrubTip.textContent()) === "ฝาก scrub ทำ", "the scrub's name in a bubble");
+      assert((await scrubTip.evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(228, 154, 162)", "pink, like the nurse");
+      await board.click(".room-sheet h2");
+      await scrubTip.waitFor({ state: "detached" });
       assert((await board.locator('.case-row [data-testid="row-icon"][data-source]').count()) === 0, "no source icon in the dressing room");
       await ownerShot(board, "room-sheet-dressing-booked.png");
       await nurse.close();
@@ -3094,16 +3106,20 @@ async function main() {
       const missing = await textOf(page, '[data-testid="upload-not-in-hosxp"]');
       assert(missing.includes(`HN ${HN_X_MISSING}`) && missing.includes(RP.drX.name) && missing.includes("OR 10"), `the booking HOSxP does not list: ${missing}`);
 
-      // stored: one upload for Tuesday made on Monday, its cases with normalised HNs and nothing about the patient
+      // stored: one upload for Tuesday made on Monday, its cases with normalised HNs and, of the patient, only the name
       const up = (await db.query("SELECT id, cycle_day::text AS c, target_date::text AS t, uploaded_by, uploader_name, file_name, total_rows, kept, placed FROM workbook_uploads")).rows;
       assert(
         up.length === 1 && up[0].c === "2026-11-16" && up[0].t === "2026-11-17" && up[0].uploaded_by === RP.mx.sub && up[0].uploader_name === RP.mx.name &&
           up[0].file_name === "e2e-or-export.xlsx" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 7,
         `upload row: ${JSON.stringify(up)}`,
       );
-      const cases = (await db.query("SELECT row_to_json(w)::text AS j, hn, room_id FROM workbook_cases w WHERE upload_id = $1 ORDER BY position", [up[0].id])).rows;
+      const cases = (
+        await db.query("SELECT (to_jsonb(w) - 'patient_name')::text AS j, patient_name, hn, room_id FROM workbook_cases w WHERE upload_id = $1 ORDER BY position", [up[0].id])
+      ).rows;
       assert(cases.length === 7 && cases.some((c) => c.hn === "7000015" && c.room_id === "or-12"), `stored cases: ${cases.length}`);
-      assert(cases.every((c) => !/ผู้ป่วย|ประกัน|690000|ปี \d/.test(c.j)), "no patient name, age, AN or cover stored");
+      // The name (Pong, 16 Nov 2026: "Add patient name line above HN") in its own column, the made-up one from the file.
+      assert(cases.every((c) => /^ตัวอย่าง ผู้ป่วย\d+$/.test(c.patient_name ?? "")), "each case keeps the patient's name");
+      assert(cases.every((c) => !/ผู้ป่วย|ประกัน|690000|ปี \d/.test(c.j)), "no other patient field (age, AN, cover) stored");
 
       await page.setViewportSize({ width: 360, height: 780 });
       await noSideScroll(page, "/upload at 360px");
@@ -3171,8 +3187,11 @@ async function main() {
           const icon = row.querySelector('[data-testid="row-icon"]').getBoundingClientRect();
           const box = row.getBoundingClientRect();
           return {
-            lines: lines.map((line) => line.dataset.testid ?? "operation"),
+            lines: lines.map((line) => line.dataset.testid ?? "?"),
+            patient: size("row-patient"),
             hn: size("row-hn"),
+            surgeonText: row.querySelector('[data-testid="row-surgeon"]').textContent.trim(),
+            opWrap: getComputedStyle(row.querySelector("[data-op-id]")).whiteSpace,
             surgeon: size("row-surgeon"),
             bookedAt: size("row-booked-at"),
             iconRight: Math.round(box.right - icon.right),
@@ -3184,14 +3203,62 @@ async function main() {
         }),
       );
       assert(JSON.stringify(layout.map((row) => row.lines)) === JSON.stringify([
-        ["operation", "row-hn", "row-surgeon", "row-booked-at"],
-        ["operation", "row-hn", "row-surgeon"],
+        ["row-op", "row-patient", "row-hn", "row-surgeon", "row-booked-at"],
+        ["row-op", "row-patient", "row-hn", "row-surgeon"],
       ]), `the rows' lines: ${JSON.stringify(layout)}`);
       for (const row of layout) {
-        assert(row.hn === 15 && row.surgeon === 15, `the HN and the surgeon at 15px: ${JSON.stringify(row)}`);
+        assert(row.patient === 15 && row.hn === 15 && row.surgeon === 15, `the patient's name, the HN and the surgeon at 15px: ${JSON.stringify(row)}`);
+        // the surgeon without นพ./พญ. (Pong, 16 Nov 2026: "No นพ พญ prefix"), the operation on one line
+        assert(row.surgeonText === "ตัวอย่าง ศัลย์ทั่วไป", `the surgeon without a title: ${row.surgeonText}`);
+        assert(row.opWrap === "nowrap", `the operation on one line: ${JSON.stringify(row)}`);
         assert(row.iconAfterText && row.iconRight <= 24 && row.iconMiddle <= 1 && row.iconSize >= 40, `the icon at the right, centred: ${JSON.stringify(row)}`);
       }
       assert(layout[0].bookedAt === 12, `the booking's time smaller: ${layout[0].bookedAt}`);
+      // names that fit are plain text; the matched icon's meaning in a green bubble, closed by a tap elsewhere
+      assert((await page.locator('.case-row [data-testid="row-op"] button').count()) === 0, "no name is cut at 390px");
+      await page.click('.case-row [data-testid="row-icon"]');
+      const matchedTip = page.locator('[data-testid="row-icon-tip"]');
+      assert((await matchedTip.textContent()) === "ตาราง HOSxP ตรงกับการจอง" && (await matchedTip.getAttribute("data-tone")) === "matched", "the matched meaning");
+      await ownerShot(page, "room-sheet-icon-tip.png");
+      // a tap on the dimmed plan above the sheet closes the bubble and keeps the room open, like the account menu
+      await page.click('button[aria-label="ปิดรายการห้อง"]', { position: { x: 195, y: 300 } });
+      await matchedTip.waitFor({ state: "detached" });
+      assert((await page.locator(".room-sheet .case-row").count()) === 2, "the room stays open when a tap on the plan closes a bubble");
+      // on a 320px phone the long name ends in "…" and a chevron; a tap unfolds it in place, another folds it
+      await page.setViewportSize({ width: 320, height: 844 });
+      const cutName = page.locator('.case-row [data-testid="row-op"] button').first();
+      await cutName.waitFor();
+      const opHeight = () => cutName.locator("[data-op-id]").evaluate((el) => el.getBoundingClientRect().height);
+      assert((await cutName.getAttribute("aria-expanded")) === "false" && (await opHeight()) < 30, "folded on one line");
+      assert((await cutName.locator("[data-op-id]").evaluate((el) => el.scrollWidth > el.clientWidth)), "the name is cut with an ellipsis");
+      await cutName.click();
+      assert((await cutName.getAttribute("aria-expanded")) === "true" && (await opHeight()) > 30, "unfolded over two lines");
+      await ownerShot(page, "room-sheet-name-open.png");
+      await cutName.click();
+      assert((await cutName.getAttribute("aria-expanded")) === "false" && (await opHeight()) < 30, "folded again");
+      // a tap on the bubble closes it and reaches nothing under it
+      const cutIndex = await page.$$eval(".case-row", (rows) => rows.findIndex((row) => row.querySelector('[data-testid="row-op"] button')));
+      const cutRow = page.locator(".case-row").nth(cutIndex);
+      await cutRow.locator('[data-testid="row-icon"]').click();
+      await page.locator('[data-testid="row-icon-tip"]').click();
+      await page.locator('[data-testid="row-icon-tip"]').waitFor({ state: "detached" });
+      assert((await cutName.getAttribute("aria-expanded")) === "false", "a tap on the bubble unfolds nothing");
+      // unfolded with the keyboard, then the sheet widens so the whole name fits: it stays open until folded, then it is
+      // plain text, and the focus goes to the row's icon rather than nowhere
+      await cutName.focus();
+      await page.keyboard.press("Enter");
+      assert((await cutName.getAttribute("aria-expanded")) === "true", "unfolded with Enter");
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert((await cutName.getAttribute("aria-expanded")) === "true", "kept open when the sheet widens");
+      await page.keyboard.press("Enter");
+      await cutRow.locator('[data-testid="row-op"] button').waitFor({ state: "detached" });
+      assert(await cutRow.locator('[data-testid="row-icon"]').evaluate((el) => el === document.activeElement), "the focus moves to the row's icon");
+      // moving the focus away closes an open bubble
+      await page.keyboard.press("Enter");
+      await page.locator('[data-testid="row-icon-tip"]').waitFor();
+      await page.keyboard.press("Shift+Tab");
+      await page.locator('[data-testid="row-icon-tip"]').waitFor({ state: "detached" });
+      await page.evaluate(() => (document.activeElement instanceof HTMLElement ? document.activeElement.blur() : undefined));
       await ownerShot(page, "room-sheet.png");
       await page.goto(`${APP}/?room=or-10`, { waitUntil: "networkidle" });
       await page.waitForSelector(".case-row");
@@ -3202,7 +3269,13 @@ async function main() {
       );
       // who does each dressing instead of where it came from: nobody booked these, so the doctor
       assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["surgeon", "surgeon"]), `OR 10's icons: ${JSON.stringify(await rowIcons(page))}`);
-      assert((await page.getAttribute('.case-row [data-testid="row-icon"]', "title")) === "แพทย์ทำเอง", "the doctor's name for a pointer");
+      await page.click('.case-row [data-testid="row-icon"]');
+      const doctorTip = page.locator('[data-testid="row-icon-tip"]');
+      assert((await doctorTip.textContent()) === "แพทย์ทำเอง", "the doctor's name in a bubble");
+      assert((await doctorTip.evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(127, 191, 183)", "green, like the doctor's scrubs");
+      await doctorTip.click();
+      await doctorTip.waitFor({ state: "detached" });
+      assert((await page.locator(".room-sheet .case-row").count()) === 2, "a tap on the bubble closes only the bubble");
       await ownerShot(page, "room-sheet-dressing.png");
       await page.goto(`${APP}/?room=or-13`, { waitUntil: "networkidle" });
       await page.waitForSelector(".case-row");
@@ -3223,6 +3296,11 @@ async function main() {
       for (const hn of WORKBOOK_HNS.filter((h) => h !== "7000002")) assert(!html.drX.includes(hn), "doctor X gets no HN but their own");
       for (const hn of [...WORKBOOK_HNS.filter((h) => h !== HN_Y_MATCH), HN_TODAY, HN_X_MISSING]) assert(!html.drY.includes(hn), "doctor Y gets no HN but their own");
       assert(html.drX.includes("7000002") && html.drY.includes(HN_Y_MATCH), "each doctor's own HNs");
+      // the patient's name goes with the HN: every one for MX, a doctor's own case only, none for a nurse
+      const patients = (page) => new Set(page.match(/ตัวอย่าง ผู้ป่วย\d+/g) ?? []);
+      assert(patients(html.mx).size >= 7, `MX sees the patients' names: ${[...patients(html.mx)]}`);
+      assert(patients(html.nurse).size === 0, "no patient's name in the nurse's page");
+      assert(patients(html.drX).size === 1 && patients(html.drY).size === 1, `each doctor sees only their own patient's name: ${[...patients(html.drX)]} ${[...patients(html.drY)]}`);
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
       rmSync(NOW_FILE, { force: true });
@@ -3535,7 +3613,7 @@ async function main() {
         assert(!log.includes(BOT_TOKEN), `the holidays token in the ${proc.name} log`);
         // no HN and nothing of a workbook row (patients' made-up names, operations) is ever logged
         for (const hn of [...WORKBOOK_HNS, HN_TODAY, HN_X_MISSING]) assert(!log.includes(hn), `an HN in the ${proc.name} log`);
-        assert(!/ตัวอย่าง|cholecystectomy|thyroidectomy/i.test(log), `a workbook row in the ${proc.name} log`);
+        assert(!/ตัวอย่าง|ผู้ป่วย|cholecystectomy|thyroidectomy/i.test(log), `a workbook row in the ${proc.name} log`);
       }
       assert(/\[sms\] deeSMSX OTP request failed: code 102/.test(app.log()), "provider failures are logged by reference code");
     });

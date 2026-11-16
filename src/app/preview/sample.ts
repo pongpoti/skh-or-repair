@@ -30,7 +30,8 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
   let position = 0;
   const hosxp = (roomId: string, hn: string, operation: string, surgeon: string, status: CaseStatus = "scheduled", shift: Shift = "in"): WorkbookCase => {
     position += 1;
-    return { caseId: `9000${position}`, hn, operation, surgeon, dept: dept(roomId), team: null, urgency: "Elective", shift, status, position };
+    const patientName = `${["นาย", "นาง", "น.ส."][position % 3]} ตัวอย่าง ผู้ป่วย${position}`;
+    return { caseId: `9000${position}`, hn, patientName, operation, surgeon, dept: dept(roomId), team: null, urgency: "Elective", shift, status, position };
   };
   let id = 0;
   const booking = (roomId: string, hn: string, operation: string, surgeonId: string, surgeon: string, scrubDoes: boolean | null = null): AddedCase => {

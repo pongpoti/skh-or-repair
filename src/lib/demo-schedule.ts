@@ -172,6 +172,11 @@ function bookedAtFor(date: string, mix: number): string {
  * and the emergency room included. A recovery room, the instrument room and a closed room get none. Empty on a day
  * with no open room (a weekend).
  */
+/** A made-up patient's name, written as the HOSxP export writes names (title, first name, family name). */
+export function demoPatient(n: number): string {
+  return `${["นาย", "นาง", "น.ส."][n % 3]} ตัวอย่าง ผู้ป่วย${n}`;
+}
+
 export function demoSchedule(date: string, periods: RepairPeriods): { workbook: WorkbookCase[]; bookings: AddedCase[] } {
   const workbook: WorkbookCase[] = [];
   const bookings: AddedCase[] = [];
@@ -199,6 +204,7 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
       workbook.push({
         caseId: id,
         hn,
+        patientName: demoPatient(position),
         operation: item.operation,
         surgeon: `${surgeon.title} ${surgeon.name}`,
         dept: item.dept,
@@ -260,13 +266,13 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
         roomId: room.id,
         order: slot,
         procedure: item.operation,
-        surgeon: `${surgeon.title} ${surgeon.name}`,
+        surgeon: surgeon.name,
         specialty: DEPARTMENTS[item.dept].name,
         status: "scheduled",
         shift: "in",
         source: "matched",
         flag: null,
-        ...(viewer.allHn ? { hn: `99${room.number.padStart(2, "0")}${500 + slot}` } : {}),
+        ...(viewer.allHn ? { hn: `99${room.number.padStart(2, "0")}${500 + slot}`, patientName: demoPatient(500 + slot) } : {}),
         bookedBy: surgeon.name,
         bookedAt,
         ...(dressingRooms.includes(room.id) ? { doneBy: "surgeon" as const } : {}),

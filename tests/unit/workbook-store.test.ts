@@ -29,6 +29,7 @@ function placed(position: number, more: Partial<PlacedCase> = {}): PlacedCase {
     urgency: "Elective",
     bookedTime: "08:30",
     position,
+    patientName: `ผู้ป่วยสมมุติ ลำดับ${position}`,
     ...more,
   };
 }
@@ -45,7 +46,7 @@ function upload(more: Partial<UploadInput> = {}): UploadInput {
     kept: 2,
     placed: 1,
     summary: { dropped: { "no-hn": 1 }, placed: { "or-12": 1 }, unplaced: { "no-department": 1 } },
-    cases: [placed(1), placed(2, { roomId: null, dept: null, team: null, shift: null, urgency: null, bookedTime: null })],
+    cases: [placed(1), placed(2, { roomId: null, dept: null, team: null, shift: null, urgency: null, bookedTime: null, patientName: null })],
     ...more,
   };
 }
@@ -76,7 +77,7 @@ describe("workbook uploads (database)", () => {
       board.cases.map(({ id, uploadId, ...rest }) => (assert.match(id, /^\d+$/), assert.equal(uploadId, saved.id), rest)),
       [
         { ...placed(1), hn: "1" },
-        { ...placed(2, { roomId: null, dept: null, team: null, shift: null, urgency: null, bookedTime: null }), hn: "2" },
+        { ...placed(2, { roomId: null, dept: null, team: null, shift: null, urgency: null, bookedTime: null, patientName: null }), hn: "2" },
       ],
     );
     assert.equal(await workbookFor(pool, "2026-11-16", "2026-11-18"), null, "another target day");
