@@ -14,7 +14,7 @@ import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-row
 import { boardHref } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
-import { getRoom, isSelectableRoom, roomLabel } from "@/lib/rooms";
+import { getRoom, isSelectableRoom, openRooms, roomLabel, type Room } from "@/lib/rooms";
 import { roomMark } from "@/lib/schedule";
 
 const NONE: BoardRow[] = [];
@@ -82,6 +82,90 @@ function Owner({ dept, part, split = false }: { dept: Department | null; part?: 
         </span>
       )}
     </span>
+  );
+}
+
+/**
+ * The side panel on a computer before a room is picked (Pong, 16 Nov 2026: the board opens on desktop): the rooms in use
+ * that day in number order, each with its department and how many cases it holds, as a second way to open a room beside
+ * the plan. Hidden below 1024px, where the panel is the bottom sheet and only opens with a room.
+ */
+function RoomOverview({
+  rooms,
+  date,
+  periods,
+  counts,
+  mismatches,
+  onOpen,
+}: {
+  rooms: readonly Room[];
+  date: string;
+  periods: RepairPeriods;
+  counts: Record<string, number>;
+  mismatches: Record<string, number>;
+  onOpen: (id: string) => void;
+}) {
+  const total = rooms.reduce((sum, room) => sum + (counts[room.id] ?? 0), 0);
+  return (
+    <div className="hidden min-h-0 flex-1 flex-col lg:flex" data-testid="room-overview">
+      <div className="shrink-0 border-b border-line px-5 pt-4 pb-3.5">
+        <div className="flex min-h-11 items-center gap-2.5">
+          <h2 className="text-xl leading-snug font-bold text-ink">ห้องที่เปิด</h2>
+          <span className="count-tag">
+            <span className="tabular-nums">{rooms.length}</span> ห้อง · <span className="tabular-nums">{total}</span> รายการ
+          </span>
+        </div>
+        <p className="mt-0.5 text-sm text-muted">เลือกห้องบนแปลนหรือในรายการนี้เพื่อดูรายการผ่าตัด</p>
+      </div>
+      <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1.5">
+        {rooms.map((room) => {
+          const allocation = allocationFor(room.id, date, periods);
+          const fill = allocation?.am?.color ?? UNALLOCATED_FILL;
+          const count = counts[room.id] ?? 0;
+          const mismatch = (mismatches[room.id] ?? 0) > 0;
+          return (
+            <li key={room.id}>
+              <button
+                type="button"
+                className="flex w-full cursor-pointer items-center gap-3 px-5 py-2.5 text-left hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus"
+                onClick={() => onOpen(room.id)}
+                data-testid={`overview-${room.id}`}
+              >
+                <span
+                  aria-hidden
+                  className="flex size-10 shrink-0 items-center justify-center rounded-xl text-base font-bold tabular-nums shadow-[inset_0_1px_0_rgb(255_255_255/0.35),0_1px_2px_rgb(41_29_20/0.18)]"
+                  style={{ background: fill, color: readableTextOn(fill) }}
+                >
+                  {room.number}
+                </span>
+                <span className="sr-only">{roomLabel(room)}</span>
+                <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+                  {allocation?.split ? (
+                    <>
+                      <Owner part="เช้า" dept={allocation.am} split />
+                      <Owner part="บ่าย" dept={allocation.pm} split />
+                    </>
+                  ) : (
+                    <Owner dept={allocation?.am ?? null} split />
+                  )}
+                </span>
+                {mismatch ? (
+                  <span className="shrink-0 text-late" title="ข้อมูลไม่ตรงกับการจอง">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01" />
+                    </svg>
+                    <span className="sr-only">ข้อมูลไม่ตรงกับการจอง</span>
+                  </span>
+                ) : null}
+                <span className={`shrink-0 text-sm tabular-nums ${count ? "font-semibold text-ink-2" : "text-muted"}`}>
+                  {count ? `${count} รายการ` : "ไม่มีรายการ"}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 
@@ -211,6 +295,7 @@ export function SuiteBoard({
   const cases = room ? rowsOf(operations, room.id) : NONE;
   const allocation = room && planDate ? allocationFor(room.id, planDate, periods) : null;
   const wash = allocation?.am?.color ?? allocation?.pm?.color;
+  const overviewRooms = useMemo(() => (planDate ? openRooms(planDate, periods) : []), [planDate, periods]);
 
   return (
     <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -322,6 +407,15 @@ export function SuiteBoard({
                 <CaseList key={room?.id} cases={cases} />
               )}
             </div>
+          ) : planDate && overviewRooms.length > 0 ? (
+            <RoomOverview
+              rooms={overviewRooms}
+              date={planDate}
+              periods={periods}
+              counts={counts}
+              mismatches={board?.mismatchByRoom ?? NO_MISMATCH}
+              onOpen={choose}
+            />
           ) : (
             <div className="hidden flex-1 flex-col items-center justify-center gap-3 px-8 text-center lg:flex">
               <span aria-hidden className="flex size-11 items-center justify-center rounded-full bg-brand-tint text-brand">

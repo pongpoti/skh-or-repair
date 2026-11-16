@@ -19,7 +19,7 @@ function fail(req: NextRequest, code: ErrorCode): NextResponse {
   return res;
 }
 
-/** LINE redirects here with ?code&state (or ?error). Only inside the LIFF app (the proxy checks too). */
+/** LINE redirects here with ?code&state (or ?error). Only where the device gate lets the board open (the proxy checks too). */
 export async function GET(req: NextRequest) {
   if (!clientAllowed(req.headers.get("user-agent"), gateMode())) {
     return NextResponse.redirect(new URL(GATE_PATH, req.nextUrl.origin), { status: 303, headers: { "Cache-Control": "no-store" } });

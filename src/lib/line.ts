@@ -14,7 +14,11 @@ export function pkceChallenge(verifier: string): string {
   return createHash("sha256").update(verifier, "ascii").digest("base64url");
 }
 
-export function buildAuthorizeUrl(cfg: LineConfig, p: { state: string; nonce: string; challenge: string }): string {
+/**
+ * LINE Login's authorization URL. `qr` (a computer or tablet) opens LINE's sign-in page on its QR code, which the LINE
+ * app on the person's phone scans, instead of the email and password form most staff have never set up.
+ */
+export function buildAuthorizeUrl(cfg: LineConfig, p: { state: string; nonce: string; challenge: string; qr?: boolean }): string {
   const u = new URL(cfg.authorizeUrl);
   u.search = new URLSearchParams({
     response_type: "code",
@@ -26,6 +30,7 @@ export function buildAuthorizeUrl(cfg: LineConfig, p: { state: string; nonce: st
     code_challenge: p.challenge,
     code_challenge_method: "S256",
     ui_locales: "th",
+    ...(p.qr ? { initial_amr_display: "lineqr" } : {}),
   }).toString();
   return u.toString();
 }
