@@ -31,13 +31,13 @@ function fixedDay(date: string, time: string | undefined): BoardDay {
  *
  * - ?date=2026-12-14 shows the board as on that date (e.g. the repair's second half); ?day=tue the Tuesday of this week.
  * - ?at=2026-11-16T16:30+07:00 shows the board's day at that moment (after 16:00: the next workday).
- * - ?holiday=วันปิยมหาราช shows the closed day.
+ * - ?holiday=วันปิยมหาราช shows the closed day (no badge in the strip since 16 Nov 2026).
  * - ?sample=1 adds made-up HOSxP cases and bookings (preview/sample.ts) to see the row icons, flags and room marks;
  *   with ?upload=0 the bookings alone, as before MX uploads.
  * - ?mx=1 shows the board as MX sees it (every HN, the upload button); otherwise as the sample's doctor, who sees the
  *   HN of their own bookings. ?admin=1 adds the admin button.
- * - ?failed=1 shows the board as when its cases cannot be read; ?notices=all puts every kind of notice in the strip at
- *   once, to see the short badges, the sideways scroll and each bubble.
+ * - ?failed=1 shows the board as when its cases cannot be read (no badge since 16 Nov 2026); ?notices=all puts every
+ *   kind of notice in the strip, now the one ยังไม่มีตาราง HOSxP badge.
  * - ?book=1 adds the booking form as the sample doctor of ?dept= (a department code, GENSX unless given) sees it;
  *   ?time=15:30 with ?date= sets the clock that picks the first day that can be booked. Bookings stay in memory.
  */
@@ -122,12 +122,11 @@ export default async function PreviewPage({
         board={board}
         today={day.today}
         periods={periods}
-        holiday={holiday}
         roomId={params.room ?? null}
         pathname="/preview"
         casesUnavailable={Boolean(params.failed)}
         adding={adding}
-        notices={params.notices === "all" ? everyNotice(day.boardDate, holiday ?? undefined) : undefined}
+        notices={params.notices === "all" ? everyNotice(day.boardDate) : undefined}
       />
     </div>
   );

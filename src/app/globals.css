@@ -581,6 +581,10 @@ body {
     flex: none;
     scroll-snap-align: start;
   }
+  /* The badges sit in the middle of the strip (Pong, 16 Nov 2026); auto margins, unlike justify-content: center, keep
+     the first one reachable when the row is wider than the strip. */
+  .notice-item:first-child { margin-left: auto; }
+  .notice-item:last-child { margin-right: auto; }
   /* Alone, a badge may take the strip's whole width and cuts a long message short; the bubble has it all. */
   .notice-item-alone {
     flex: 0 1 auto;
@@ -609,7 +613,6 @@ body {
   .notice-badge > svg { flex: none; }
   .notice-badge:hover { background: rgb(255 255 255 / 0.95); }
   .notice-badge[data-tone="warning"] { color: var(--late); }
-  .notice-badge[data-tone="danger"] { color: var(--stop); }
   .notice-badge[aria-expanded="true"] {
     background: #fff;
     border-color: currentColor;
@@ -628,6 +631,13 @@ body {
     transition: transform 0.18s ease;
   }
   .notice-badge[aria-expanded="true"] .notice-badge-chevron { transform: rotate(180deg); }
+
+  /* The no-HOSxP-table icon in a room card's header, beside the count (Pong, 16 Nov 2026). */
+  .room-no-table {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+  }
 
   /* A notice's message, said as a chat bubble under its badge with a soft shadow; the tail points at the badge. */
   .notice-bubble {
@@ -672,7 +682,6 @@ body {
     color: var(--ink-2);
   }
   .notice-bubble[data-tone="warning"] .notice-bubble-icon { background: var(--late-tint); color: var(--late); }
-  .notice-bubble[data-tone="danger"] .notice-bubble-icon { background: rgb(253 236 234); color: var(--stop); }
   .notice-bubble-close {
     display: grid;
     flex: none;

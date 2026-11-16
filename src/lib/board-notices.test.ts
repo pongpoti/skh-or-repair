@@ -1,50 +1,34 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { badgeText, boardNotices, bubblePlace } from "./board-notices.ts";
+import { badgeText, boardNotices, bubblePlace, DEMO_NOTICE, everyNotice } from "./board-notices.ts";
 
-const NONE = { closed: false, holiday: null, failed: false, missingUpload: null, mismatches: 0 };
-
-test("no notices on an ordinary day: the strip stays empty", () => {
-  assert.deepEqual(boardNotices(NONE), []);
+test("no notice when the board's day has its HOSxP table: the strip stays empty", () => {
+  assert.deepEqual(boardNotices({ missingUpload: null }), []);
 });
 
-test("each notice: its whole message, short form, tone and test id", () => {
-  const [noUpload] = boardNotices({ ...NONE, missingUpload: "2026-11-16" });
+test("the one notice (Pong, 16 Nov 2026): no HOSxP table yet, with the database-off icon", () => {
+  const notices = boardNotices({ missingUpload: "2026-11-16" });
+  assert.equal(notices.length, 1);
+  const [noUpload] = notices;
   assert.equal(noUpload.id, "no-upload");
+  assert.equal(noUpload.icon, "no-table");
   assert.equal(noUpload.text, "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569");
   assert.equal(noUpload.short, "ยังไม่มี HOSxP");
   assert.equal(noUpload.tone, "warning");
   assert.equal(noUpload.testId, "no-upload-alert");
-
-  const [mismatch] = boardNotices({ ...NONE, mismatches: 6 });
-  assert.equal(mismatch.text, "ไม่ตรงกับการจอง 6 รายการ");
-  assert.equal(mismatch.short, "ไม่ตรง 6");
-  assert.equal(mismatch.testId, "mismatch-alert");
-
-  const [failed] = boardNotices({ ...NONE, failed: true });
-  assert.equal(failed.text, "โหลดเคสไม่สำเร็จ ลองรีเฟรช");
-  assert.equal(failed.tone, "danger");
-
-  assert.equal(boardNotices({ ...NONE, closed: true, holiday: "วันปิยมหาราช" })[0].text, "วันหยุด วันปิยมหาราช · ไม่มีตารางผ่าตัด");
-  assert.equal(boardNotices({ ...NONE, closed: true })[0].text, "วันนี้เป็นวันหยุด ไม่มีตารางผ่าตัด");
-  for (const notice of boardNotices({ closed: true, holiday: null, failed: true, missingUpload: "2026-11-16", mismatches: 1 })) {
-    assert.ok(notice.detail.length > 0, `${notice.id} has a message for its bubble`);
-    assert.ok(notice.short.length < notice.text.length, `${notice.id}: the short form is shorter`);
-  }
+  assert.ok(noUpload.detail.includes("15:00–16:00"), "the bubble says when MX uploads");
 });
 
-test("the order: holiday, cases not loaded, no upload, mismatches", () => {
-  const all = boardNotices({ closed: true, holiday: null, failed: true, missingUpload: "2026-11-16", mismatches: 2 });
-  assert.deepEqual(
-    all.map((notice) => notice.id),
-    ["holiday", "failed", "no-upload", "mismatch"],
-  );
+test("test mode's every notice is that one badge: no holiday, load failure or mismatch badges", () => {
+  const ids = everyNotice("2026-11-16").map((notice) => notice.id);
+  assert.deepEqual(ids, ["no-upload"]);
 });
 
-test("a badge says the whole message alone and its short form with others", () => {
-  const [notice] = boardNotices({ ...NONE, missingUpload: "2026-11-16" });
+test("a badge says the whole message alone and its short form with others (the demo's)", () => {
+  const [notice] = boardNotices({ missingUpload: "2026-11-16" });
   assert.equal(badgeText(notice, 1), "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569");
   assert.equal(badgeText(notice, 2), "ยังไม่มี HOSxP");
+  assert.ok(DEMO_NOTICE.short.length < DEMO_NOTICE.text.length);
 });
 
 test("the bubble: centred on its badge, kept inside the strip, its tail on the badge", () => {

@@ -350,8 +350,8 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
 /**
  * The day to name in the board's "no HOSxP list yet" alert, or null. The board's rows come only from MX's uploads, in
  * the repair and outside it (the weekly export no longer feeds the board), so a day without one is news to everyone:
- * otherwise an empty room could not be told from a missing list. Not when the cases could not be read (that notice
- * stands instead) or there is no board (a closed day).
+ * otherwise an empty room could not be told from a missing list. Not when the cases could not be read (whether there is
+ * a list is not known then) or there is no board (a closed day).
  */
 export function missingUploadDay(board: { date: string; uploaded: boolean } | null, casesUnavailable: boolean): string | null {
   return board && !board.uploaded && !casesUnavailable ? board.date : null;
