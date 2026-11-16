@@ -458,6 +458,9 @@ body {
     color: var(--ink-2);
   }
   .case-icon-matched { color: var(--live); background: var(--live-tint); border-color: rgb(21 127 61 / 0.25); }
+  /* Each source its own colour (Pong, 16 Nov 2026): HOSxP's database blue, a booking still waiting for MX's list amber. */
+  .case-icon-hosxp { color: #1f5a8a; background: #e4eef7; border-color: rgb(31 90 138 / 0.28); }
+  .case-icon-booking { color: var(--late); background: var(--late-tint); border-color: rgb(150 88 0 / 0.28); }
   /* The dressing room's doctor and nurse portraits bring their own round tile (components/case-source.tsx). */
   .case-icon-doer { border: none; background: none; }
   .case-tip {
@@ -495,10 +498,13 @@ body {
     border-top-right-radius: 0.1875rem;
     transform: translateY(-50%) rotate(45deg);
   }
-  /* The icon's own colours: the doctor's teal-green scrubs, the nurse's pink, the handshake's green. */
+  /* The icon's own colours: the doctor's teal-green scrubs, the nurse's pink, the handshake's green, the database's blue,
+     the calendar's amber. */
   .case-tip[data-tone="surgeon"] { background: #7fbfb7; border-color: #5a9e96; color: var(--ink); }
   .case-tip[data-tone="scrub"] { background: #e49aa2; border-color: #c97a84; color: var(--ink); }
   .case-tip[data-tone="matched"] { background: var(--live-tint); border-color: rgb(21 127 61 / 0.3); color: var(--live); }
+  .case-tip[data-tone="hosxp"] { background: #e4eef7; border-color: rgb(31 90 138 / 0.3); color: #1f5a8a; }
+  .case-tip[data-tone="booking"] { background: var(--late-tint); border-color: rgb(150 88 0 / 0.3); color: var(--late); }
 
   /* Floating control over the plan: frosted, 44px tall. */
   .pill {

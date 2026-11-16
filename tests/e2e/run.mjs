@@ -3157,7 +3157,7 @@ async function main() {
       // a tap says what it means in a bubble beside it (Pong, 16 Nov 2026), white like the icon; Escape closes only it
       await icon.click();
       const tip = board.locator('[data-testid="row-icon-tip"]');
-      assert((await tip.textContent()) === "แพทย์จองห้อง" && (await tip.getAttribute("data-tone")) === "plain", "the booking's meaning in a bubble");
+      assert((await tip.textContent()) === "แพทย์จองห้อง" && (await tip.getAttribute("data-tone")) === "booking", "the booking's meaning in a bubble, amber");
       assert((await icon.getAttribute("aria-expanded")) === "true", "the icon says its bubble is open");
       await board.keyboard.press("Escape");
       await tip.waitFor({ state: "detached" });
@@ -3392,6 +3392,9 @@ async function main() {
       await page.click('.case-row [data-testid="row-icon"]');
       const matchedTip = page.locator('[data-testid="row-icon-tip"]');
       assert((await matchedTip.textContent()) === "ตาราง HOSxP ตรงกับการจอง" && (await matchedTip.getAttribute("data-tone")) === "matched", "the matched meaning");
+      // the HOSxP-only database icon has its own blue, apart from the calendar's amber (Pong, 16 Nov 2026)
+      const hosxpBg = await page.$eval('.case-row [data-testid="row-icon"][data-source="hosxp"]', (el) => getComputedStyle(el).backgroundColor);
+      assert(hosxpBg === "rgb(228, 238, 247)", `the database icon's blue tile: ${hosxpBg}`);
       await ownerShot(page, "room-sheet-icon-tip.png");
       // a tap on the dimmed plan above the sheet closes the bubble and keeps the room open, like the account menu
       await page.click('button[aria-label="ปิดรายการห้อง"]', { position: { x: 195, y: 300 } });
