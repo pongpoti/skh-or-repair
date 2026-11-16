@@ -96,15 +96,19 @@ test("the doctor's choice of room wins when matched: the dressing room stays, an
   // Nobody booked this one: its name places it, and an I&D is a dressing (Pong, 15 Nov 2026).
   const unbooked = wb({ hn: "225", operation: "I&D abscess Rt thigh", dept: "GENSX" });
   const result = build([item, plain, named, unbooked], [mine, kept]);
+  // The booked cases first, then the ones nobody booked. In the dressing room a case nobody booked is no mismatch, and
+  // every row there says who does the dressing.
   assert.deepEqual(
-    result.rows.map((row) => [row.id, row.roomId, row.source, row.scrubDoes]),
+    result.rows.map((row) => [row.id, row.roomId, row.source, row.flag, row.doneBy]),
     [
-      [`mt-${mine.id}`, "or-10", "matched", true],
-      [`hx-${plain.caseId}`, "or-13", "hosxp", undefined],
-      [`mt-${kept.id}`, "or-13", "matched", undefined],
-      [`hx-${unbooked.caseId}`, "or-10", "hosxp", undefined],
+      [`mt-${mine.id}`, "or-10", "matched", null, "scrub"],
+      [`mt-${kept.id}`, "or-13", "matched", null, undefined],
+      [`hx-${plain.caseId}`, "or-13", "hosxp", "unbooked", undefined],
+      [`hx-${unbooked.caseId}`, "or-10", "hosxp", null, "surgeon"],
     ],
   );
+  assert.equal(result.mismatchCount, 1);
+  assert.deepEqual(result.mismatchByRoom, { "or-13": 1 });
 });
 
 test("a matched case booked in the department's room keeps the workbook's other rules: an emergency goes to the emergency room", () => {
@@ -135,11 +139,12 @@ test("a patient booked twice on one day: each booking pairs with the HOSxP case 
   const first = wb({ hn: "555", operation: "ORIF Lt tibia", dept: "ORTHO" });
   const second = wb({ hn: "555", operation: "Wound dressing Lt leg", dept: "ORTHO" });
   const result = build([first, second], [dressing, orif]);
+  // In the order they were booked, whatever HOSxP's order.
   assert.deepEqual(
-    result.rows.map((row) => [row.id, row.roomId, row.procedure, row.scrubDoes]),
+    result.rows.map((row) => [row.id, row.roomId, row.procedure, row.doneBy]),
     [
+      [`mt-${dressing.id}`, "or-10", "Wound dressing Lt leg", "scrub"],
       [`mt-${orif.id}`, "or-13", "ORIF Lt tibia", undefined],
-      [`mt-${dressing.id}`, "or-10", "Wound dressing Lt leg", true],
     ],
   );
 });
@@ -158,7 +163,7 @@ test("a case the workbook cannot place shows in its booking's room, but a depart
   );
 });
 
-test("a dressing-room booking carries the scrub answer; others carry none", () => {
+test("in the dressing room each row says who does the dressing: the scrub if the booking said so, else the doctor", () => {
   const yes = booking({ dressing: true, scrubDoes: true });
   const no = booking({ dressing: true, scrubDoes: false });
   const dept = booking({});
@@ -167,39 +172,51 @@ test("a dressing-room booking carries the scrub answer; others carry none", () =
   const legacyDept = booking({ roomId: "or-12", dressing: null, operation: "Wound dressing" });
   const result = build(null, [yes, no, dept, legacyDressing, legacyDept]);
   assert.deepEqual(
-    result.rows.map((row) => [row.id, row.roomId, "scrubDoes" in row ? row.scrubDoes : "none"]),
+    result.rows.map((row) => [row.id, row.roomId, "doneBy" in row ? row.doneBy : "none"]),
     [
-      [`bk-${yes.id}`, "or-10", true],
-      [`bk-${no.id}`, "or-10", false],
+      [`bk-${yes.id}`, "or-10", "scrub"],
+      [`bk-${no.id}`, "or-10", "surgeon"],
       [`bk-${dept.id}`, "or-12", "none"],
-      [`bk-${legacyDressing.id}`, "or-10", "none"],
+      [`bk-${legacyDressing.id}`, "or-10", "surgeon"],
       [`bk-${legacyDept.id}`, "or-12", "none"],
     ],
   );
 });
 
-test("left over: a workbook case is flagged unbooked in its placed room, a booking not-in-hosxp in its room", () => {
+test("left over after an upload: a case nobody booked is flagged (not in the dressing room); a booking HOSxP lacks leaves the board", () => {
   // A dressing goes to the dressing room whatever its department, so even one with no department is placed.
   const item = wb({ operation: "Wound dressing", dept: null });
+  const plain = wb({ dept: "GENSX" });
   const mine = booking({ subtype: "ORTHO" });
-  const result = build([item], [mine]);
+  const result = build([item, plain], [mine]);
   assert.deepEqual(
     result.rows.map((row) => [row.id, row.roomId, row.source, row.flag]),
     [
-      [`hx-${item.caseId}`, "or-10", "hosxp", "unbooked"],
-      [`bk-${mine.id}`, "or-13", "booking", "not-in-hosxp"],
+      [`hx-${item.caseId}`, "or-10", "hosxp", null],
+      [`hx-${plain.caseId}`, "or-12", "hosxp", "unbooked"],
     ],
   );
   assert.equal(result.rows[0].specialty, null, "no department");
   assert.equal(result.rows[0].bookedBy, undefined);
-  assert.equal(result.mismatchCount, 2);
-  assert.deepEqual(result.mismatchByRoom, { "or-10": 1, "or-13": 1 });
+  assert.equal(result.mismatchCount, 1);
+  assert.deepEqual(result.mismatchByRoom, { "or-12": 1 });
+  // The booking is no real patient (Pong, 15 Nov 2026): off the board, for MX's upload summary alone.
+  assert.deepEqual(
+    result.unmatched.map((row) => [row.id, row.roomId, row.source, row.flag, row.order]),
+    [[`bk-${mine.id}`, "or-13", "booking", "not-in-hosxp", 1]],
+  );
+  assert.deepEqual(result.countByRoom, { "or-10": 1, "or-12": 1 });
 });
 
-test("an upload with no cases still flags every booking", () => {
+test("an upload with no cases takes every booking off the board", () => {
   const result = build([], [booking({})]);
   assert.equal(result.uploaded, true);
-  assert.deepEqual(result.rows.map((row) => row.flag), ["not-in-hosxp"]);
+  assert.deepEqual(result.rows, []);
+  assert.deepEqual(result.unmatched.map((row) => row.flag), ["not-in-hosxp"]);
+  assert.equal(result.mismatchCount, 0);
+  // Before an upload the same booking shows.
+  assert.equal(build(null, [booking({})]).rows.length, 1);
+  assert.deepEqual(build(null, [booking({})]).unmatched, []);
 });
 
 test("matching is one to one, workbook cases in file order taking the earliest free booking", () => {
@@ -209,7 +226,7 @@ test("matching is one to one, workbook cases in file order taking the earliest f
   const late = booking({ hn: "555", roomId: "or-11" });
   const alone = booking({ hn: "556", roomId: "or-11" });
   const result = build([first, second], [early, late, alone]);
-  const byId = Object.fromEntries(result.rows.map((row) => [row.id, row]));
+  const byId = Object.fromEntries([...result.rows, ...result.unmatched].map((row) => [row.id, row]));
   assert.equal(byId[`mt-${early.id}`].procedure, second.operation, "position 1 takes the earliest booking");
   assert.equal(byId[`mt-${late.id}`].procedure, first.operation);
   assert.equal(byId[`bk-${alone.id}`].flag, "not-in-hosxp");
@@ -225,9 +242,9 @@ test("a booking from before HNs, or on another day, never matches", () => {
   const old = booking({ hn: null });
   const other = booking({ hn: "1", date: "2026-11-18" });
   const result = build([item], [old, other]);
-  assert.deepEqual(result.rows.map((row) => [row.source, row.flag]), [["hosxp", "unbooked"], ["booking", "not-in-hosxp"]]);
-  assert.equal(result.rows[1].id, `bk-${old.id}`);
-  assert.ok(!("hn" in result.rows[1]), "no HN to show");
+  assert.deepEqual(result.rows.map((row) => [row.source, row.flag]), [["hosxp", "unbooked"]]);
+  assert.deepEqual(result.unmatched.map((row) => [row.id, row.flag]), [[`bk-${old.id}`, "not-in-hosxp"]]);
+  assert.ok(!("hn" in result.unmatched[0]), "no HN to show");
 });
 
 test("rows whose room does not operate that day are left off; a matched pair shows in the workbook's room", () => {
@@ -260,9 +277,9 @@ test("workbook cases are placed under the repair's dates in force when the board
     buildBoardRows({ date, periods, workbook: stored, bookings: [mine], viewer: MX }).rows.map((row) => [row.source, row.roomId, row.flag]);
 
   // As uploaded: the stored rooms.
-  assert.deepEqual(rooms(REPAIR), [["hosxp", "or-5", "unbooked"], ["matched", "or-2", null]]);
+  assert.deepEqual(rooms(REPAIR), [["matched", "or-2", null], ["hosxp", "or-5", "unbooked"]]);
   // After the change nothing is lost: the cases move to the first half's rooms and are still flagged and counted.
-  assert.deepEqual(rooms(moved), [["hosxp", "or-12", "unbooked"], ["matched", "or-13", null]]);
+  assert.deepEqual(rooms(moved), [["matched", "or-13", null], ["hosxp", "or-12", "unbooked"]]);
   const after = buildBoardRows({ date, periods: moved, workbook: stored, bookings: [mine], viewer: MX });
   assert.equal(after.mismatchCount, 1);
   assert.deepEqual(after.mismatchByRoom, { "or-12": 1 });
@@ -283,26 +300,35 @@ test("a booking moves with the repair's dates, like the workbook's cases", () =>
   assert.deepEqual(at({ half1: { from: "2026-11-14", to: "2027-01-24" }, half2: { from: "2027-01-25", to: "2027-03-17" } }), ["or-2"]);
 });
 
-test("rows are numbered per room: workbook cases in file order, then bookings in the order they were made", () => {
-  const b1 = booking({});
+test("rows are numbered per room: the booked cases first, the earliest booking first, then HOSxP's others in file order", () => {
+  // Pong, 15 Nov 2026: "first priority is booking case: sort by prior set; second priority is HOSxP sequence".
   const c2 = wb({ position: 2 });
   const c1 = wb({ position: 1 });
-  const b2 = booking({});
-  const m = wb({ hn: "M1", position: 3 });
-  const mb = booking({ hn: "M1" });
-  const result = build([c2, m, c1], [b1, b2, mb]);
+  const m1 = wb({ hn: "M1", position: 3 });
+  const m2 = wb({ hn: "M2", position: 4 });
+  // Bookings come oldest first (lib/cases.ts): M2's was made before M1's.
+  const early = booking({ hn: "M2", bookedAt: "2026-11-10T02:05:00.000Z" });
+  const late = booking({ hn: "M1", bookedAt: "2026-11-15T16:43:00.000Z" });
+  const stray = booking({});
+  const result = build([c2, m1, c1, m2], [early, stray, late]);
   assert.deepEqual(
-    result.rows.map((row) => [row.id, row.order]),
+    result.rows.map((row) => [row.id, row.order, row.bookedAt ?? null]),
     [
-      [`hx-${c1.caseId}`, 1],
-      [`hx-${c2.caseId}`, 2],
-      [`mt-${mb.id}`, 3],
-      [`bk-${b1.id}`, 4],
-      [`bk-${b2.id}`, 5],
+      [`mt-${early.id}`, 1, "10 พ.ย. 69, 09:05"],
+      [`mt-${late.id}`, 2, "15 พ.ย. 69, 23:43"],
+      [`hx-${c1.caseId}`, 3, null],
+      [`hx-${c2.caseId}`, 4, null],
     ],
   );
-  assert.deepEqual(result.countByRoom, { "or-12": 5 });
-  assert.deepEqual(result.mismatchByRoom, { "or-12": 4 });
+  assert.deepEqual(result.countByRoom, { "or-12": 4 });
+  assert.deepEqual(result.mismatchByRoom, { "or-12": 2 });
+  assert.deepEqual(result.unmatched.map((row) => row.id), [`bk-${stray.id}`]);
+
+  // Before an upload the bookings alone, in the order they were booked, with their time.
+  const before = build(null, [early, stray, late]);
+  assert.deepEqual(before.rows.map((row) => [row.id, row.order]), [[`bk-${early.id}`, 1], [`bk-${stray.id}`, 2], [`bk-${late.id}`, 3]]);
+  assert.equal(before.rows[0].bookedAt, "10 พ.ย. 69, 09:05");
+  assert.ok(!("bookedAt" in before.rows[1]), "no time when the booking has none");
 });
 
 test("the HN reaches only MX and admins (every row) and the doctor who booked (their own bookings)", () => {
@@ -313,7 +339,12 @@ test("the HN reaches only MX and admins (every row) and the doctor who booked (t
   const theirsMatched = booking({ hn: "103", surgeonId: "8" });
   const workbook = [hosxpOnly, wb({ hn: "101" }), wb({ hn: "103" })];
   const bookings = [mine, mineMatched, theirs, theirsMatched];
-  const hns = (viewer: BoardViewer) => Object.fromEntries(build(workbook, bookings, viewer).rows.map((row) => [row.id, row.hn ?? null]));
+  // The bookings HOSxP lacks are off the board but in MX's upload summary: the same rule.
+  const all = (viewer: BoardViewer) => {
+    const built = build(workbook, bookings, viewer);
+    return [...built.rows, ...built.unmatched];
+  };
+  const hns = (viewer: BoardViewer) => Object.fromEntries(all(viewer).map((row) => [row.id, row.hn ?? null]));
 
   assert.deepEqual(hns(MX), {
     [`hx-${hosxpOnly.caseId}`]: "99",
@@ -329,7 +360,7 @@ test("the HN reaches only MX and admins (every row) and the doctor who booked (t
     [`bk-${mine.id}`]: "100",
     [`bk-${theirs.id}`]: null,
   });
-  const anyone = build(workbook, bookings, NOBODY).rows;
+  const anyone = all(NOBODY);
   assert.ok(anyone.every((row) => !("hn" in row)), "no hn key at all");
   assert.doesNotMatch(JSON.stringify(anyone), /"(99|100|101|102|103)"/, "no HN anywhere in what the client gets");
 });

@@ -81,12 +81,22 @@ test("on any weekday, in the repair or outside it (a gap between the halves, the
   }
 });
 
-test("the demo looks like a real day: matched, unbooked and booking-only rows, every status, the out-of-hours shift", () => {
+test("the demo looks like a real day: matched and unbooked rows, booking times, every status, the out-of-hours shift", () => {
   for (const date of ["2026-11-17", "2027-02-02"]) {
     const { built, bookings } = board(date, DEFAULT_REPAIR_PERIODS);
     const sources = new Set(built.rows.map((row) => row.source));
-    assert.deepEqual([...sources].toSorted(), ["booking", "hosxp", "matched"], `${date}: sources`);
+    // No booking without its HOSxP case: after an upload the board leaves those off.
+    assert.deepEqual([...sources].toSorted(), ["hosxp", "matched"], `${date}: sources`);
+    assert.deepEqual(built.unmatched, [], `${date}: every booking matches`);
     assert.ok(built.uploaded, "as after MX's upload");
+    // Each booking has its time, oldest first as the database lists them, and the booked cases come first in each room.
+    assert.ok(bookings.every((booking) => booking.bookedAt && booking.bookedAt < `${date}T00:00`), `${date}: booked before the day`);
+    assert.deepEqual(bookings.map((booking) => booking.bookedAt), bookings.map((booking) => booking.bookedAt).toSorted());
+    assert.ok(built.rows.every((row) => (row.source === "matched") === (row.bookedAt !== undefined)), `${date}: a time on every booked row`);
+    for (const room of openRooms(date, DEFAULT_REPAIR_PERIODS)) {
+      const sources = built.rows.filter((row) => row.roomId === room.id).map((row) => row.source);
+      assert.deepEqual(sources, sources.toSorted((a, b) => Number(a === "hosxp") - Number(b === "hosxp")), `${date} ${room.id}: booked first`);
+    }
     // The ! marks show in some rooms, not all.
     const flagged = Object.keys(built.mismatchByRoom);
     const open = openRooms(date, DEFAULT_REPAIR_PERIODS);
@@ -97,12 +107,14 @@ test("the demo looks like a real day: matched, unbooked and booking-only rows, e
       assert.ok(statuses.has(status), `${date}: a ${status} case`);
     }
     assert.ok(built.rows.some((row) => row.shift === "out"), `${date}: an out-of-hours case`);
-    // The dressing room: dressing names only, and both answers to the scrub question.
-    const dressingRoom = open.find((room) => built.rows.some((row) => row.roomId === room.id && row.scrubDoes !== undefined));
-    assert.ok(dressingRoom, `${date}: the dressing room's bookings carry the scrub answer`);
+    // The dressing room: dressing names only, and who does each dressing, both the doctor and the scrub.
+    const dressingRoom = open.find((room) => built.rows.some((row) => row.roomId === room.id && row.doneBy !== undefined));
+    assert.ok(dressingRoom, `${date}: the dressing room's rows say who does the dressing`);
     const dressings = built.rows.filter((row) => row.roomId === dressingRoom.id);
     assert.ok(dressings.every((row) => isDressingOperation(row.procedure)), `${date}: dressing names in ${dressingRoom.id}`);
-    assert.deepEqual(new Set(dressings.flatMap((row) => (row.scrubDoes === undefined ? [] : [row.scrubDoes]))), new Set([true, false]));
+    assert.ok(dressings.every((row) => row.doneBy !== undefined), `${date}: every dressing row`);
+    assert.deepEqual(new Set(dressings.map((row) => row.doneBy)), new Set(["scrub", "surgeon"]));
+    assert.ok(built.rows.every((row) => (row.roomId === dressingRoom.id) === (row.doneBy !== undefined)), `${date}: only there`);
     // Only dressing-room bookings carry an answer.
     assert.ok(bookings.every((booking) => (booking.scrubDoes === null) === !booking.dressing));
   }

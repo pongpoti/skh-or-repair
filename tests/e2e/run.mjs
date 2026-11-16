@@ -2393,6 +2393,26 @@ async function main() {
     /** The rows of a room's sheet: [source, flag, has an HN]. */
     const sheetRows = (page) =>
       page.$$eval(".case-row", (rows) => rows.map((r) => [r.dataset.source, r.dataset.flag ?? null, r.querySelector('[data-testid="row-hn"]')?.textContent.trim() ?? null]));
+    /** Each row's icon: who does the dressing (the dressing room), else where the row comes from. */
+    const rowIcons = (page) =>
+      page.$$eval('.case-row [data-testid="row-icon"]', (els) => els.map((e) => e.dataset.doneBy ?? e.dataset.source));
+    /**
+     * A one-finger swipe over an element, by Chromium's own touch input (so the page gets real touch events): from its
+     * centre, `dx` pixels sideways and `dy` down.
+     */
+    const swipe = async (page, selector, dx, dy = 0) => {
+      const box = await page.locator(selector).boundingBox();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 6; step += 1) {
+        await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x + (dx * step) / 6, y: y + (dy * step) / 6 }] });
+      }
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await cdp.detach();
+      await page.waitForTimeout(250);
+    };
     /**
      * Picks a day in a Thai date field (components/thai-date-field.tsx): opens its calendar, pages to the day's month
      * and taps the day, then waits for the field to hold it.
@@ -2911,7 +2931,11 @@ async function main() {
       // the BOT's holidays named under the calendar (Pong, 15 Nov 2026: "for special holiday, disable click and remark
       // underneath calendar"); the BOT listed this year, so no note that it did not
       const remarks = await textOf(page, '[data-testid="case-date-calendar"] ul');
-      for (const name of ["7 ธ.ค. ชดเชยวันพ่อแห่งชาติ", "10 ธ.ค. วันรัฐธรรมนูญ", "31 ธ.ค. วันสิ้นปี"]) assert(remarks.includes(name), `${name} under the calendar: ${remarks}`);
+      // and the hospital's own special holiday, 16 Dec (Pong, 15 Nov 2026: "add 16 ธ.ค. 69 as special holiday กรณีพิเศษ")
+      for (const name of ["7 ธ.ค. ชดเชยวันพ่อแห่งชาติ", "10 ธ.ค. วันรัฐธรรมนูญ", "16 ธ.ค. วันหยุดกรณีพิเศษ", "31 ธ.ค. วันสิ้นปี"]) {
+        assert(remarks.includes(name), `${name} under the calendar: ${remarks}`);
+      }
+      assert(await calendar.locator('[data-date="2026-12-16"]').isDisabled(), "16 Dec cannot be booked");
       assert((await page.locator('[data-testid="case-date-calendar-unlisted"]').count()) === 0, "the BOT listed 2569");
       await ownerShot(page, "booking-calendar-holiday.png");
       setNow("2026-11-16T10:00:00+07:00");
@@ -2970,9 +2994,22 @@ async function main() {
       await board.waitForSelector(".case-row");
       assert(JSON.stringify(await sheetRows(board)) === JSON.stringify([["booking", null, null]]), `OR 11: ${JSON.stringify(await sheetRows(board))}`);
       assert((await textOf(board, ".case-row p")).startsWith("Perm cath insertion"), "the booking's operation, now required");
-      // the chip's word, and the longer name a screen reader gets
-      assert((await textOf(board, '.case-row [data-source="booking"] span[aria-hidden="true"]')) === "จอง", "the booking chip");
-      assert((await textOf(board, '.case-row [data-source="booking"] .sr-only')) === "แพทย์จองห้อง", "the booking chip's spoken name");
+      // the row's icon alone at its right end (Pong, 15 Nov 2026: "no text"), with the longer name for a screen reader
+      const icon = board.locator('.case-row [data-testid="row-icon"]');
+      assert((await icon.getAttribute("data-source")) === "booking" && (await icon.locator("svg").count()) === 1, "the booking's icon");
+      assert((await icon.textContent()) === "แพทย์จองห้อง" && (await icon.locator(".sr-only").textContent()) === "แพทย์จองห้อง", "only the spoken name");
+      assert((await icon.getAttribute("title")) === "แพทย์จองห้อง", "the name for a pointer");
+      // when it was booked, smaller, under the surgeon: Bangkok time in Thai (the database's clock, not the app's)
+      const bookedAt = await textOf(board, '.case-row [data-testid="row-booked-at"]');
+      assert(/^วันเวลาที่จองคิว : \d{1,2} [ก-๙]+\.(?:[ก-๙]+\.)? \d{2}, \d{2}:\d{2}$/.test(bookedAt), `the booking's time: ${bookedAt}`);
+      // the dressing room shows who does the dressing instead (Pong, 15 Nov 2026): doctor X said the scrub does, for
+      // Tuesday, before Tuesday's upload
+      await board.goto(`${APP}/?date=2026-11-17&room=or-10`, { waitUntil: "networkidle" });
+      await board.waitForSelector(".case-row");
+      assert(JSON.stringify(await rowIcons(board)) === JSON.stringify(["scrub"]), `OR 10's icon: ${JSON.stringify(await rowIcons(board))}`);
+      assert((await board.getAttribute('.case-row [data-testid="row-icon"]', "title")) === "ฝาก scrub ทำ", "the scrub's name");
+      assert((await board.locator('.case-row [data-testid="row-icon"][data-source]').count()) === 0, "no source icon in the dressing room");
+      await ownerShot(board, "room-sheet-dressing-booked.png");
       await nurse.close();
 
       // HN: the booking doctor sees theirs; nobody else gets another doctor's in the page at all
@@ -3048,11 +3085,12 @@ async function main() {
       await page.waitForSelector('[data-testid="upload-matching"]');
       assert((await textOf(page, '[data-testid="upload-latest"] h2 + p')) === `15:20 น. · ${RP.mx.name}`, "when and by whom");
       const stats = await page.$$eval('[data-testid="upload-latest"] dd', (els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
-      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "7 เคส", "6 รายการ"]), `counts: ${JSON.stringify(stats)}`);
+      // 3 HOSxP cases nobody booked (not the 2 dressings: nobody need book the dressing room) and 1 booking HOSxP lacks
+      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "7 เคส", "4 รายการ"]), `counts: ${JSON.stringify(stats)}`);
       const latest = await textOf(page, '[data-testid="upload-latest"]');
       for (const line of ["ยกเลิกการผ่าตัด", "เคสของ รพ.นครท่าฉลอม", "OR 12 · GENSX", "ID ซ้ำ นับครั้งเดียว"]) assert(latest.includes(line), `summary shows ${line}`);
       assert((await textOf(page, '[data-testid="upload-matching"]')) === "แพทย์จองไว้ 3 รายการ · ตรงกัน 2 รายการ", `matching: ${await textOf(page, '[data-testid="upload-matching"]')}`);
-      assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 5, "five HOSxP cases nobody booked");
+      assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 3, "three HOSxP cases nobody booked, outside the dressing room");
       const missing = await textOf(page, '[data-testid="upload-not-in-hosxp"]');
       assert(missing.includes(`HN ${HN_X_MISSING}`) && missing.includes(RP.drX.name) && missing.includes("OR 10"), `the booking HOSxP does not list: ${missing}`);
 
@@ -3076,7 +3114,7 @@ async function main() {
       await ctx.close();
     });
 
-    await t("16:00: the board turns to Tuesday with the upload: HOSxP, จอง and ตรงกัน rows, flags, the mismatch alert; HN only for who may see it", async () => {
+    await t("16:00: the board turns to Tuesday with the upload: booked rows first, a booking HOSxP lacks gone, icons, the mismatch alert; HN only for who may see it", async () => {
       // until 16:00 the board keeps Monday: the upload is the next cycle's
       setNow("2026-11-16T15:59:00+07:00");
       const ctx = await contextAs(RP.admin);
@@ -3092,46 +3130,79 @@ async function main() {
       assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดถัดไป", "tomorrow's list");
       assert((await page.getAttribute("header time", "datetime")) === "2026-11-17", "dated Tuesday");
       assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "uploaded: no alert");
-      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 6 รายการ", `mismatch alert: ${await textOf(page, '[data-testid="mismatch-alert"]')}`);
-      for (const [room, flagged] of [["or-10", true], ["or-11", true], ["or-12", true], ["or-13", false]]) {
+      // HOSxP's cases nobody booked, but not the dressing room's; the booking HOSxP does not list is off the board
+      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 3 รายการ", `mismatch alert: ${await textOf(page, '[data-testid="mismatch-alert"]')}`);
+      for (const [room, flagged] of [["or-10", false], ["or-11", true], ["or-12", true], ["or-13", false]]) {
         const label = (await page.getAttribute(`#${room} .fp-floor`, "aria-label")) ?? "";
         assert(label.includes("ข้อมูลไม่ตรงกับการจอง") === flagged, `${room} mismatch mark: ${label}`);
       }
       await ownerShot(page, "board-after-upload.png");
 
-      // OR 12: a HOSxP case nobody booked and doctor Y's booking matched; HOSxP's I&D nobody booked, and doctor X's
-      // dressing-room booking, which HOSxP does not list, in the dressing room OR 10; doctor X's matched case in OR 13,
-      // where HOSxP's list places it (ORTHO), not OR 11, the mixed room the booking was in: after the upload MX's list
-      // decides the room, unless the doctor picked the dressing room.
+      // OR 12: doctor Y's booking matched first, then a HOSxP case nobody booked (Pong, 15 Nov 2026: bookings first,
+      // then HOSxP's order). In the dressing room OR 10, HOSxP's I&D and dressing nobody booked, with no flag, and not
+      // doctor X's dressing-room booking, which HOSxP does not list ("no real patient set"). Doctor X's matched case is
+      // in OR 13, where HOSxP's list places it (ORTHO), not OR 11, the mixed room the booking was in: after the upload
+      // MX's list decides the room, unless the doctor picked the dressing room.
       await page.goto(`${APP}/?room=or-12`, { waitUntil: "networkidle" });
       await page.waitForSelector(".case-row");
       assert(
         JSON.stringify(await sheetRows(page)) ===
           JSON.stringify([
-            ["hosxp", "unbooked", "HN 7000001"],
             ["matched", null, `HN ${HN_Y_MATCH}`],
+            ["hosxp", "unbooked", "HN 7000001"],
           ]),
         `OR 12 for the admin: ${JSON.stringify(await sheetRows(page))}`,
       );
-      const chips = await page.$$eval(".case-row [data-source], .case-row [data-flag]", (els) =>
-        els.map((e) => (e.querySelector('span[aria-hidden="true"]') ?? e).textContent.trim()),
+      // the icons alone: a handshake for the match, a database for HOSxP's case nobody booked; no word chips at all
+      assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["matched", "hosxp"]), `OR 12's icons: ${JSON.stringify(await rowIcons(page))}`);
+      const badges = await page.$$eval(".case-row .badge", (els) => els.map((e) => e.textContent.trim()));
+      assert(badges.every((text) => text === "นอกเวลา"), `no chips but นอกเวลา: ${JSON.stringify(badges)}`);
+      assert((await page.locator(".case-row").nth(0).textContent()).includes("Total thyroidectomy"), "a matched row has the workbook's operation");
+      // each row: the operation, the HN on its own line, the surgeon as large as the HN, then when it was booked,
+      // smaller; the icon at the right end, centred on the row's height
+      const layout = await page.$$eval(".case-row", (rows) =>
+        rows.map((row) => {
+          const lines = [...row.querySelectorAll(":scope > div > p")];
+          const size = (testid) => {
+            const line = row.querySelector(`[data-testid="${testid}"]`);
+            return line ? Number.parseFloat(getComputedStyle(line).fontSize) : null;
+          };
+          const text = row.querySelector(":scope > div").getBoundingClientRect();
+          const icon = row.querySelector('[data-testid="row-icon"]').getBoundingClientRect();
+          const box = row.getBoundingClientRect();
+          return {
+            lines: lines.map((line) => line.dataset.testid ?? "operation"),
+            hn: size("row-hn"),
+            surgeon: size("row-surgeon"),
+            bookedAt: size("row-booked-at"),
+            iconRight: Math.round(box.right - icon.right),
+            iconAfterText: icon.left >= text.right,
+            iconMiddle: Math.abs(icon.top + icon.height / 2 - (box.top + box.height / 2)),
+            iconSize: Math.round(icon.width),
+            visibleText: row.querySelector('[data-testid="row-icon"]').innerText.trim(),
+          };
+        }),
       );
-      assert(JSON.stringify(chips) === JSON.stringify(["HOSxP", "ไม่มีการจอง", "ตรงกัน"]), `source chips and flags: ${JSON.stringify(chips)}`);
-      assert((await page.locator(".case-row").nth(1).textContent()).includes("Total thyroidectomy"), "a matched row has the workbook's operation");
+      assert(JSON.stringify(layout.map((row) => row.lines)) === JSON.stringify([
+        ["operation", "row-hn", "row-surgeon", "row-booked-at"],
+        ["operation", "row-hn", "row-surgeon"],
+      ]), `the rows' lines: ${JSON.stringify(layout)}`);
+      for (const row of layout) {
+        assert(row.hn === 15 && row.surgeon === 15, `the HN and the surgeon at 15px: ${JSON.stringify(row)}`);
+        assert(row.iconAfterText && row.iconRight <= 24 && row.iconMiddle <= 1 && row.iconSize >= 40, `the icon at the right, centred: ${JSON.stringify(row)}`);
+      }
+      assert(layout[0].bookedAt === 12, `the booking's time smaller: ${layout[0].bookedAt}`);
       await ownerShot(page, "room-sheet.png");
       await page.goto(`${APP}/?room=or-10`, { waitUntil: "networkidle" });
       await page.waitForSelector(".case-row");
       const dressingRoom = await sheetRows(page);
       assert(
-        JSON.stringify(dressingRoom.slice(-1)) === JSON.stringify([["booking", "not-in-hosxp", `HN ${HN_X_MISSING}`]]),
+        JSON.stringify(dressingRoom) === JSON.stringify([["hosxp", null, "HN 7000003"], ["hosxp", null, "HN 7000010"]]),
         `OR 10: ${JSON.stringify(dressingRoom)}`,
       );
-      assert(dressingRoom.some((row) => JSON.stringify(row) === JSON.stringify(["hosxp", "unbooked", "HN 7000003"])), `HOSxP's I&D in OR 10: ${JSON.stringify(dressingRoom)}`);
-      // the doctor's answer to the scrub question, on the booking's row only
-      assert(
-        JSON.stringify(await page.$$eval('.case-row [data-testid="row-scrub"]', (els) => els.map((e) => e.textContent.trim()))) === JSON.stringify(["ฝาก scrub ทำ"]),
-        "the scrub tag on the dressing-room booking",
-      );
+      // who does each dressing instead of where it came from: nobody booked these, so the doctor
+      assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["surgeon", "surgeon"]), `OR 10's icons: ${JSON.stringify(await rowIcons(page))}`);
+      assert((await page.getAttribute('.case-row [data-testid="row-icon"]', "title")) === "แพทย์ทำเอง", "the doctor's name for a pointer");
       await ownerShot(page, "room-sheet-dressing.png");
       await page.goto(`${APP}/?room=or-13`, { waitUntil: "networkidle" });
       await page.waitForSelector(".case-row");
@@ -3145,12 +3216,13 @@ async function main() {
       // the HN in each viewer's page: everything for MX, a doctor's own bookings only, none for a nurse
       const html = {};
       for (const key of ["mx", "nurse", "drX", "drY"]) html[key] = (await htmlAs(RP[key])).html;
-      const placed = ["7000001", "7000002", "7000003", "7000010", "7000011", "7000014", "7000015", HN_X_MISSING];
+      const placed = ["7000001", "7000002", "7000003", "7000010", "7000011", "7000014", "7000015"];
       for (const hn of placed) assert(html.mx.includes(hn), `MX sees ${hn}`);
+      assert(!html.mx.includes(HN_X_MISSING), "the booking HOSxP does not list is off the board, even for MX");
       for (const hn of [...WORKBOOK_HNS, HN_TODAY, HN_X_MISSING]) assert(!html.nurse.includes(hn), "no HN in the nurse's page");
       for (const hn of WORKBOOK_HNS.filter((h) => h !== "7000002")) assert(!html.drX.includes(hn), "doctor X gets no HN but their own");
       for (const hn of [...WORKBOOK_HNS.filter((h) => h !== HN_Y_MATCH), HN_TODAY, HN_X_MISSING]) assert(!html.drY.includes(hn), "doctor Y gets no HN but their own");
-      assert(html.drX.includes(HN_X_MISSING) && html.drX.includes("7000002") && html.drY.includes(HN_Y_MATCH), "each doctor's own HNs");
+      assert(html.drX.includes("7000002") && html.drY.includes(HN_Y_MATCH), "each doctor's own HNs");
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
       rmSync(NOW_FILE, { force: true });
@@ -3191,6 +3263,20 @@ async function main() {
       assert(await page.locator('#board-date-calendar [data-nav="prev"]').isDisabled(), "no month before this one");
       assert(await page.locator('#board-date-calendar [data-nav="next"]').isEnabled(), "December can be shown");
       await ownerShot(page, "board-date-picker.png");
+      // a swipe turns the month (Pong, 15 Nov 2026: "allow swipe back and forth"): to the left the next month, to the
+      // right the one before, never past the months that can be picked; a scroll up or down turns nothing, and the day
+      // the finger lifts from is not picked
+      const title = () => textOf(page, "#board-date-calendar-title");
+      await swipe(page, '#board-date-calendar [role="grid"]', 120);
+      assert((await title()) === "พฤศจิกายน 2569", `no month before November: ${await title()}`);
+      await swipe(page, '#board-date-calendar [role="grid"]', -120);
+      assert((await title()) === "ธันวาคม 2569", `swiped to December: ${await title()}`);
+      await swipe(page, '#board-date-calendar [role="grid"]', -30, 100);
+      assert((await title()) === "ธันวาคม 2569", `an up-and-down move turns nothing: ${await title()}`);
+      await swipe(page, '#board-date-calendar [role="grid"]', 120);
+      assert((await title()) === "พฤศจิกายน 2569", `swiped back to November: ${await title()}`);
+      assert(await dialog.isVisible(), "still open: no day picked by a swipe");
+      assert((await shownDay()) === "2026-11-18" && !new URL(page.url()).searchParams.has("date"), "the board's day unchanged");
       // Escape closes it and the date gets the focus back
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden" });
@@ -3217,7 +3303,7 @@ async function main() {
       await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-17");
       await dialog.waitFor({ state: "hidden" });
       assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดวันนี้", "today's eyebrow");
-      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 6 รายการ", `Tuesday's list: ${await textOf(page, "[data-notice-strip]")}`);
+      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 3 รายการ", `Tuesday's list: ${await textOf(page, "[data-notice-strip]")}`);
       assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "Tuesday has its upload");
       await ownerShot(page, "board-picked-day.png");
       // a room opened on the picked day keeps it, and shows that day's cases
@@ -3240,13 +3326,15 @@ async function main() {
         assert((await textOf(page, "#board-date-calendar-title")) === month, `the next month: ${month}`);
         if (month !== "ธันวาคม 2569") continue;
         // the BOT's holidays cannot be picked and are named under the calendar (Pong, 15 Nov 2026)
-        for (const [iso, name] of [["2026-12-07", "ชดเชยวันพ่อแห่งชาติ"], ["2026-12-10", "วันรัฐธรรมนูญ"], ["2026-12-31", "วันสิ้นปี"]]) {
+        // and the hospital's own, 16 Dec (Pong, 15 Nov 2026: "add 16 ธ.ค. 69 as special holiday กรณีพิเศษ")
+        const named = [["2026-12-07", "ชดเชยวันพ่อแห่งชาติ"], ["2026-12-10", "วันรัฐธรรมนูญ"], ["2026-12-16", "วันหยุดกรณีพิเศษ"], ["2026-12-31", "วันสิ้นปี"]];
+        for (const [iso, name] of named) {
           assert(await day(iso).isDisabled(), `${iso} is closed`);
           assert(((await day(iso).getAttribute("aria-label")) ?? "").endsWith(name), `${iso} is named on its day`);
         }
         const remarks = await page.$$eval("#board-date-calendar ul li", (items) => items.map((li) => li.textContent.replace(/\s+/g, " ").trim()));
         assert(
-          JSON.stringify(remarks) === JSON.stringify(["7 ธ.ค. ชดเชยวันพ่อแห่งชาติ", "10 ธ.ค. วันรัฐธรรมนูญ", "31 ธ.ค. วันสิ้นปี"]),
+          JSON.stringify(remarks) === JSON.stringify(["7 ธ.ค. ชดเชยวันพ่อแห่งชาติ", "10 ธ.ค. วันรัฐธรรมนูญ", "16 ธ.ค. วันหยุดกรณีพิเศษ", "31 ธ.ค. วันสิ้นปี"]),
           `December's holidays under the calendar: ${JSON.stringify(remarks)}`,
         );
         assert((await page.locator('[data-testid="board-date-calendar-unlisted"]').count()) === 0, "the BOT listed 2569");
@@ -3383,6 +3471,11 @@ async function main() {
       await ownerShot(page, "board-demo-notice.png");
       await checkDay(null, ["or-9", "or-10", "or-11", "or-12", "or-13"]);
       await ownerShot(page, "board-demo-room.png");
+      // the demo's dressing room, OR 10: who does each dressing, the doctor and the scrub both
+      await roomRows("or-10", null);
+      const doers = await rowIcons(page);
+      assert(doers.includes("scrub") && doers.includes("surgeon") && doers.every((who) => who === "scrub" || who === "surgeon"), `OR 10: ${JSON.stringify(doers)}`);
+      await ownerShot(page, "board-demo-dressing.png");
       // with the test notices too, the demo's badge stays first
       await page.goto(`${APP}/?demo=1&notices=all`, { waitUntil: "networkidle" });
       const both = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));

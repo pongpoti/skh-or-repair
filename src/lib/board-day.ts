@@ -128,8 +128,9 @@ export function nextBoardRefresh(at: Date): Date {
 export type LoadedBoardDay = BoardDay & { holidays: Holiday[]; holidaysOk: boolean };
 
 /**
- * The board's day at `at` (lib/clock.ts now()), with the holidays from EXTRA_HOLIDAYS and the BOT feed. When the feed
- * fails the board keeps going on weekdays and EXTRA_HOLIDAYS (only the upload is blocked then).
+ * The board's day at `at` (lib/clock.ts now()), with the holidays from HOSPITAL_HOLIDAYS, EXTRA_HOLIDAYS and the BOT
+ * feed. When the feed fails the board keeps going on weekdays, HOSPITAL_HOLIDAYS and EXTRA_HOLIDAYS (only the upload is
+ * blocked then).
  */
 export async function loadBoardDay(at: Date): Promise<LoadedBoardDay> {
   const cycleDay = cycleDayOf(at);

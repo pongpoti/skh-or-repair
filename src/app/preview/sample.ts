@@ -1,5 +1,6 @@
 import type { AddedCase } from "@/lib/added-cases";
 import { allocationFor } from "@/lib/allocation";
+import { addDays } from "@/lib/days";
 import { roomsHeldBy } from "@/lib/placement";
 import type { WorkbookCase } from "@/lib/board-rows";
 import type { RepairPeriods } from "@/lib/repair";
@@ -10,13 +11,15 @@ import type { CaseStatus, Shift } from "@/lib/schedule";
 export const SAMPLE_DOCTOR_ID = "9001";
 
 /**
- * Made-up rows for /preview?sample=1 (development only), so every source chip, flag and room mark can be seen without
- * a database: invented operations, surgeons and HNs, never real patient data. The bookings use the day's first three
- * open rooms, whatever the layout; the workbook cases take their departments from those rooms and are placed by the
- * board's rules (lib/placement.ts), so the one nobody booked, a dressing, goes to the day's dressing room. One workbook
- * HN keeps a leading zero, as HOSxP may write it, to show it still matches the booking (bookings store the HN
- * normalised, lib/hn.ts). Two bookings are in the dressing room by the doctor's choice, one for each answer to the
- * scrub question, so both tags show.
+ * Made-up rows for /preview?sample=1 (development only), so every row icon, flag and room mark can be seen without a
+ * database: invented operations, surgeons and HNs, never real patient data. The bookings use the day's first three open
+ * rooms, whatever the layout; the workbook cases take their departments from those rooms and are placed by the board's
+ * rules (lib/placement.ts). Two workbook cases nobody booked: a dressing, which goes to the day's dressing room
+ * unflagged (booking does not matter there), and an excision in an operating room, flagged. Bookings HOSxP does not list
+ * leave the board once the workbook is in (lib/board-rows.ts). One workbook HN keeps a leading zero, as HOSxP may write
+ * it, to show it still matches the booking (bookings store the HN normalised, lib/hn.ts). Two bookings are in the
+ * dressing room by the doctor's choice, one for each answer to the scrub question, so both the doctor's and the scrub's
+ * icons show with &upload=0; the scrub's is in HOSxP too, so it also shows after the upload.
  */
 export function sampleCases(date: string, periods: RepairPeriods): { workbook: WorkbookCase[]; bookings: AddedCase[] } {
   const rooms = openRooms(date, periods).map((room) => room.id);
@@ -33,7 +36,9 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
   const booking = (roomId: string, hn: string, operation: string, surgeonId: string, surgeon: string, scrubDoes: boolean | null = null): AddedCase => {
     id += 1;
     const dressing = scrubDoes !== null;
-    return { id: String(id), date, roomId, hn, operation, shift: "in", dressing, scrubDoes, surgeonId, surgeon, subtype: "GENSX" };
+    // Booked a week before, an hour apart, oldest first as the database lists them.
+    const bookedAt = new Date(`${addDays(date, -7)}T${String(8 + id).padStart(2, "0")}:15:00+07:00`).toISOString();
+    return { id: String(id), date, roomId, hn, operation, shift: "in", dressing, scrubDoes, surgeonId, surgeon, subtype: "GENSX", bookedAt };
   };
   const dressingRoom = roomsHeldBy("INFECT", date, periods)[0] ?? room(0);
 
@@ -42,6 +47,8 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
     hosxp(room(0), "100002", "Wound dressing, left leg", "พญ. ตัวอย่าง สอง"),
     hosxp(room(1), "100004", "Open reduction and internal fixation, radius", "นพ. ตัวอย่าง สาม"),
     hosxp(room(2), "100005", "Laparoscopic cholecystectomy", "นพ. ตัวอย่าง หนึ่ง", "delayed", "out"),
+    hosxp(room(1), "100009", "Excision of breast mass, right", "นพ. ตัวอย่าง สาม"),
+    hosxp(dressingRoom, "100007", "I&D abscess, right thigh", "นพ. ตัวอย่าง หนึ่ง"),
   ];
   const bookings = [
     booking(room(0), "100001", "", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง"),

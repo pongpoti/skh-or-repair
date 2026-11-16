@@ -85,7 +85,30 @@ export type AddedCase = Omit<CaseInput, "hn" | "dressing"> & {
   surgeon: string;
   /** The surgeon's subtype code (users.subtype), e.g. ORTHO. */
   subtype: string | null;
+  /** When the doctor made the booking (cases.created_at), an ISO time; left out by the made-up previews. */
+  bookedAt?: string;
 };
+
+const BOOKED_AT = new Intl.DateTimeFormat("th-TH-u-ca-buddhist", {
+  timeZone: "Asia/Bangkok",
+  day: "numeric",
+  month: "short",
+  year: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * When a booking was made, as the case row says it (Pong, 15 Nov 2026: "วันเวลาที่จองคิว : 00 มค 66, 44:44"): "15 พ.ย. 69,
+ * 23:43", in Bangkok time with the Buddhist year. Empty for a time that cannot be read.
+ */
+export function bookedAtText(iso: string): string {
+  const time = new Date(iso);
+  if (Number.isNaN(time.getTime())) return "";
+  const part = Object.fromEntries(BOOKED_AT.formatToParts(time).map((item) => [item.type, item.value]));
+  return `${part.day} ${part.month} ${part.year}, ${part.hour}:${part.minute}`;
+}
 
 /** The form field an error is about, for the form to mark and focus. */
 export type CaseField = "date" | "hn" | "operation" | "room" | "shift";
@@ -265,7 +288,7 @@ export type BookingContext = {
   periods: RepairPeriods;
   /** The doctor's subtype code (users.subtype), which picks the room. */
   subtype: string | null;
-  /** The Bank of Thailand's holidays and EXTRA_HOLIDAYS, from today to 60 days ahead. */
+  /** The Bank of Thailand's holidays, HOSPITAL_HOLIDAYS and EXTRA_HOLIDAYS, from today to 60 days ahead. */
   holidays: readonly Holiday[];
 };
 

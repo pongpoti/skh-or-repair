@@ -5,9 +5,9 @@ import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperti
 import type { CaseResult } from "@/app/(board)/actions";
 import { AddCase, type Doctor } from "@/components/add-case";
 import { BoardNotices, noticeBadge } from "@/components/board-notices";
-import { CaseFlag, CaseSource } from "@/components/case-source";
+import { CaseIcon } from "@/components/case-source";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
-import { scrubTag, type AddedCase } from "@/lib/added-cases";
+import type { AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
@@ -331,36 +331,47 @@ export function SuiteBoard({
               ) : (
                 <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
                   {cases.map((item) => (
-                    <li key={item.id} data-status={item.status} data-source={item.source} data-flag={item.flag ?? undefined} className="case-row">
+                    <li
+                      key={item.id}
+                      data-status={item.status}
+                      data-source={item.source}
+                      data-flag={item.flag ?? undefined}
+                      data-done-by={item.doneBy}
+                      className="case-row"
+                    >
                       <span className="order-no mt-0.5">
                         <span className="sr-only">ลำดับ </span>
                         {item.order}
                       </span>
+                      {/* Pong, 15 Nov 2026: the operation, the HN on the next line, the surgeon as large as the HN, and
+                          the booking's time smaller below. The HN shows only when the server sent it (the booking's
+                          doctor, MX and admins). */}
                       <div className="min-w-0">
-                        <p className={`font-semibold ${item.status === "cancelled" ? "text-muted line-through" : "text-ink"}`}>
+                        <p className={`font-semibold break-words ${item.status === "cancelled" ? "text-muted line-through" : "text-ink"}`}>
                           {item.procedure}
                           <span className="sr-only"> ({STATUS_LABEL[item.status]})</span>
                         </p>
-                        <p className="text-sm text-muted">{item.surgeon}</p>
-                        {/* Where the row comes from, what does not match, and the HN only when the server sent it
-                            (the booking's doctor, MX and admins). */}
-                        <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                          <CaseSource source={item.source} />
-                          <CaseFlag flag={item.flag} />
-                          {item.shift === "out" ? <span className="badge badge-warning">นอกเวลา</span> : null}
-                          {/* A dressing-room booking: who does the dressing, as the doctor said when booking. */}
-                          {typeof item.scrubDoes === "boolean" ? (
-                            <span className="badge badge-muted" data-testid="row-scrub" data-scrub={item.scrubDoes ? "yes" : "no"}>
-                              {scrubTag(item.scrubDoes)}
-                            </span>
-                          ) : null}
-                          {item.hn ? (
-                            <span className="text-xs font-semibold text-ink-2 tabular-nums" data-testid="row-hn">
-                              HN {displayHn(item.hn)}
-                            </span>
-                          ) : null}
+                        {item.hn ? (
+                          <p className="case-line font-semibold text-ink-2 tabular-nums" data-testid="row-hn">
+                            HN {displayHn(item.hn)}
+                          </p>
+                        ) : null}
+                        <p className="case-line break-words text-ink-2" data-testid="row-surgeon">
+                          {item.surgeon}
                         </p>
+                        {item.bookedAt ? (
+                          <p className="mt-0.5 text-xs text-muted tabular-nums" data-testid="row-booked-at">
+                            วันเวลาที่จองคิว : {item.bookedAt}
+                          </p>
+                        ) : null}
+                        {item.shift === "out" ? (
+                          <p className="mt-1.5">
+                            <span className="badge badge-warning">นอกเวลา</span>
+                          </p>
+                        ) : null}
                       </div>
+                      {/* Who does the dressing in the dressing room, else where the row comes from: an icon alone. */}
+                      <CaseIcon source={item.source} doneBy={item.doneBy} />
                     </li>
                   ))}
                 </ol>

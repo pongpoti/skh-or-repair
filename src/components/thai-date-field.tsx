@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent, type TouchEvent } from "react";
 import { addDays, thaiDate, todayIso } from "@/lib/days";
 
 /** What the calendar shows for one day: whether it can be picked, and why not (a holiday's name, or the weekend). */
@@ -35,6 +35,11 @@ export const WEEKDAYS = [
 
 /** The keys that move focus between days. Enter and Space need no handling: they click the focused day's button. */
 const MOVE_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+/**
+ * A swipe that turns the month (Pong, 15 Nov 2026: "allow swipe back and forth"): at least this far sideways, in CSS
+ * pixels, and mostly sideways, so a scroll up or down and a tap on a day never turn it.
+ */
+const SWIPE_MIN = 40;
 
 /** Never walk further than two years looking for a day that can be picked. */
 const MAX_WALK = 732;
@@ -240,6 +245,10 @@ export function ThaiCalendar({
   // What to focus once the calendar has been drawn (a CSS selector inside it), and whether to scroll it into view first.
   const focusNext = useRef<string | null>(start && focusOnOpen ? `[data-date="${start}"]` : null);
   const revealNext = useRef(revealOnOpen);
+  // Which way the last month change went, so the new month slides in from that side.
+  const [slide, setSlide] = useState<"next" | "prev" | null>(null);
+  // Where a one-finger touch started, for a swipe.
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const panel = panelRef.current;
@@ -275,17 +284,42 @@ export function ThaiCalendar({
       return;
     }
     setMonth(monthOf(to));
+    setSlide(to > from ? "next" : "prev");
     focusNext.current = `[data-date="${to}"]`;
   }
 
-  function showMonth(next: string, event: MouseEvent<HTMLButtonElement>) {
+  /** The month before (-1) or after (1), by an arrow or a swipe. */
+  function turn(step: 1 | -1) {
+    const next = shiftMonth(month, step);
     setMonth(next);
-    // A focused button that turns disabled drops focus to the page; the other one takes it instead.
-    const button = event.currentTarget.dataset.nav;
-    const atEdge = button === "prev" ? next <= monthOf(min) : next >= monthOf(max);
-    if (atEdge && document.activeElement === event.currentTarget) {
-      focusNext.current = `[data-nav="${button === "prev" ? "next" : "prev"}"]`;
+    setSlide(step > 0 ? "next" : "prev");
+    // A focused arrow that turns disabled at the first or last month drops focus to the page; the other one takes it.
+    const edge = step > 0 ? "next" : "prev";
+    const atEdge = step > 0 ? next >= monthOf(max) : next <= monthOf(min);
+    if (atEdge && document.activeElement === panelRef.current?.querySelector(`[data-nav="${edge}"]`)) {
+      focusNext.current = `[data-nav="${edge === "prev" ? "next" : "prev"}"]`;
     }
+  }
+
+  function onTouchStart(event: TouchEvent<HTMLDivElement>) {
+    const touch = event.touches.length === 1 ? event.touches[0] : null;
+    touchStart.current = touch ? { x: touch.clientX, y: touch.clientY } : null;
+  }
+
+  // A swipe to the left shows the next month, to the right the month before, within the months that can be picked.
+  function onTouchEnd(event: TouchEvent<HTMLDivElement>) {
+    const from = touchStart.current;
+    touchStart.current = null;
+    const touch = event.changedTouches[0];
+    if (!from || !touch || event.touches.length > 0) return;
+    const dx = touch.clientX - from.x;
+    const dy = touch.clientY - from.y;
+    if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    const step = dx < 0 ? 1 : -1;
+    if (step > 0 ? month >= monthOf(max) : month <= monthOf(min)) return;
+    // No click on the day the finger lifted from.
+    if (event.cancelable) event.preventDefault();
+    turn(step);
   }
 
   const cells = monthGrid(month);
@@ -313,7 +347,22 @@ export function ThaiCalendar({
   const noHolidays = unlisted.includes(year);
 
   return (
-    <div ref={panelRef} id={id} role="group" aria-label="ปฏิทิน" onKeyDown={onPanelKey} className={className} data-testid={testId}>
+    <div
+      ref={panelRef}
+      id={id}
+      role="group"
+      aria-label="ปฏิทิน"
+      onKeyDown={onPanelKey}
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={() => {
+        touchStart.current = null;
+      }}
+      // Sideways moves are the calendar's own (a swipe); up and down still scroll, and a pinch still zooms.
+      style={{ touchAction: "pan-y pinch-zoom" }}
+      className={className}
+      data-testid={testId}
+    >
       <div className="flex items-center justify-between gap-1">
         <button
           type="button"
@@ -321,7 +370,7 @@ export function ThaiCalendar({
           className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
           aria-label="เดือนก่อนหน้า"
           disabled={month <= monthOf(min)}
-          onClick={(event) => showMonth(shiftMonth(month, -1), event)}
+          onClick={() => turn(-1)}
         >
           <Chevron to="left" />
         </button>
@@ -334,12 +383,19 @@ export function ThaiCalendar({
           className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
           aria-label="เดือนถัดไป"
           disabled={month >= monthOf(max)}
-          onClick={(event) => showMonth(shiftMonth(month, 1), event)}
+          onClick={() => turn(1)}
         >
           <Chevron to="right" />
         </button>
       </div>
-      <div role="grid" aria-labelledby={titleId} onKeyDown={onGridKey} className="mt-1">
+      {/* Drawn again for each month, so it slides in from the side the month came from. */}
+      <div
+        key={month}
+        role="grid"
+        aria-labelledby={titleId}
+        onKeyDown={onGridKey}
+        className={`mt-1 ${slide ? `calendar-from-${slide}` : ""}`}
+      >
         <div role="row" className="grid grid-cols-7">
           {WEEKDAYS.map(([short, long], index) => (
             <span

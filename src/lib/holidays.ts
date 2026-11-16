@@ -6,10 +6,27 @@ import { addDays, workdayIndex } from "./days.ts";
  * Source: the Bank of Thailand's Financial Institutions' Holidays API, which lists the public holidays,
  * substitution days and the special holidays the cabinet announces during the year. It needs a free
  * token from https://portal.api.bot.or.th in BOT_API_TOKEN. Dates the API does not know, such as a
- * hospital-only closure, can be added in EXTRA_HOLIDAYS ("2026-12-30=ปิดปรับปรุง,2026-12-31").
+ * hospital-only closure, are HOSPITAL_HOLIDAYS below or can be added in EXTRA_HOLIDAYS
+ * ("2026-12-30=ปิดปรับปรุง,2026-12-31").
  */
 
 export type Holiday = { date: string; name: string };
+
+/**
+ * The hospital's own holidays, which the BOT does not list: Pong, 15 Nov 2026, "add 16 ธ.ค. 69 as special holiday
+ * กรณีพิเศษ". They count like the BOT's (no elective list, no booking, the board steps over them) and show in the
+ * calendars' lists. Kept in the code, so no setting on Vercel is needed; EXTRA_HOLIDAYS still adds more.
+ */
+export const HOSPITAL_HOLIDAYS: readonly Holiday[] = [{ date: "2026-12-16", name: "วันหยุดกรณีพิเศษ" }];
+
+/** HOSPITAL_HOLIDAYS and EXTRA_HOLIDAYS, one per date (the first that names it): the holidays that need no BOT feed. */
+function ownHolidays(): Holiday[] {
+  const own: Holiday[] = [];
+  for (const holiday of [...HOSPITAL_HOLIDAYS, ...parseExtraHolidays(process.env.EXTRA_HOLIDAYS)]) {
+    if (holidayIn(own, holiday.date) === null) own.push(holiday);
+  }
+  return own;
+}
 
 const ENDPOINT = "https://gateway.api.bot.or.th/financial-institutions-holidays/";
 /** How far ahead the next workday is looked for: long enough for Songkran and the New Year. */
@@ -120,9 +137,9 @@ function blank(text: string, token: string): string {
   return text.split(token).join("***");
 }
 
-/** The holiday on a YYYY-MM-DD date in Thailand, from EXTRA_HOLIDAYS first, then the BOT API. */
+/** The holiday on a YYYY-MM-DD date in Thailand, from HOSPITAL_HOLIDAYS and EXTRA_HOLIDAYS first, then the BOT API. */
 export async function holidayOn(iso: string): Promise<Holiday | null> {
-  const extra = holidayIn(parseExtraHolidays(process.env.EXTRA_HOLIDAYS), iso);
+  const extra = holidayIn(ownHolidays(), iso);
   if (extra) return extra;
   const feed = await botHolidayFeed(Number(iso.slice(0, 4)));
   return feed.state === "ok" ? holidayIn(feed.holidays, iso) : null;
@@ -152,20 +169,22 @@ export type HolidayList =
   | { ok: false; reason: "no-token" | "failed"; holidays: Holiday[]; unlisted: number[] };
 
 /**
- * The holidays from `from` to `to` (YYYY-MM-DD): EXTRA_HOLIDAYS and the BOT feed of every year in between. When a
- * year's feed is not "ok" (no token, refused, unreachable) the answer says why, and still carries EXTRA_HOLIDAYS and
- * the years that did load, so the board can fall back to weekdays while the upload refuses (lib/board-day.ts). An
- * empty list is still "ok": only the calendars' note (`unlisted`) tells it apart.
+ * The holidays from `from` to `to` (YYYY-MM-DD): HOSPITAL_HOLIDAYS, EXTRA_HOLIDAYS and the BOT feed of every year in
+ * between. A date the hospital already closes keeps the hospital's name: the BOT's entry for it is left out. When a
+ * year's feed is not "ok" (no token, refused, unreachable) the answer says why, and still carries HOSPITAL_HOLIDAYS,
+ * EXTRA_HOLIDAYS and the years that did load, so the board can fall back to weekdays while the upload refuses
+ * (lib/board-day.ts). An empty list is still "ok": only the calendars' note (`unlisted`) tells it apart.
  */
 export async function holidaysBetween(from: string, to: string): Promise<HolidayList> {
-  const holidays = parseExtraHolidays(process.env.EXTRA_HOLIDAYS);
+  const holidays = ownHolidays();
   const first = Number(from.slice(0, 4));
   const last = Number(to.slice(0, 4));
   let reason: "no-token" | "failed" | null = null;
   const unlisted: number[] = [];
   for (let year = first; year <= last; year += 1) {
     const feed = await botHolidayFeed(year);
-    if (feed.state === "ok") holidays.push(...feed.holidays);
+    // A date the hospital already closes keeps its own name, so it is listed once.
+    if (feed.state === "ok") holidays.push(...feed.holidays.filter((holiday) => holidayIn(holidays, holiday.date) === null));
     else reason ??= feed.state;
     if (feed.state !== "ok" || feed.holidays.length === 0) unlisted.push(year);
   }
@@ -176,7 +195,7 @@ export async function holidaysBetween(from: string, to: string): Promise<Holiday
 export type NextWorkday = { ok: true; date: string } | { ok: false; reason: "no-token" | "failed" | "none" };
 
 /**
- * The first workday after `iso` by EXTRA_HOLIDAYS and the BOT feed, looking up to 14 days ahead (and so into the next
+ * The first workday after `iso` by HOSPITAL_HOLIDAYS, EXTRA_HOLIDAYS and the BOT feed, looking up to 14 days ahead (and so into the next
  * year at the end of December). Without the feed the day cannot be trusted, so the answer is not ok: an upload's
  * target day must not be guessed (Pong, 30 Oct 2026).
  */

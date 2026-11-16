@@ -1,9 +1,10 @@
-import type { AddedCase } from "./added-cases.ts";
+import { bookedAtText, type AddedCase } from "./added-cases.ts";
 import { allocationFor, DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { buildBoardRows, type BoardRow, type BoardRows, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
 import { addDays } from "./days.ts";
 import { isWorkday, type Holiday } from "./holidays.ts";
 import type { RepairPeriods } from "./repair.ts";
+import { roomsHeldBy } from "./placement.ts";
 import { openRooms } from "./rooms.ts";
 import type { CaseStatus, Shift } from "./schedule.ts";
 
@@ -17,8 +18,9 @@ import type { CaseStatus, Shift } from "./schedule.ts";
  * Every case is invented: the HNs start with 99 (a made-up range), the surgeons are "ตัวอย่าง หนึ่ง" to "ตัวอย่าง แปด",
  * and the operations are common names, never a real patient's row. The cases go through the board's own rules
  * (lib/board-rows.ts buildBoardRows, lib/placement.ts), so the demo looks as a real day would: most cases match a
- * booking, some rooms have one HOSxP case nobody booked and one booking HOSxP does not list (the ! marks), and the
- * statuses and the out-of-hours shift show. On a day outside the repair (a gap an admin left between the halves) the
+ * booking, booked some days before at made-up times, some rooms have one HOSxP case nobody booked (the ! marks; not in
+ * the dressing room, where booking does not matter), and the statuses and the out-of-hours shift show. No booking is
+ * left without its HOSxP case: the board leaves those off once MX has uploaded (Pong, 15 Nov 2026). On a day outside the repair (a gap an admin left between the halves) the
  * weekly schedule's rooms get cases of their own departments the same way, and demoBoardRows makes sure of the 10
  * there too. Pure and isomorphic.
  */
@@ -149,8 +151,21 @@ function casesFor(code: DeptCode): readonly DemoCase[] {
   return Array.from({ length: 12 }, (_, i) => ({ dept: code, operation: `Elective operation ${i + 1}` }));
 }
 
-/** What one of a room's rows is: a HOSxP case with its booking, a HOSxP case nobody booked, or a booking alone. */
-type Kind = "matched" | "hosxp" | "booking";
+/** What one of a room's rows is: a HOSxP case with its booking, or a HOSxP case nobody booked. */
+type Kind = "matched" | "hosxp";
+
+/**
+ * When a made-up booking was made: 5 to 11 days before the case at a time from 07:00 to 22:59 Bangkok, as an ISO time
+ * (AddedCase.bookedAt), well before the booking form's cut-off (15:00 on the workday before).
+ */
+function bookedAtFor(date: string, mix: number): string {
+  // Spread the seed's bits first: seeds of neighbouring cases differ only in their lowest bits.
+  const spread = Math.imul(mix ^ (mix >>> 15), 2246822519) >>> 0;
+  const day = addDays(date, -(5 + (spread % 7)));
+  const hour = 7 + ((spread >>> 8) % 16);
+  const minute = (spread >>> 16) % 60;
+  return new Date(`${day}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+07:00`).toISOString();
+}
 
 /**
  * The made-up HOSxP workbook and bookings for `date`: 10 to 12 cases in every open operating room, the dressing room
@@ -168,35 +183,32 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
     const list = casesFor(code);
     const mix = seed(`${date}|${room.id}`);
     const count = DEMO_MIN_CASES + (mix % 3);
-    // Every other room has one HOSxP case nobody booked and one booking HOSxP does not list, so the ! marks show; the
-    // emergency room never has a booking alone (a booking goes to the doctor's own room, lib/added-cases.ts).
+    // Every other room has one HOSxP case nobody booked, so the ! marks show (the dressing room's is no mismatch).
     const flagged = r % 2 === 0;
     const emergency = code === "EMER";
     const dressing = code === "INFECT";
     for (let i = 0; i < count; i += 1) {
       const item = list[(mix + i) % list.length];
       const surgeon = SURGEONS[(r * 3 + i) % SURGEONS.length];
-      const kind: Kind = flagged && i === 6 ? "hosxp" : flagged && !emergency && i === count - 1 ? "booking" : "matched";
+      const kind: Kind = flagged && i === 6 ? "hosxp" : "matched";
       const hn = `99${room.number.padStart(2, "0")}${String(i + 1).padStart(3, "0")}`;
       const id = `demo-${room.id}-${i + 1}`;
       // Late cases run out of hours in every other room.
       const shift: Shift = r % 2 === 1 && i >= count - 2 ? "out" : "in";
-      if (kind !== "booking") {
-        position += 1;
-        workbook.push({
-          caseId: id,
-          hn,
-          operation: item.operation,
-          surgeon: `${surgeon.title} ${surgeon.name}`,
-          dept: item.dept,
-          team: item.team ?? item.dept,
-          urgency: emergency ? (i % 3 === 0 ? "Stat" : "Emergency") : "Elective",
-          shift,
-          status: statusOf(r, i),
-          position,
-        });
-      }
-      if (kind !== "hosxp") {
+      position += 1;
+      workbook.push({
+        caseId: id,
+        hn,
+        operation: item.operation,
+        surgeon: `${surgeon.title} ${surgeon.name}`,
+        dept: item.dept,
+        team: item.team ?? item.dept,
+        urgency: emergency ? (i % 3 === 0 ? "Stat" : "Emergency") : "Elective",
+        shift,
+        status: statusOf(r, i),
+        position,
+      });
+      if (kind === "matched") {
         bookings.push({
           id,
           date,
@@ -210,10 +222,13 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
           surgeonId: surgeon.id,
           surgeon: surgeon.name,
           subtype: item.dept,
+          bookedAt: bookedAtFor(date, seed(`${date}|${room.id}|${i}`)),
         });
       }
     }
   });
+  // Oldest booking first, as lib/cases.ts lists them: the board puts the booked cases in that order.
+  bookings.sort((a, b) => (a.bookedAt ?? "").localeCompare(b.bookedAt ?? "") || a.id.localeCompare(b.id));
   return { workbook, bookings };
 }
 
@@ -221,7 +236,9 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
  * The demo's board rows for `date`: demoSchedule's cases through the board's own rules (buildBoardRows), then, for an
  * open room the rules left short of DEMO_MIN_CASES, more made-up rows straight in that room. That only happens outside
  * the repair (the weekly schedule pools a department's rooms and splits a room between two departments); in either
- * half every room gets its cases by the rules (lib/demo-schedule.test.ts).
+ * half every room gets its cases by the rules (lib/demo-schedule.test.ts). The added rows are booked cases, booked
+ * after the others, so they go after the room's booked cases and before the ones nobody booked, as the board orders
+ * them.
  */
 export function demoBoardRows(date: string, periods: RepairPeriods, viewer: BoardViewer): BoardRows {
   const { workbook, bookings } = demoSchedule(date, periods);
@@ -229,6 +246,8 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
   const rows: BoardRow[] = [...built.rows];
   const countByRoom = { ...built.countByRoom };
   let matched = built.matched;
+  const dressingRooms = roomsHeldBy("INFECT", date, periods);
+  const bookedAt = bookedAtText(new Date(`${addDays(date, -4)}T21:00:00+07:00`).toISOString());
   openRooms(date, periods).forEach((room, r) => {
     const code = allocationFor(room.id, date, periods)?.am?.code;
     if (!code) return;
@@ -249,12 +268,22 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
         flag: null,
         ...(viewer.allHn ? { hn: `99${room.number.padStart(2, "0")}${500 + slot}` } : {}),
         bookedBy: surgeon.name,
+        bookedAt,
+        ...(dressingRooms.includes(room.id) ? { doneBy: "surgeon" as const } : {}),
       });
       countByRoom[room.id] = slot;
       matched += 1;
     }
   });
-  return { ...built, rows, matched, countByRoom };
+  // The booked rows before the ones nobody booked (a stable sort keeps each group's order), numbered again per room.
+  const booked = (row: BoardRow) => (row.source === "hosxp" ? 1 : 0);
+  const order = new Map<string, number>();
+  const sorted = rows.toSorted((a, b) => booked(a) - booked(b)).map((row) => {
+    const slot = (order.get(row.roomId) ?? 0) + 1;
+    order.set(row.roomId, slot);
+    return { ...row, order: slot };
+  });
+  return { ...built, rows: sorted, matched, countByRoom };
 }
 
 /**

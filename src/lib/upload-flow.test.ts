@@ -285,7 +285,10 @@ test("stored cases placed again give the upload's own rooms, or the new dates' r
   assert.deepEqual(summary, { ...upload.summary, placed, rooms, unplaced, repairHalf: 2 });
   assert.deepEqual(placedSummary(upload.summary, upload.cases, THURSDAY, FIRST_HALF), upload.summary);
   const matching = matchBookings({ date: THURSDAY, periods: SECOND_HALF, cases: upload.cases, bookings: [] });
-  assert.deepEqual(matching.unbooked.map((row) => row.roomId), Object.values(roomOf(second)));
+  // Every case nobody booked, but those in the dressing room (OR 1 in the second half), where booking does not matter.
+  const outsideDressing = Object.values(roomOf(second)).filter((roomId) => roomId !== "or-1");
+  assert.ok(outsideDressing.length < Object.values(roomOf(second)).length, "the file has dressings");
+  assert.deepEqual(matching.unbooked.map((row) => row.roomId), outsideDressing);
 });
 
 test("during the repair OB-GYN is not placed (obstetric building) and a case with no department is not either", () => {
@@ -360,10 +363,8 @@ test("matching: a booking with the case's HN pairs with it; the rest are unbooke
   const { matching } = result;
   assert.equal(matching.bookings, 2, "only the target day's bookings count");
   assert.equal(matching.matched, 1);
-  assert.deepEqual(
-    matching.unbooked.map((row) => row.hn),
-    ["99000002", "99000003", "99000010", "99000011", "99000014", "99000015"],
-  );
+  // Not 900003 and 900010, the dressings: nobody need book a case in the dressing room (Pong, 15 Nov 2026).
+  assert.deepEqual(matching.unbooked.map((row) => row.hn), ["99000002", "99000011", "99000014", "99000015"]);
   assert.deepEqual(matching.notInHosxp, [
     { key: `bk-${bookings[1].id}`, roomId: "or-4", room: "OR 4", surgeon: "สมหญิง ใจงาม", hn: "55555", operation: "Tonsillectomy" },
   ]);
@@ -393,7 +394,8 @@ test("the upload's own rooms are the board's: a case a doctor booked goes by the
 test("matching: a booking with no operation name and no HN reads as such; no bookings flags every case", () => {
   const cases = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY)).cases;
   const none = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [] });
-  assert.deepEqual([none.bookings, none.matched, none.unbooked.length, none.notInHosxp.length], [0, 0, 7, 0]);
+  // The 7 cases placed, but the 2 dressings.
+  assert.deepEqual([none.bookings, none.matched, none.unbooked.length, none.notInHosxp.length], [0, 0, 5, 0]);
   const old = booking({ hn: null, roomId: "or-3", subtype: null });
   const result = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [old] });
   assert.deepEqual(result.notInHosxp, [
