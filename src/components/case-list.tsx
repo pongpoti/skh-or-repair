@@ -158,10 +158,11 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
       return;
     }
     // Folded, the name is measured again (the sheet may have widened meanwhile). If it now fits, it is plain text and
-    // its button is gone: the focus it had goes to the row's icon rather than to nowhere.
+    // its button is gone: the focus it had goes to the row's icon rather than to nowhere, without scrolling the list
+    // under the finger that just tapped.
     const hadFocus = row?.contains(document.activeElement) ?? false;
     flushSync(() => setUnfolded((current) => toggled(current, id)));
-    if (hadFocus && row && !row.contains(document.activeElement)) iconFor(row, `${id}:icon`)?.focus();
+    if (hadFocus && row && !row.contains(document.activeElement)) iconFor(row, `${id}:icon`)?.focus({ preventScroll: true });
   }
 
   return (
