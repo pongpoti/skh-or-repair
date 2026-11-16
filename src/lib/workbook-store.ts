@@ -11,7 +11,8 @@ type Q = Pool | PoolClient;
  * The HOSxP workbook uploads and their cases: tables `workbook_uploads` and `workbook_cases` (db/schema.sql). The
  * upload page reads the file (lib/xlsx.ts, lib/workbook.ts), places each kept case (lib/placement.ts) and saves the
  * result here; the board shows the latest upload of its cycle (lib/board-day.ts). Only what the board needs is
- * stored, never the patient's name, age, AN, diagnosis, illnesses or costs, and nothing here is ever logged.
+ * stored: of the patient, the HN and the name (Pong, 16 Nov 2026), never the age, AN, diagnosis, illnesses or costs,
+ * and nothing here is ever logged.
  */
 
 /** Uploads are kept this long, then deleted with their cases when a new upload is saved. */
@@ -46,6 +47,8 @@ export type PlacedCase = {
   bookedTime: string | null;
   /** Order in the file, from 1. */
   position: number;
+  /** The patient's name as the file has it (ชื่อ), or null when the file has no such column or the cell is blank. */
+  patientName: string | null;
 };
 
 /** A saved case, as read back. */
@@ -116,6 +119,7 @@ interface CaseRow {
   urgency: string | null;
   booked_time: string | null;
   position: number;
+  patient_name: string | null;
 }
 
 const UPLOAD_COLUMNS =
@@ -124,7 +128,7 @@ const UPLOAD_COLUMNS =
 
 const CASE_COLUMNS =
   "id::text AS id, upload_id::text AS upload_id, case_id, hn, operation, surgeon, dept, team, room_id, shift, status, " +
-  "urgency, booked_time, position";
+  "urgency, booked_time, position, patient_name";
 
 function toUpload(r: UploadRow): Upload {
   return {
@@ -158,6 +162,7 @@ function toCase(r: CaseRow): StoredCase {
     urgency: r.urgency,
     bookedTime: r.booked_time,
     position: r.position,
+    patientName: r.patient_name,
   };
 }
 
@@ -198,9 +203,9 @@ export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload
     if (cases.length > 0) {
       // One statement for the whole file: each column goes as one array.
       await c.query(
-        `INSERT INTO workbook_cases (upload_id, case_id, hn, operation, surgeon, dept, team, room_id, shift, status, urgency, booked_time, position)
+        `INSERT INTO workbook_cases (upload_id, case_id, hn, operation, surgeon, dept, team, room_id, shift, status, urgency, booked_time, position, patient_name)
          SELECT $1::bigint, * FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
-           $10::text[], $11::text[], $12::text[], $13::int[])`,
+           $10::text[], $11::text[], $12::text[], $13::int[], $14::text[])`,
         [
           upload.id,
           cases.map((item) => item.caseId),
@@ -215,6 +220,7 @@ export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload
           cases.map((item) => item.urgency),
           cases.map((item) => item.bookedTime),
           cases.map((item) => item.position),
+          cases.map((item) => item.patientName),
         ],
       );
     }

@@ -5,27 +5,17 @@ import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperti
 import type { CaseResult } from "@/app/(board)/actions";
 import { AddCase, type Doctor } from "@/components/add-case";
 import { BoardNotices, noticeBadge } from "@/components/board-notices";
-import { CaseIcon } from "@/components/case-source";
+import { CaseList, isCaseBubbleOpen } from "@/components/case-list";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
 import type { AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
 import { boardHref } from "@/lib/days";
-import { displayHn } from "@/lib/hn";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, isSelectableRoom, roomLabel } from "@/lib/rooms";
-import { roomMark, type CaseStatus } from "@/lib/schedule";
-
-const STATUS_LABEL: Record<CaseStatus, string> = {
-  scheduled: "รอ",
-  "in-progress": "กำลังผ่าตัด",
-  delayed: "เลื่อน",
-  done: "เสร็จ",
-  cancelled: "ยกเลิก",
-  recovery: "พักฟื้น",
-};
+import { roomMark } from "@/lib/schedule";
 
 const NONE: BoardRow[] = [];
 const NO_MISMATCH: Record<string, number> = {};
@@ -268,16 +258,16 @@ export function SuiteBoard({
             className="scrim fixed inset-0 z-10 cursor-default bg-[rgb(36_28_22/0.25)] lg:hidden"
             aria-label="ปิดรายการห้อง"
             onPointerDown={() => {
-              // A tap outside the account menu closes the menu; it should not also close the room.
-              // The menu is already gone by the time the click fires, so note it now.
-              menuWasOpen.current = isPopoverOpen();
+              // A tap outside the account menu, or outside a bubble in the room's list, closes it; it should not also
+              // close the room. The menu or bubble is already gone by the time the click fires, so note it now.
+              menuWasOpen.current = isPopoverOpen() || isCaseBubbleOpen();
             }}
-            onClick={() => {
-              if (menuWasOpen.current) {
-                menuWasOpen.current = false;
-                return;
-              }
-              choose(null);
+            onClick={(event) => {
+              // A press that closed a menu or bubble ends here, or elsewhere after a drag: the flag never outlives the
+              // next click, and a key press (no pointer, detail 0) always closes the room.
+              const closedMenu = menuWasOpen.current && event.detail !== 0;
+              menuWasOpen.current = false;
+              if (!closedMenu) choose(null);
             }}
           />
         ) : null}
@@ -329,52 +319,7 @@ export function SuiteBoard({
                 // The board may show the next workday (from 16:00), so the text names no day.
                 <p className="px-5 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] text-center text-sm text-muted">ไม่มีรายการ</p>
               ) : (
-                <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
-                  {cases.map((item) => (
-                    <li
-                      key={item.id}
-                      data-status={item.status}
-                      data-source={item.source}
-                      data-flag={item.flag ?? undefined}
-                      data-done-by={item.doneBy}
-                      className="case-row"
-                    >
-                      <span className="order-no mt-0.5">
-                        <span className="sr-only">ลำดับ </span>
-                        {item.order}
-                      </span>
-                      {/* Pong, 15 Nov 2026: the operation, the HN on the next line, the surgeon as large as the HN, and
-                          the booking's time smaller below. The HN shows only when the server sent it (the booking's
-                          doctor, MX and admins). */}
-                      <div className="min-w-0">
-                        <p className={`font-semibold break-words ${item.status === "cancelled" ? "text-muted line-through" : "text-ink"}`}>
-                          {item.procedure}
-                          <span className="sr-only"> ({STATUS_LABEL[item.status]})</span>
-                        </p>
-                        {item.hn ? (
-                          <p className="case-line font-semibold text-ink-2 tabular-nums" data-testid="row-hn">
-                            HN {displayHn(item.hn)}
-                          </p>
-                        ) : null}
-                        <p className="case-line break-words text-ink-2" data-testid="row-surgeon">
-                          {item.surgeon}
-                        </p>
-                        {item.bookedAt ? (
-                          <p className="mt-0.5 text-xs text-muted tabular-nums" data-testid="row-booked-at">
-                            วันเวลาที่จองคิว : {item.bookedAt}
-                          </p>
-                        ) : null}
-                        {item.shift === "out" ? (
-                          <p className="mt-1.5">
-                            <span className="badge badge-warning">นอกเวลา</span>
-                          </p>
-                        ) : null}
-                      </div>
-                      {/* Who does the dressing in the dressing room, else where the row comes from: an icon alone. */}
-                      <CaseIcon source={item.source} doneBy={item.doneBy} />
-                    </li>
-                  ))}
-                </ol>
+                <CaseList key={room?.id} cases={cases} />
               )}
             </div>
           ) : (

@@ -189,17 +189,28 @@ test("flags: dressing, SCOPE, Tha Chalom, SMC, emergency, and the cleaned values
   assert.equal(rows.get("900005")?.status, "cancelled");
 });
 
-test("rows keep no patient name, age, AN, diagnosis, illnesses or costs", () => {
+test("rows keep the patient's name (Pong, 16 Nov 2026) but no age, AN, diagnosis, illnesses or costs", () => {
   const rows = parsed(SHEET);
   const keys = [
-    "line", "caseId", "hn", "operation", "surgeon", "title", "status", "urgency", "emergency", "shift", "bookedDate",
-    "bookedTime", "dept", "deptFrom", "team", "thaChalom", "smc", "dressing", "scope",
+    "line", "caseId", "hn", "patientName", "operation", "surgeon", "title", "status", "urgency", "emergency", "shift",
+    "bookedDate", "bookedTime", "dept", "deptFrom", "team", "thaChalom", "smc", "dressing", "scope",
   ];
   for (const row of rows) assert.deepEqual(Object.keys(row).sort(), [...keys].sort());
-  const text = JSON.stringify(rows);
+  assert.equal(byId(rows).get("900001")?.patientName, "ตัวอย่าง ผู้ป่วย01");
+  const text = JSON.stringify(rows, (key, value) => (key === "patientName" ? undefined : value));
   for (const secret of ["ผู้ป่วย", "690000001", "ปี", "เดือน", "ประกันสังคม", "IPD", "2750", "ศัลยกรรมหญิง"]) {
     assert.equal(text.includes(secret), false, secret);
   }
+});
+
+test("the patient's name is cleaned, and optional: an export without ชื่อ still reads, with empty names", () => {
+  const rows = parsed(sheetOf([ROW, { ...ROW, ID: 2, ชื่อ: "  ตัวอย่าง   ผู้ป่วย  " }]));
+  assert.deepEqual(rows.map((row) => row.patientName), ["", "ตัวอย่าง ผู้ป่วย"]);
+  assert.ok(!(REQUIRED_HEADERS as readonly string[]).includes("ชื่อ"));
+  const at = SHEET[0].indexOf("ชื่อ");
+  assert.ok(at >= 0);
+  const without = sheetOf([{ ...ROW, ชื่อ: "ตัวอย่าง ผู้ป่วย" }]).map((row) => row.filter((_, index) => index !== at));
+  assert.deepEqual(parsed(without).map((row) => [row.caseId, row.patientName]), [["1", ""]]);
 });
 
 test("HN stays text as written, leading zeros kept", () => {

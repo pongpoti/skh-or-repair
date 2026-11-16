@@ -199,7 +199,7 @@ test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 9 kept, 2 cut, 
   );
 });
 
-test("the stored cases hold what the board needs, in file order, and never a patient field", () => {
+test("the stored cases hold what the board needs, in file order, and of the patient only the HN and the name", () => {
   const result = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY));
   assert.deepEqual(
     result.cases.map((item) => item.position),
@@ -218,12 +218,14 @@ test("the stored cases hold what the board needs, in file order, and never a pat
     urgency: "Elective",
     bookedTime: "09:00",
     position: 1,
+    patientName: "ตัวอย่าง ผู้ป่วย01",
   });
-  // The summary goes into workbook_uploads.summary: counts and labels, no HN and no case ID.
+  // The summary goes into workbook_uploads.summary: counts and labels, no HN, no case ID and no name.
   const stored = JSON.stringify(result.summary);
   for (const item of result.cases) {
     assert.ok(!stored.includes(item.hn), "an HN in the summary");
     assert.ok(!stored.includes(item.caseId), "a case ID in the summary");
+    assert.ok(item.patientName && !stored.includes(item.patientName), "a patient's name in the summary");
   }
 });
 
@@ -371,7 +373,8 @@ test("matching: a booking with the case's HN pairs with it; the rest are unbooke
   const unbooked = matching.unbooked[0];
   assert.deepEqual(
     { room: unbooked.room, surgeon: unbooked.surgeon, operation: unbooked.operation },
-    { room: "OR 11", surgeon: "นพ. ตัวอย่าง กระดูก", operation: "ORIF Lt distal radius" },
+    // The surgeon as the board writes it, without the title.
+    { room: "OR 11", surgeon: "ตัวอย่าง กระดูก", operation: "ORIF Lt distal radius" },
   );
 });
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
-import { buildBoardRows, missingUploadDay, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
+import { buildBoardRows, missingUploadDay, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 
 // Tuesday 17 Nov 2026, the first half of the repair: OR 9 to 13 operate, OR 1 to 8 do not. Workbook cases and bookings
@@ -79,7 +79,8 @@ test("a matched pair shows once, in the workbook case's room, with the workbook'
   const [row] = result.rows;
   assert.deepEqual(
     [row.id, row.roomId, row.source, row.flag, row.procedure, row.status, row.shift, row.surgeon, row.bookedBy, row.hn],
-    [`mt-${mine.id}`, "or-12", "matched", null, "Lap chole", "in-progress", "out", "นพ. ตัวอย่าง ศัลย์ทั่วไป", "สมชาย ใจดี", "12345"],
+    // The surgeon without the title (Pong, 16 Nov 2026: "No นพ พญ prefix").
+    [`mt-${mine.id}`, "or-12", "matched", null, "Lap chole", "in-progress", "out", "ตัวอย่าง ศัลย์ทั่วไป", "สมชาย ใจดี", "12345"],
   );
   assert.equal(result.matched, 1);
   assert.equal(result.mismatchCount, 0);
@@ -363,6 +364,56 @@ test("the HN reaches only MX and admins (every row) and the doctor who booked (t
   const anyone = all(NOBODY);
   assert.ok(anyone.every((row) => !("hn" in row)), "no hn key at all");
   assert.doesNotMatch(JSON.stringify(anyone), /"(99|100|101|102|103)"/, "no HN anywhere in what the client gets");
+});
+
+test("the patient's name follows the HN: MX and admins on every row, the doctor who booked on their own matched case", () => {
+  const hosxpOnly = wb({ hn: "0199", patientName: "ตัวอย่าง ผู้ป่วยหนึ่ง" });
+  const mineMatched = booking({ hn: "201", surgeonId: "7" });
+  const theirsMatched = booking({ hn: "203", surgeonId: "8" });
+  const mine = booking({ hn: "204", surgeonId: "7" });
+  const workbook = [
+    hosxpOnly,
+    wb({ hn: "201", patientName: "ตัวอย่าง ผู้ป่วยสอง" }),
+    wb({ hn: "203", patientName: "ตัวอย่าง ผู้ป่วยสาม" }),
+    // An upload from before the name was read: no name, and no empty line.
+    wb({ hn: "205", patientName: null }),
+  ];
+  const names = (viewer: BoardViewer) =>
+    Object.fromEntries(build(workbook, [mineMatched, theirsMatched, mine], viewer).rows.map((row) => [row.id, row.patientName ?? null]));
+  const old = `hx-${workbook[3].caseId}`;
+  assert.deepEqual(names(MX), {
+    [`mt-${mineMatched.id}`]: "ตัวอย่าง ผู้ป่วยสอง",
+    [`mt-${theirsMatched.id}`]: "ตัวอย่าง ผู้ป่วยสาม",
+    [`hx-${hosxpOnly.caseId}`]: "ตัวอย่าง ผู้ป่วยหนึ่ง",
+    [old]: null,
+  });
+  // A booking alone has no name: it comes only from HOSxP's list.
+  assert.deepEqual(names({ allHn: false, userId: "7" }), {
+    [`mt-${mineMatched.id}`]: "ตัวอย่าง ผู้ป่วยสอง",
+    [`mt-${theirsMatched.id}`]: null,
+    [`hx-${hosxpOnly.caseId}`]: null,
+    [old]: null,
+  });
+  const anyone = build(workbook, [mineMatched, theirsMatched, mine], NOBODY);
+  const sent = [...anyone.rows, ...anyone.unmatched];
+  assert.ok(sent.every((row) => !("patientName" in row)), "no patientName key at all");
+  assert.doesNotMatch(JSON.stringify(sent), /ผู้ป่วย/, "no name anywhere in what the client gets");
+});
+
+test("HOSxP's surgeon loses the title on the board; a name without one is kept as it is", () => {
+  assert.equal(withoutTitle("นพ. ตัวอย่าง ศัลย์ทั่วไป"), "ตัวอย่าง ศัลย์ทั่วไป");
+  assert.equal(withoutTitle("พญ. ตัวอย่าง สูติ"), "ตัวอย่าง สูติ");
+  assert.equal(withoutTitle("น.พ. ตัวอย่าง กระดูก"), "ตัวอย่าง กระดูก");
+  assert.equal(withoutTitle("พ.ญ.ตัวอย่าง หู"), "ตัวอย่าง หู");
+  assert.equal(withoutTitle("ทพ. ตัวอย่าง ฟัน"), "ตัวอย่าง ฟัน");
+  assert.equal(withoutTitle("ทพญ. ตัวอย่าง ช่องปาก"), "ตัวอย่าง ช่องปาก");
+  assert.equal(withoutTitle("สมชาย ใจดี"), "สมชาย ใจดี");
+  // A name that is only a title stays, rather than an empty line.
+  assert.equal(withoutTitle("นพ."), "นพ.");
+  // Only a title at the start: a name that happens to begin with the same letters is not cut.
+  assert.equal(withoutTitle("นพดล ตัวอย่าง"), "นพดล ตัวอย่าง");
+  const [row] = build([wb({ surgeon: "พญ. ตัวอย่าง สูติ" })], []).rows;
+  assert.equal(row.surgeon, "ตัวอย่าง สูติ");
 });
 
 test("the no-upload alert names the board's day whenever it has no upload, in the repair or not", () => {

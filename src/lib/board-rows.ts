@@ -30,6 +30,11 @@ export type BoardRow = Operation & {
   flag: RowFlag;
   /** The patient's HN, present only when the viewer may see it (the key is left out otherwise). */
   hn?: string;
+  /**
+   * The patient's name from the HOSxP workbook (Pong, 16 Nov 2026: "Add patient name line above HN"), under the HN's
+   * rule: present only when the viewer may see the HN and the workbook has a name. A booking alone has none.
+   */
+  patientName?: string;
   /** The doctor who booked the room (booking and matched rows). */
   bookedBy?: string;
   /** When the booking was made, as the row says it: "15 พ.ย. 69, 23:43" (Bangkok time; booking and matched rows). */
@@ -43,6 +48,13 @@ export type BoardRow = Operation & {
    */
   doneBy?: DoneBy;
 };
+
+/**
+ * The surgeon as a row names them: without the title (Pong, 16 Nov 2026: "No นพ พญ prefix"), so every doctor's name
+ * fits on one line on a phone. The workbook's cases keep the title as saved ("นพ. ชื่อ นามสกุล"); bookings never had one.
+ */
+const TITLE = /^(?:น\.\s?พ\.|นพ\.|พ\.\s?ญ\.|พญ\.|ทพญ\.|ทพ\.)\s*/;
+export const withoutTitle = (surgeon: string) => surgeon.replace(TITLE, "").trim() || surgeon;
 
 /** Who does a dressing: the scrub nurse or the doctor. */
 export type DoneBy = "scrub" | "surgeon";
@@ -74,6 +86,8 @@ export type WorkbookCase = {
   status: CaseStatus;
   /** Order in the file. */
   position: number;
+  /** The patient's name (ชื่อ), null or absent when the file had none. */
+  patientName?: string | null;
 };
 
 export type BoardRowsInput = {
@@ -253,13 +267,14 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
           id: `mt-${booking.id}`,
           roomId,
           procedure: item.operation || booking.operation || NO_OPERATION_LABEL,
-          surgeon: item.surgeon,
+          surgeon: withoutTitle(item.surgeon),
           specialty: departmentName(item.dept) ?? subtypeLabel("DR", booking.subtype),
           status: item.status,
           shift: item.shift ?? booking.shift,
           source: "matched",
           flag: null,
           ...(seesHn(booking) && hn ? { hn } : {}),
+          ...(seesHn(booking) && item.patientName ? { patientName: item.patientName } : {}),
           bookedBy: booking.surgeon,
           ...when(booking),
           ...doneByIn(roomId, dressingRooms, booking),
@@ -275,13 +290,14 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       id: `hx-${item.caseId}`,
       roomId: placed,
       procedure: item.operation,
-      surgeon: item.surgeon,
+      surgeon: withoutTitle(item.surgeon),
       specialty: departmentName(item.dept),
       status: item.status,
       shift: item.shift,
       source: "hosxp",
       flag: dressingRoom ? null : "unbooked",
       ...(viewer.allHn ? { hn: normalizeHn(item.hn) } : {}),
+      ...(viewer.allHn && item.patientName ? { patientName: item.patientName } : {}),
       ...doneByIn(placed, dressingRooms),
     });
   }
