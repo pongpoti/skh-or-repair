@@ -1,7 +1,8 @@
 import "./_setup";
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
-import { cookieName, cookieOptions } from "@/lib/cookies";
+import { NextResponse } from "next/server";
+import { cookieName, cookieOptions, sessionTtlFor, setSessionCookie } from "@/lib/cookies";
 import { allowedPhonesRaw, appUrl, assertOtpReady, ConfigError, lineConfig, smsConfig } from "@/lib/env";
 import { setTestEnv } from "./_setup";
 
@@ -125,5 +126,26 @@ describe("env validation", () => {
     process.env.APP_URL = "https://orskh.vercel.app";
     assert.equal(cookieName("access"), "__Host-access");
     assert.equal(cookieOptions("access").httpOnly, true);
+  });
+
+  test("session length by device: 30 days in the LINE app, one shift and the browser's life elsewhere", () => {
+    process.env.APP_URL = "https://orskh.vercel.app";
+    const liff =
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari Line/14.10.0 LIFF";
+    const desktop = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    assert.equal(sessionTtlFor(liff), 30 * 24 * 3600);
+    assert.equal(sessionTtlFor(desktop), 12 * 3600);
+    assert.equal(sessionTtlFor(""), 12 * 3600);
+
+    const phone = NextResponse.json({});
+    setSessionCookie(phone, "tok", liff);
+    assert.match(phone.headers.get("set-cookie") ?? "", /^__Host-session=tok;.*Max-Age=2592000/i);
+    const computer = NextResponse.json({});
+    setSessionCookie(computer, "tok", desktop);
+    const set = computer.headers.get("set-cookie") ?? "";
+    assert.match(set, /^__Host-session=tok;/);
+    assert.doesNotMatch(set, /Max-Age|Expires/i, "a computer's session cookie ends with the browser");
+    assert.match(set, /HttpOnly/i);
+    assert.match(set, /Secure/i);
   });
 });

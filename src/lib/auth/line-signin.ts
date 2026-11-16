@@ -22,6 +22,7 @@ export async function lineSignIn(
   next: string,
   secret: string,
   meta: { ip: string; userAgent: string },
+  sessionTtlS: number,
 ): Promise<LineSignIn> {
   const doctorId = await freshEmailClaim(pool, profile.sub);
   if (doctorId && (await isAuthorizedDoctor(doctorId, profile.sub))) {
@@ -31,6 +32,7 @@ export async function lineSignIn(
       token: await signSession(
         { sub: profile.sub, phone: null, userId: doctorId, name: profile.name, picture: profile.picture },
         secret,
+        sessionTtlS,
       ),
     };
   }
@@ -49,6 +51,7 @@ export async function lineSignIn(
       token: await signSession(
         { sub: profile.sub, phone: binding.phone, userId: null, name: profile.name, picture: profile.picture },
         secret,
+        sessionTtlS,
       ),
     };
   }

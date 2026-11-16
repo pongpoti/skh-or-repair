@@ -1,7 +1,8 @@
 import "server-only";
 import type { NextResponse } from "next/server";
 import { secureCookies } from "./env";
-import { ACCESS_TTL_S, PENDING_TTL_S, SESSION_TTL_S, TX_TTL_S } from "./tokens";
+import { isLineApp } from "./gate";
+import { ACCESS_TTL_S, BROWSER_SESSION_TTL_S, PENDING_TTL_S, SESSION_TTL_S, TX_TTL_S } from "./tokens";
 
 export type CookieKind = "session" | "pending" | "tx" | "access";
 
@@ -25,6 +26,24 @@ export function cookieOptions(kind: CookieKind, secure = secureCookies()) {
 export function setCookie(res: NextResponse, kind: CookieKind, value: string): void {
   const secure = secureCookies();
   res.cookies.set(cookieName(kind, secure), value, cookieOptions(kind, secure));
+}
+
+/**
+ * How long a sign-in on this device lasts: 30 days in the LINE app, which is each person's own phone; 12 hours in any
+ * other browser (a computer or tablet, often one the OR shares), so the next person at it is not let in as the last.
+ */
+export function sessionTtlFor(userAgent: string): number {
+  return isLineApp(userAgent) ? SESSION_TTL_S : BROWSER_SESSION_TTL_S;
+}
+
+/**
+ * Sets the session cookie for the device that signed in. In the LINE app it is kept for 30 days; in any other browser it
+ * has no Max-Age, so it ends when the browser closes (and the token inside ends after 12 hours in any case).
+ */
+export function setSessionCookie(res: NextResponse, token: string, userAgent: string): void {
+  const secure = secureCookies();
+  const { maxAge, ...rest } = cookieOptions("session", secure);
+  res.cookies.set(cookieName("session", secure), token, isLineApp(userAgent) ? { ...rest, maxAge } : rest);
 }
 
 export function clearCookie(res: NextResponse, kind: CookieKind): void {
