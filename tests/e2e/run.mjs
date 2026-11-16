@@ -3145,6 +3145,8 @@ async function main() {
       await board.goto(`${APP}/`, { waitUntil: "networkidle" });
       assert((await textOf(board, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569", "no-upload alert");
       assert((await board.locator('[data-notice-id]').count()) === 1, "the one badge (Pong, 16 Nov 2026)");
+      // only doctors (DR) get the booking button (Pong, 16 Nov 2026): not a nurse
+      assert((await board.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button for a nurse");
       // in the middle of the strip, with the database-off icon (Pong, 16 Nov 2026)
       const centred = await board.evaluate(() => {
         const strip = document.querySelector('[data-testid="notice-strip"]').getBoundingClientRect();
@@ -3352,6 +3354,8 @@ async function main() {
       assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "uploaded: no alert");
       // no ไม่ตรง badge since 16 Nov 2026: the strip is empty; the rooms keep their mismatch marks
       assert((await page.locator("[data-notice-id]").count()) === 0, `uploaded: an empty strip: ${await textOf(page, "[data-notice-strip]")}`);
+      // nor an admin who is not a doctor
+      assert((await page.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button for an admin who is not a DR");
       // test mode is for admins only: on a day with its upload, a non-admin's /?notices=all has no false "no table" badge
       // or room icon
       {

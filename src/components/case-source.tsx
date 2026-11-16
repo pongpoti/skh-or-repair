@@ -62,8 +62,8 @@ const SOURCE_ICONS: Record<RowSource, ReactNode> = {
 
 // The doctor and the scrub nurse as small round portraits, drawn for this app in the logo's colours (src/app/icon.svg,
 // components/brand-mark.tsx): the tile's brown, teal scrubs, pale mask and face. The doctor wears the logo's scrub cap
-// and mask; the nurse wears a white folded nurse cap with a black stripe and a red cross, and rose scrubs. They differ
-// in shape (cap, mask, smile), not only in colour.
+// and mask; the nurse wears the same scrub cap in rose with a white cross, and rose scrubs, without a mask. They differ
+// in shape (the cross, the mask or the smile), not only in colour.
 const TILE = "#54402f";
 const TILE_EDGE = "#3f2f24";
 const SCRUBS = "#7fbfb7";
@@ -72,10 +72,9 @@ const MASK = "#eaf4f5";
 const PLEAT = "#a7c9cf";
 const FACE = "#f1e7da";
 const INK = "#241c16";
-const HAIR = "#2a1f18";
 const ROSE = "#e49aa2";
 const ROSE_DARK = "#c97a84";
-const CROSS = "#d63c3c";
+const CHEEK = "#f2b3a8";
 
 /** Shoulders on the tile, cut by its round edge. */
 const SHOULDERS = "M5.27 39 C7.6 35.7 14 34.3 24 34.3 C34 34.3 40.4 35.7 42.73 39 A24 24 0 0 1 5.27 39 Z";
@@ -95,22 +94,23 @@ const DOER_ICONS: Record<DoneBy, ReactNode> = {
       <path d="M16.1 26.9 Q24 25.9 31.9 26.9 M16.8 29.5 Q24 28.6 31.2 29.5" fill="none" stroke={PLEAT} strokeWidth="1.1" strokeLinecap="round" />
     </>
   ),
-  // The scrub nurse: nurse cap, no mask, a smile.
+  // The scrub nurse (Pong picked option A, 16 Nov 2026, after the nurse cap looked "spooky"): the doctor's twin, a pink
+  // scrub cap with a white cross, no mask, a smile, shining eyes and rosy cheeks.
   scrub: (
     <>
       <path d={SHOULDERS} fill={ROSE} />
-      <path d="M20 29 H28 V35 H20 Z" fill={FACE} />
-      <path d="M19.2 34.4 L24 40.6 L28.8 34.4 Z" fill={ROSE_DARK} />
-      <path d="M36.3 22.8 A12.3 12.3 0 0 0 11.7 22.8 L12.2 27.6 L35.8 27.6 Z" fill={HAIR} />
-      <circle cx="24" cy="23" r="11.2" fill={FACE} />
-      <path d="M12.8 22.6 C13.1 17.8 17.4 15.4 22.4 15.3 Q25.4 15.4 26.9 13.8 Q28.6 16.2 31.6 17 C33.9 18 35 20 35.2 22.6 A11.2 11.2 0 0 0 12.8 22.6 Z" fill={HAIR} />
-      <path d="M15.4 15 Q24 12.9 32.6 15 L35.6 4.6 Q24 6.4 12.4 4.6 Z" fill="#ffffff" />
-      <path d="M15.4 15 L12.4 4.6 L16.6 5.4 L18 14.4 Z M32.6 15 L35.6 4.6 L31.4 5.4 L30 14.4 Z" fill="#dfe3e8" />
-      <path d="M12.74 5.8 Q24 7.6 35.26 5.8 L34.77 7.5 Q24 9.3 13.23 7.5 Z" fill={HAIR} />
-      <path d="M23.15 8.9 h1.7 v1.45 h1.45 v1.7 h-1.45 v1.45 h-1.7 v-1.45 h-1.45 v-1.7 h1.45 Z" fill={CROSS} />
-      <circle cx="19.8" cy="23.6" r="1.65" fill={INK} />
-      <circle cx="28.2" cy="23.6" r="1.65" fill={INK} />
-      <path d="M21 28.3 Q24 30.5 27 28.3" fill="none" stroke="#b0624a" strokeWidth="1.3" strokeLinecap="round" />
+      <path d="M18.8 34.4 L24 41.6 L29.2 34.4 Z" fill={ROSE_DARK} />
+      <circle cx="24" cy="21.5" r="12" fill={FACE} />
+      <path d="M11.7 20.3 C8.6 16.4 9.4 5.4 24 5.4 C38.6 5.4 39.4 16.4 36.3 20.3 Q24 16.6 11.7 20.3 Z" fill={ROSE} />
+      <path d="M11.9 20.1 Q24 16.6 36.1 20.1" fill="none" stroke={ROSE_DARK} strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M22.6 9.2 h2.8 v2.4 h2.4 v2.8 h-2.4 v2.4 h-2.8 v-2.4 h-2.4 v-2.8 h2.4 Z" fill="#ffffff" />
+      <circle cx="19.7" cy="22.4" r="1.65" fill={INK} />
+      <circle cx="28.3" cy="22.4" r="1.65" fill={INK} />
+      <circle cx="20.2" cy="21.9" r="0.5" fill="#ffffff" />
+      <circle cx="28.8" cy="21.9" r="0.5" fill="#ffffff" />
+      <ellipse cx="16.6" cy="26.4" rx="2" ry="1.3" fill={CHEEK} />
+      <ellipse cx="31.4" cy="26.4" rx="2" ry="1.3" fill={CHEEK} />
+      <path d="M20.6 27.6 Q24 30.8 27.4 27.6" fill="none" stroke="#b0624a" strokeWidth="1.4" strokeLinecap="round" />
     </>
   ),
 };
