@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
-import { clientAllowed, gateMode, isLiff, isLineApp, isPhone, liffUrl } from "@/lib/gate";
+import { clientAllowed, gateMode, isDesktop, isLiff, isLineApp, isPhone, liffUrl } from "@/lib/gate";
 
 // Real-world shaped User-Agents (versions invented).
 const UA = {
@@ -24,6 +24,14 @@ const UA = {
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
   macLine:
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Line/9.5.0",
+  macSafari:
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+  windowsEdge:
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+  linuxFirefox: "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+  androidTabletChrome:
+    "Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+  curl: "curl/8.5.0",
   liffWord: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Mobile LIFF",
 };
 
@@ -43,6 +51,11 @@ describe("device detection", () => {
     assert.ok(!isLiff(UA.iosLine) && !isLiff(UA.androidLine));
     assert.ok(!isLiff(UA.liffWord), "LIFF without the LINE app is not LIFF");
   });
+  test("computers and tablets: browsers that are not phones", () => {
+    for (const ua of [UA.desktopChrome, UA.windowsEdge, UA.macSafari, UA.linuxFirefox, UA.macLine, UA.ipadLine, UA.androidTabletChrome])
+      assert.ok(isDesktop(ua), ua);
+    for (const ua of [UA.iosLiff, UA.androidLiff, UA.iosSafari, UA.androidChrome, UA.liffWord, UA.curl, ""]) assert.ok(!isDesktop(ua), ua);
+  });
   test("phones only", () => {
     for (const ua of [UA.iosLine, UA.androidLine, UA.iosSafari, UA.androidChrome]) assert.ok(isPhone(ua), ua);
     for (const ua of [UA.androidTabletLine, UA.ipadLine, UA.desktopChrome, UA.macLine, ""]) assert.ok(!isPhone(ua), ua);
@@ -54,22 +67,21 @@ describe("clientAllowed", () => {
     assert.ok(clientAllowed(UA.desktopChrome, "off"));
     assert.ok(clientAllowed(null, "off"));
   });
-  test("liff: only the LIFF app on a phone", () => {
-    for (const ua of [UA.iosLiff, UA.androidLiff]) assert.ok(clientAllowed(ua, "liff"), ua);
+  test("liff: the LIFF app on a phone, and any browser on a computer or tablet", () => {
     for (const ua of [
-      UA.iosLine,
-      UA.androidLine,
-      UA.iosSafari,
-      UA.androidChrome,
+      UA.iosLiff,
+      UA.androidLiff,
       UA.desktopChrome,
+      UA.windowsEdge,
+      UA.macSafari,
+      UA.linuxFirefox,
       UA.macLine,
       UA.ipadLine,
       UA.androidTabletLine,
-      UA.liffWord,
-      "",
-      null,
-      undefined,
+      UA.androidTabletChrome,
     ])
+      assert.ok(clientAllowed(ua, "liff"), ua);
+    for (const ua of [UA.iosLine, UA.androidLine, UA.iosSafari, UA.androidChrome, UA.liffWord, UA.curl, "", null, undefined])
       assert.ok(!clientAllowed(ua, "liff"), String(ua));
   });
 });

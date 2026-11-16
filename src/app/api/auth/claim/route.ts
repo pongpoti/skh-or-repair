@@ -1,7 +1,7 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { accessGrantFor } from "@/lib/access-http";
 import { noteAuthorized } from "@/lib/authz";
-import { clearCookie, setCookie } from "@/lib/cookies";
+import { clearCookie, sessionTtlFor, setSessionCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { sessionSecret, telegramEnabled } from "@/lib/env";
 import { guardPost, json, MSG } from "@/lib/http";
@@ -82,11 +82,11 @@ export async function POST(req: NextRequest) {
     }
     // "own_claim": the number already holds this name (another tab, or a retry): claimUser() bound it, sign in.
     noteAuthorized(grant.phone);
-    const token = await signSession({ sub: grant.sub, phone: grant.phone, userId: null, name: grant.name, picture: grant.picture }, sessionSecret());
+    const token = await signSession({ sub: grant.sub, phone: grant.phone, userId: null, name: grant.name, picture: grant.picture }, sessionSecret(), sessionTtlFor(req.headers.get("user-agent") ?? ""));
     const res = NextResponse.json({ ok: true, redirect: "/" }, { headers: { "Cache-Control": "no-store" } });
     clearCookie(res, "access");
     clearCookie(res, "pending");
-    setCookie(res, "session", token);
+    setSessionCookie(res, token, req.headers.get("user-agent") ?? "");
     return res;
   } catch (e) {
     console.error("[claim] claim failed:", (e as Error).message);

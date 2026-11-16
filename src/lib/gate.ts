@@ -1,15 +1,15 @@
 /**
- * Device gate: the board, and LINE Login with it, opens only inside the board's LIFF app in the LINE app on a mobile
- * phone. Every other browser gets the "open in LINE" page instead, before the sign-in gate, so LINE Login cannot be
- * started (or finished) outside LIFF.
+ * Device gate: on a phone the board, and LINE Login with it, opens only inside the board's LIFF app in the LINE app.
+ * A computer or tablet opens it in any browser, where LINE Login's web page (QR code or email) signs in. A phone
+ * browser outside LINE, or a plain LINE chat on a phone, gets the "open in LINE" page instead, before the sign-in gate.
  *
- * The check reads the User-Agent, which a determined person can fake: it keeps the board off desktop browsers, out of
- * ordinary phone browsers and out of plain LINE chats, while the sign-in (LINE + SMS code + a claimed name) stays the
- * real access control.
+ * The check reads the User-Agent, which a determined person can fake (a phone browser's "desktop site" mode already
+ * reads as a computer): it steers phones into LINE, while the sign-in (LINE + SMS or email code + a claimed name)
+ * stays the real access control.
  *
  * Modes:
- *   liff - the LIFF app on a phone (LINE adds "LIFF" to the in-app browser's User-Agent there). Always on Vercel
- *          (production and preview), whether or not LIFF_ID is set.
+ *   liff - the LIFF app on a phone (LINE adds "LIFF" to the in-app browser's User-Agent there), or any browser on a
+ *          computer or tablet. Always on Vercel (production and preview), whether or not LIFF_ID is set.
  *   off  - no gate. The default outside Vercel (local development and tests), and the break-glass CLIENT_GATE=off.
  */
 
@@ -58,10 +58,18 @@ export function isPhone(ua: string): boolean {
   return /\bAndroid\b/.test(ua) && /\bMobile\b/.test(ua);
 }
 
+/**
+ * A computer or tablet browser: a browser's User-Agent ("Mozilla/...") that is not a phone's. iPads report themselves
+ * as a Mac. An empty or non-browser User-Agent is neither, so it stays out.
+ */
+export function isDesktop(ua: string): boolean {
+  return /^Mozilla\/\d/.test(ua) && !isPhone(ua);
+}
+
 export function clientAllowed(ua: string | null | undefined, mode: GateMode): boolean {
   if (mode === "off") return true;
   const s = ua ?? "";
-  return isPhone(s) && isLiff(s);
+  return isPhone(s) ? isLiff(s) : isDesktop(s);
 }
 
 export const GATE_PATH = "/open-in-line";

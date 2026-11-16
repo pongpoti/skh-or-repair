@@ -41,6 +41,16 @@ describe("PKCE and authorize URL", () => {
       ui_locales: "th",
     });
   });
+
+  test("a computer's authorize URL opens LINE's QR code first", () => {
+    delete process.env.LINE_AUTH_URL;
+    const qr = new URL(buildAuthorizeUrl(lineConfig(), { state: "st", nonce: "no", challenge: "ch", qr: true }));
+    assert.equal(qr.searchParams.get("initial_amr_display"), "lineqr");
+    assert.equal(qr.searchParams.get("prompt"), "login", "never 'continue as' the last person on a shared computer");
+    const phone = new URL(buildAuthorizeUrl(lineConfig(), { state: "st", nonce: "no", challenge: "ch", qr: false }));
+    assert.equal(phone.searchParams.has("initial_amr_display"), false);
+    assert.equal(phone.searchParams.has("prompt"), false);
+  });
 });
 
 describe("LINE profile sanitizing", () => {

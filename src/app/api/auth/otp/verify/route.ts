@@ -1,6 +1,6 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedPhone } from "@/lib/authz";
-import { clearCookie, cookieName, setCookie } from "@/lib/cookies";
+import { clearCookie, cookieName, sessionTtlFor, setCookie, setSessionCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { assertOtpReady, ConfigError, otpPepper, sessionSecret, smsConfig, telegramEnabled } from "@/lib/env";
 import { guardPost, json, MSG } from "@/lib/http";
@@ -92,11 +92,11 @@ export async function POST(req: NextRequest) {
           await notifyVerified({ user, lineName: pending.name, phone, at, history, verifiedPhones });
         });
       }
-      const token = await signSession({ sub: pending.sub, phone, userId: null, name: pending.name, picture: pending.picture }, secret);
+      const token = await signSession({ sub: pending.sub, phone, userId: null, name: pending.name, picture: pending.picture }, secret, sessionTtlFor(req.headers.get("user-agent") ?? ""));
       const res = NextResponse.json({ ok: true, redirect: safeNextPath(pending.next) }, { headers: { "Cache-Control": "no-store" } });
       clearCookie(res, "pending");
       clearCookie(res, "access");
-      setCookie(res, "session", token);
+      setSessionCookie(res, token, req.headers.get("user-agent") ?? "");
       return res;
     }
     if (result.reason === "locked") {

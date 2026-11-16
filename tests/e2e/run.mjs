@@ -165,6 +165,11 @@ const PNG_1PX = Buffer.from(
   "base64",
 );
 
+// User-Agents for the checks that depend on the device (the e2e app runs with the device gate off)
+const UA_DESKTOP = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const UA_IPHONE_LIFF =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari Line/14.10.0 LIFF";
+
 const children = [];
 const issuedCodes = [];
 const shots = [];
@@ -797,8 +802,28 @@ async function main() {
       assert(csp.length === 0, `CSP violations: ${csp.join(" | ")}`);
       assert((await page.textContent("h1")).trim() === "ออกจากระบบแล้ว", "signed-out title");
       assert((await page.locator('[data-testid="line-login"]').count()) === 0, "no LINE button");
+      // a computer has no LINE menu: one link back to the board, which signs in again through LINE's page
+      const reopen = page.locator('[data-testid="signed-out-reopen"]');
+      assert((await reopen.count()) === 1 && (await reopen.getAttribute("href")) === "/", "signed-out: a computer's way back to the board");
+      await noLineLogin(page, "/login?signed_out=1 (computer)");
       await touchTargets(page, "/login");
       await shoot(page, "login-signed-out");
+      // in the LIFF app on a phone: text only, reopened from the LINE menu
+      const liffCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: "th-TH", userAgent: UA_IPHONE_LIFF });
+      const liffPage = await liffCtx.newPage();
+      await liffPage.goto(`${APP}/login?signed_out=1`);
+      assert((await liffPage.textContent("h1")).trim() === "ออกจากระบบแล้ว", "signed-out title (LIFF)");
+      assert((await liffPage.textContent("main")).includes("เปิดใหม่ได้จากเมนูใน LINE"), "signed-out (LIFF): reopen from the LINE menu");
+      assert((await liffPage.locator('[data-testid="signed-out-reopen"], main a, main button').count()) === 0, "signed-out (LIFF): no link or button");
+      await liffCtx.close();
+
+      // LINE Login from a computer opens on LINE's QR code and asks for it every time (never "continue as" the last
+      // person on a shared computer); in the LINE app LINE's own sign-in stays as it is
+      const startAt = async (ua) => new URL((await rawRequest("/api/auth/line/start", { host: `localhost:${APP_PORT}`, "user-agent": ua })).location);
+      const desk = await startAt(UA_DESKTOP);
+      assert(desk.searchParams.get("initial_amr_display") === "lineqr" && desk.searchParams.get("prompt") === "login", `computer: ${desk.search}`);
+      const inLine = await startAt(UA_IPHONE_LIFF);
+      assert(!inLine.searchParams.has("initial_amr_display") && !inLine.searchParams.has("prompt"), `LIFF fallback: ${inLine.search}`);
 
       for (const headers of [{ RSC: "1" }, { RSC: "1", "Next-Router-Prefetch": "1" }, { Purpose: "prefetch" }]) {
         const r = await rawRequest("/", { host: `localhost:${APP_PORT}`, ...headers });
@@ -1060,6 +1085,12 @@ async function main() {
       assert((await page.getAttribute('[data-testid="user-menu"] img', "src")) === "https://profile.line-scdn.net/0hMockPicture", "LINE picture");
       const s = await cookie(ctxA, "session");
       assert(s?.httpOnly && s.sameSite === "Lax" && s.path === "/", "session cookie flags");
+      // signed in from a computer's browser (the test browser's User-Agent): the cookie ends with the browser, and the
+      // session inside it after 12 hours (in the LINE app it keeps 30 days)
+      assert(s.expires === -1, `a computer's session cookie ends with the browser: expires ${s.expires}`);
+      const sessionExp = JSON.parse(Buffer.from(s.value.split(".")[1], "base64url").toString()).exp;
+      const sessionLeft = sessionExp - Date.now() / 1000;
+      assert(sessionLeft > 11 * 3600 && sessionLeft <= 12 * 3600 + 5, `a computer's session lasts 12 h: ${Math.round(sessionLeft)} s`);
       assert(!(await cookie(ctxA, "access"))?.value, "access cookie cleared");
       await page.waitForLoadState("networkidle");
       assert(csp.length === 0, `CSP violations: ${csp.join(" | ")}`);
@@ -1131,6 +1162,23 @@ async function main() {
         if (width === 1280) {
           assert(await page.locator('[data-testid="user-name"]').isVisible(), "name beside the avatar on a desktop");
           assert((await page.textContent('[data-testid="user-name"]')).trim() === DOC1_NAME, "desktop name");
+          // a computer's side panel lists the open rooms until one is picked, and the room's ปิด goes back to it (a
+          // day the suite is closed has no rooms to list)
+          const overview = page.locator('[data-testid="room-overview"]');
+          if (await overview.count()) {
+            assert(await overview.isVisible(), "the open rooms beside the plan on a desktop");
+            const first = overview.locator('button[data-testid^="overview-or-"]').first();
+            const roomId = (await first.getAttribute("data-testid")).replace("overview-", "");
+            await first.click();
+            await page.waitForURL((u) => new URL(u).searchParams.get("room") === roomId);
+            await page.locator('[data-testid="room-close"]').click();
+            await overview.waitFor({ state: "visible" });
+            await page.waitForURL((u) => new URL(u).searchParams.get("room") === null);
+          } else {
+            console.log("[e2e] note: the board's day is closed, so the open-room list was not checked");
+          }
+        } else {
+          assert(!(await page.locator('[data-testid="room-overview"]').isVisible()), "no room list on a phone");
         }
         await page.click('[data-testid="user-menu"]');
         const menu = page.locator('[data-testid="account-menu"]');

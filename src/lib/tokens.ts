@@ -13,6 +13,11 @@ import { EncryptJWT, jwtDecrypt, jwtVerify, SignJWT } from "jose";
  */
 export const ISSUER = "orskh";
 export const SESSION_TTL_S = 30 * 24 * 3600;
+/**
+ * A sign-in outside the LINE app (a computer or tablet browser, often shared in the OR) lasts one shift at most, and its
+ * cookie ends when the browser closes (lib/cookies.ts setSessionCookie).
+ */
+export const BROWSER_SESSION_TTL_S = 12 * 3600;
 export const PENDING_TTL_S = 15 * 60;
 export const TX_TTL_S = 10 * 60;
 export const ACCESS_TTL_S = 12 * 3600;
