@@ -39,7 +39,7 @@ export function boardNotices({
       icon: "no-table",
       text: `ยังไม่มีตาราง HOSxP ของ ${shortThaiDate(missingUpload)}`,
       short: "ยังไม่มี HOSxP",
-      detail: "MX อัปโหลดตารางจาก HOSxP ทุกวัน เวลา 15:00–16:00 สำหรับวันทำการถัดไป ระหว่างนี้ห้องแสดงเฉพาะการจองของแพทย์",
+      detail: "Manager อัปโหลดตารางจาก HOSxP ทุกวัน เวลา 15:00–16:00 สำหรับวันทำการถัดไป ระหว่างนี้ห้องแสดงเฉพาะการจองของแพทย์",
       testId: "no-upload-alert",
     },
   ];
