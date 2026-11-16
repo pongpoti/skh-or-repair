@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { MxResult } from "@/app/admin/actions";
 import type { MxData, MxView, PickView } from "@/app/admin/data";
+import { AdminSection } from "@/components/admin-section";
 import { Notice } from "@/components/auth-shell";
 import { InlineStatus } from "@/components/inline-status";
 import { searchKey } from "@/lib/user-labels";
@@ -22,7 +23,7 @@ function Icon({ name, size = 18 }: { name: keyof typeof icon; size?: number }) {
   );
 }
 
-/** The same dialog as the surgeon list's (components/physician-admin.tsx). */
+/** The admin page's dialog (as the surgeon list had it). */
 const DIALOG =
   "m-auto w-[min(28rem,calc(100%-2rem))] rounded-[18px] border border-line bg-surface p-6 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px]";
 
@@ -38,7 +39,8 @@ function matches(query: string, name: string): boolean {
  * The admin's list of MX members (ผู้จัดการตาราง, who upload the HOSxP workbook; lib/roles.ts): remove one, or add one by
  * picking an active user by name. Picking takes two steps (choose, then add) because the role lets that person replace
  * everyone's schedule. With `onAdd` and `onRemove` (the server actions) every change is saved; without them, as in the
- * development preview, changes stay in this page. `initial` null means the list could not be read.
+ * development preview, changes stay in this page. `initial` null means the list could not be read. Closed until opened
+ * (components/admin-section.tsx): เพิ่ม MX shows in the heading, greyed out and inert until then.
  */
 export function MxMembers({
   initial,
@@ -72,16 +74,13 @@ export function MxMembers({
 
   if (!initial) {
     return (
-      <section className="card overflow-hidden" aria-labelledby="mx-title">
-        <div className="flex flex-col gap-3 p-4 sm:p-5">
-          <h2 id="mx-title" className="text-base font-bold text-ink sm:text-lg">
-            ผู้จัดการตาราง (MX)
-          </h2>
+      <AdminSection id="mx" title="ผู้จัดการตาราง (MX)" summary="อ่านรายชื่อจากระบบไม่ได้">
+        <div className="p-4 sm:p-5">
           <Notice tone="warning" role="alert">
             อ่านรายชื่อจากระบบไม่ได้ ลองโหลดหน้านี้ใหม่
           </Notice>
         </div>
-      </section>
+      </AdminSection>
     );
   }
 
@@ -155,27 +154,26 @@ export function MxMembers({
     });
   }
 
+  const summary = (
+    <>
+      <p>อัปโหลดตาราง HOSxP ได้ · {members.length} คน</p>
+      {done ? (
+        <InlineStatus tone="success" role="status" className="mt-1">
+          {done}
+        </InlineStatus>
+      ) : null}
+    </>
+  );
+  // Greyed out and inert while the section is closed (components/admin-section.tsx).
+  const addButton = (
+    <button type="button" onClick={openPicker} className="btn btn-primary px-4" data-testid="mx-add">
+      <Icon name="plus" />
+      เพิ่ม MX
+    </button>
+  );
+
   return (
-    <section className="card overflow-hidden" aria-labelledby="mx-title">
-      <div className="flex flex-col gap-3 border-b border-line p-4 sm:p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h2 id="mx-title" className="text-base font-bold text-ink sm:text-lg">
-              ผู้จัดการตาราง (MX)
-            </h2>
-            <p className="text-sm text-muted">อัปโหลดตาราง HOSxP ได้ · {members.length} คน</p>
-            {done ? (
-              <InlineStatus tone="success" role="status" className="mt-1">
-                {done}
-              </InlineStatus>
-            ) : null}
-          </div>
-          <button type="button" onClick={openPicker} className="btn btn-primary shrink-0 px-4" data-testid="mx-add">
-            <Icon name="plus" />
-            เพิ่ม MX
-          </button>
-        </div>
-      </div>
+    <AdminSection id="mx" title="ผู้จัดการตาราง (MX)" summary={summary} actions={addButton}>
 
       {members.length === 0 ? (
         <p className="px-5 py-8 text-center text-sm text-muted">ยังไม่มีผู้จัดการตาราง กด “เพิ่ม MX” แล้วเลือกจากรายชื่อผู้ใช้</p>
@@ -321,6 +319,6 @@ export function MxMembers({
           </div>
         </div>
       </dialog>
-    </section>
+    </AdminSection>
   );
 }

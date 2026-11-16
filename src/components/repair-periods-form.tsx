@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import type { RepairResult } from "@/app/admin/actions";
 import type { RepairView } from "@/app/admin/data";
+import { AdminSection } from "@/components/admin-section";
 import { Notice } from "@/components/auth-shell";
 import { InlineStatus } from "@/components/inline-status";
 import { ThaiDateField, type DayState } from "@/components/thai-date-field";
@@ -61,7 +62,9 @@ function samePeriods(a: RepairPeriods, b: RepairPeriods): boolean {
 /**
  * The admin's form for the repair's two halves (/admin): four dates, checked here with the same rules and Thai messages
  * as the server (lib/repair.ts checkRepairPeriods), then saved by `onSave`. A save changes the board for everyone at
- * once. Without `onSave`, as in the development preview, the dates stay in this page.
+ * once. Without `onSave`, as in the development preview, the dates stay in this page. Closed until opened, like every
+ * admin section (components/admin-section.tsx); dates changed and not saved are kept while it is closed, and the
+ * heading says so.
  */
 export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; onSave?: (input: RepairPeriods) => Promise<RepairResult> }) {
   const [saved, setSaved] = useState<RepairPeriods>(initial.periods);
@@ -121,18 +124,25 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
     });
   }
 
+  const summary = (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span data-testid="repair-changed">{changed ? `แก้ไขล่าสุด ${changed.at} โดย ${changed.by}` : "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข"}</span>
+      {dirty ? (
+        <span className="badge badge-warning" data-testid="repair-unsaved">
+          ยังไม่บันทึก
+        </span>
+      ) : null}
+    </span>
+  );
+
   return (
-    <section className="card overflow-hidden" aria-labelledby="repair-periods-title">
+    <AdminSection id="repair-periods" title="ช่วงปิดซ่อมห้องผ่าตัด" summary={summary} testId="repair-section">
       <form onSubmit={save} noValidate>
-        <div className="flex flex-col gap-3 border-b border-line p-4 sm:p-5">
-          <div>
-            <h2 id="repair-periods-title" className="text-base font-bold text-ink sm:text-lg">
-              ช่วงปิดซ่อมห้องผ่าตัด
-            </h2>
-            <p className="text-sm text-muted">{changed ? `แก้ไขล่าสุด ${changed.at} โดย ${changed.by}` : "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข"}</p>
+        {fallback ? (
+          <div className="px-4 pt-4 sm:px-5 sm:pt-5">
+            <Notice tone="warning">อ่านวันที่จากระบบไม่ได้ ตอนนี้แสดงวันที่ตามแผนเดิม</Notice>
           </div>
-          {fallback ? <Notice tone="warning">อ่านวันที่จากระบบไม่ได้ ตอนนี้แสดงวันที่ตามแผนเดิม</Notice> : null}
-        </div>
+        ) : null}
 
         <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2">
           {HALVES.map((half) => {
@@ -211,6 +221,6 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
           </button>
         </div>
       </form>
-    </section>
+    </AdminSection>
   );
 }

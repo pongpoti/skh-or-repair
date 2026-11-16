@@ -137,6 +137,37 @@ body {
   outline: none;
 }
 
+/*
+ * An admin section's heading row (components/admin-section.tsx): the title's button stretches over the whole row, so a
+ * tap anywhere on it opens or closes the section, and the focus ring goes round the row rather than the title alone.
+ * Outside @layer, like the focus rule above, which it has to override.
+ */
+.section-toggle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  /* Above the row's text and chevron (a transformed element paints over a plain overlay), below the buttons (z-10). */
+  z-index: 1;
+  /* The card's corners: all four while the section is closed, the top two above an open body. */
+  border-radius: 1rem 1rem 0 0;
+  cursor: pointer;
+}
+[data-open="false"] > .section-head .section-toggle::after {
+  border-radius: 1rem;
+}
+.section-toggle:focus-visible {
+  outline: none;
+}
+.section-toggle:focus-visible::after {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+@media (hover: hover) {
+  .section-head:has(.section-toggle:hover) {
+    background: rgb(166 137 102 / 0.06);
+  }
+}
+
 @layer components {
   .appbar {
     background: rgb(255 255 255 / 0.6);

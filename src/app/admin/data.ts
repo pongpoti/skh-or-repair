@@ -4,13 +4,13 @@ import { today } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "@/lib/repair";
 import { getRepairPeriods } from "@/lib/repair-store";
-import { listActiveUsers, listMx, type MxMember } from "@/lib/roles";
+import { listActiveUsers, listMx, type MxMember, type PickableUser } from "@/lib/roles";
 import { thaiDateTime } from "@/lib/telegram";
-import { roleLabel } from "@/lib/user-labels";
+import { roleLabel, subtypeLabel, type UserType } from "@/lib/user-labels";
 import { HOLDS } from "@/lib/user-list";
 
 /**
- * What the admin page's two repair-phase sections show (components/repair-periods-form.tsx and mx-members.tsx), shaped
+ * What the admin page's sections show (components/repair-periods-form.tsx, mx-members.tsx and staff-list.tsx), shaped
  * on the server: dates and times are written out here in Bangkok time, so the browser's own clock and Thai calendar
  * data cannot make the page differ from what the server rendered. The page and the server actions both use these, so a
  * save answers with exactly what a fresh page would show.
@@ -43,6 +43,23 @@ export type MxView = {
 export type PickView = { id: string; name: string; role: string };
 
 export type MxData = { members: MxView[]; users: PickView[] };
+
+/**
+ * A name of the staff list (table `users`, loaded by scripts/sync-users.mjs), as the admin's all-names list shows it:
+ * the type and subtype codes to filter by, and the subtype in Thai.
+ */
+export type StaffView = {
+  id: string;
+  name: string;
+  type: UserType;
+  /** The code: ORTHO, OBGYN, ... for doctors, OR or ANES for nurses and assistants. */
+  subtype: string;
+  /** "ออร์โธปิดิกส์", "ห้องผ่าตัด"; the code itself when the app has no Thai name for it. */
+  subtypeName: string;
+};
+
+/** The two sections that list people: the MX list with its picker, and the all-names list. Null when unreadable. */
+export type PeopleData = { mx: MxData | null; staff: StaffView[] | null };
 
 /** Shown when the admin who saved is not found any more (their claim ended and LINE never gave a name). */
 const UNKNOWN_ADMIN = "ผู้ดูแลระบบ";
@@ -108,14 +125,25 @@ export async function mxMembersFrom(pool: Pool): Promise<MxView[]> {
   return (await listMx(pool)).map(memberView);
 }
 
-/** The MX list and the names to pick from, or null when the database cannot be read (the section says so). */
-export async function loadMxData(): Promise<MxData | null> {
+function staffView(user: PickableUser): StaffView {
+  const subtype = user.subtype?.trim() ?? "";
+  return { id: user.id, name: user.name, type: user.type, subtype, subtypeName: subtypeLabel(user.type, subtype) ?? subtype };
+}
+
+/**
+ * The MX list, the names to pick from, and the all-names list, from one read of the active users. Never throws: when
+ * the database cannot be read both sections say so and the rest of the page still opens.
+ */
+export async function loadPeople(): Promise<PeopleData> {
   try {
     const pool = await db();
     const [members, users] = await Promise.all([mxMembersFrom(pool), listActiveUsers(pool)]);
-    return { members, users: users.map((user) => ({ id: user.id, name: user.name, role: roleLabel(user.type, user.subtype) })) };
+    return {
+      mx: { members, users: users.map((user) => ({ id: user.id, name: user.name, role: roleLabel(user.type, user.subtype) })) },
+      staff: users.map(staffView),
+    };
   } catch (error) {
-    console.error("[admin] reading the MX list failed:", (error as Error).message);
-    return null;
+    console.error("[admin] reading the users failed:", (error as Error).message);
+    return { mx: null, staff: null };
   }
 }

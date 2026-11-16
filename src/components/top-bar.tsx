@@ -142,7 +142,7 @@ export function TopBar({
             href={adminHref}
             className="btn btn-ghost hidden size-11 min-h-0 shrink-0 p-0 min-[390px]:inline-flex md:w-auto md:px-3.5"
             aria-label="จัดการระบบ"
-            title="จัดการระบบ: ช่วงปิดซ่อม ผู้จัดการตาราง และรายชื่อแพทย์"
+            title="จัดการระบบ: ช่วงปิดซ่อม ผู้จัดการตาราง และรายชื่อทั้งหมด"
             data-testid="admin-button"
           >
             {ADMIN_ICON}

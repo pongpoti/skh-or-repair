@@ -414,7 +414,7 @@ DELETE FROM user_emails WHERE user_id = 42 AND email = 'old@example.com';
 
 To send from Gmail: sign in to the sending account, turn on 2-Step Verification, create an app password (Google account, Security, App passwords), and set `SMTP_USER` (the address) and `SMTP_PASS` (the 16-letter app password) in Vercel, then redeploy. Codes may land in junk mail the first time; the page says so.
 
-The old `staff_registrations` table (Auth.js registration; `src/db/schema.ts`, `drizzle/0000`) is no longer used and is left in place; nothing reads or writes it. The rest of `src/db` and `drizzle/` is still in use: the `surgeons` table (`drizzle/0001`) is read and written by `/admin` (see Admin page).
+The old `staff_registrations` table (Auth.js registration; `src/db/schema.ts`, `drizzle/0000`) is no longer used and is left in place; nothing reads or writes it. Since 16 Nov 2026 the rest of `src/db` and `drizzle/` is unused too: the `surgeons` table (`drizzle/0001`) was the admin page's old surgeon list, which gave way to the list of everyone in `users` (see Admin page). The table and its rows are left in the database as they were.
 
 ## Access requests (removed)
 
@@ -451,7 +451,7 @@ SELECT line_sub, display_name, last_login_at FROM line_bindings WHERE phone = '0
 
 The ids are the same LINE user ids Auth.js used, so a list set before the switch keeps working.
 
-The page (จัดการระบบ) holds three sections:
+The page (จัดการระบบ) holds five sections. Every one starts closed on every visit (Pong, 16 Nov 2026), showing only its title, a one-line summary and a chevron; a tap anywhere on that row opens or closes it. A closed section's buttons do nothing: its body is hidden, and the buttons in its heading row (เพิ่ม MX, the test-notice link) show greyed out and are inert, so a tap on one only opens the section. The body stays in the page while closed, so repair dates changed and not saved are still there when it is opened again, and the heading says "ยังไม่บันทึก" meanwhile.
 
 - **ช่วงปิดซ่อมห้องผ่าตัด**, the repair's dates:
   - Four dates, a start and a last day for each half, written out and picked in Thai with the same calendar as the booking form (any day, weekends and holidays too). Each half shows its operating rooms, the range in Thai dates with its number of days, and "กำลังปิดซ่อม" on the half that includes today.
@@ -462,11 +462,13 @@ The page (จัดการระบบ) holds three sections:
   - **เพิ่ม MX** searches the active users by name (names and roles only). The admin picks a name, then confirms.
   - Taking the role back asks for a confirmation first.
   - The role lives in the `mx_members` table, by `users.id`.
-- **รายชื่อแพทย์**, the surgeon list (below).
+- **รายชื่อทั้งหมด**, everyone on the staff list: the active rows of `users`, the names people sign in with.
+  - Buttons pick a type, each with its count: ทั้งหมด, DR (แพทย์), RN (พยาบาล), PN (ผู้ช่วยพยาบาล) and PCA (พนักงานช่วยเหลือคนไข้). With a type picked, a dropdown narrows it to one specialty (doctors) or unit (everyone else), and a search finds a name (spaces and case ignored).
+  - Each row shows the type, the name and the subtype in Thai, with a doctor's specialty on its department colour. Doctors come first, then RN, PN and PCA, each in Thai name order.
+  - Read only: `scripts/sync-users.mjs` is the only writer of `users` (see Who may sign in), so a name is added, corrected or removed there.
+- **ตารางตัวอย่าง**, the demo schedule of either half (above), and **โหมดทดสอบ**, the board with every kind of notice in the strip.
 
-The surgeon list has search, a specialty filter, and add, edit and delete. Specialty is a dropdown of department codes. Names are stored with invisible format characters (zero-width spaces, direction marks, soft hyphens) removed, runs of spaces evened out and Unicode NFC applied, and each name can appear once. The list is stored in the `surgeons` table. Nothing else reads it yet: the case board still matches surgeons to `src/lib/physicians.ts`, and who may sign in is the separate `users` table (see Sign-in).
-
-The surgeon list reaches the database through `src/db` (drizzle, Neon's HTTP driver); the repair's dates and the MX list go through `pg` like the rest of the app. Each section shows a notice when its data cannot be read, and the others still work. The surgeon list's table is created by the SQL files in `drizzle/`, run in order against the database (Neon's SQL editor works). `0001_surgeons.sql` creates `surgeons` and seeds it with the 76 surgeons supplied on 27 Oct 2026 (`src/data/surgeons.ts`). The seed only runs while the table's id sequence has never been used, so running the file again never brings back names the admin deleted.
+It replaced the surgeon list (`surgeons` table, add, edit and delete), which nothing else read. Every section goes through `pg` like the rest of the app, and each shows a notice when its data cannot be read while the others still work.
 
 ## Local development
 
@@ -491,7 +493,7 @@ npm run dev-session -- 0812345678 "ชื่อที่แสดง"   # prints
 
 Set that cookie for `http://localhost:3000` in the browser. The number must be in `ALLOWED_PHONES`, or hold a current claim on an active user of the local `users` table who is not a doctor (doctors sign in by email). The script refuses to run when `APP_URL` is https.
 
-`/preview` renders the board without signing in, and `/preview/admin` renders the admin page with the planned repair dates, invented MX members and the supplied surgeon list (changes stay in the page and are not saved). Both work only while `NODE_ENV` is `development`. `/preview` takes these parameters:
+`/preview` renders the board without signing in, and `/preview/admin` renders the admin page with the planned repair dates, invented MX members and an invented staff list (changes stay in the page and are not saved). Both work only while `NODE_ENV` is `development`. `/preview` takes these parameters:
 
 | Parameter | Shows |
 | --- | --- |

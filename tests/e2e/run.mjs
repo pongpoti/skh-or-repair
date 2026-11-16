@@ -444,6 +444,16 @@ async function touchTargets(page, label) {
   assert(small.length === 0, `${label}: touch targets under 44 px: ${JSON.stringify(small)}`);
 }
 
+/**
+ * Opens an admin section by its heading row (components/admin-section.tsx): every section is closed on every visit,
+ * its body hidden and its heading's buttons inert.
+ */
+async function openSection(page, id) {
+  const toggle = page.locator(`#${id}-toggle`);
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await page.locator(`#${id}-body`).waitFor({ state: "visible" });
+}
+
 /** A sign-in screen never offers LINE Login: no button, no "sign in with LINE" (LINE has signed the person in already). */
 async function noLineLogin(page, label) {
   assert((await page.locator('[data-testid="line-login"]').count()) === 0, `${label}: no LINE button`);
@@ -1803,7 +1813,7 @@ async function main() {
         assert(r.status === 404, `non-admin /admin -> ${r.status}`);
         // not even the loading screen: nothing of the admin page reaches a non-admin
         const body = await (await fetch(`${APP}/admin`, { headers: { cookie: `session=${token}` }, redirect: "manual" })).text();
-        assert(!body.includes("จัดการระบบ") && !body.includes("รายชื่อแพทย์"), "no admin page or loading screen for a non-admin");
+        assert(!body.includes("จัดการระบบ") && !body.includes("รายชื่อทั้งหมด"), "no admin page or loading screen for a non-admin");
         const html = await (await fetch(`${APP}/`, { headers: { cookie: `session=${token}` } })).text();
         assert(!html.includes('href="/admin"'), "no admin link on a non-admin's board");
         // the test notices are for admins only: anyone else gets the board's own
@@ -1816,8 +1826,8 @@ async function main() {
       // an admin sub with an authorized number opens the page
       const admin = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB)}` }, redirect: "manual" });
       const adminHtml = await admin.text();
-      // the page is named for all it holds (the repair's dates, MX, the surgeon list), not the surgeon list alone
-      assert(admin.status === 200 && adminHtml.includes("จัดการระบบ") && adminHtml.includes("รายชื่อแพทย์"), `admin /admin -> ${admin.status}`);
+      // the page is named for all it holds (the repair's dates, MX, everyone's names), not one list alone
+      assert(admin.status === 200 && adminHtml.includes("จัดการระบบ") && adminHtml.includes("รายชื่อทั้งหมด"), `admin /admin -> ${admin.status}`);
 
       const ctx = await newContext(browser);
       await ctx.addCookies([{ name: "session", value: await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB), url: APP, httpOnly: true, sameSite: "Lax" }]);
@@ -2561,18 +2571,49 @@ async function main() {
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      // Every section is closed to start with (Pong, 16 Nov 2026: "make them collapsed by default and disable any button
+      // when on collapsed"): its body hidden, and the buttons in its heading (เพิ่ม MX, the test notices) greyed out and inert.
+      const sections = await page.$$eval("main section[data-open]", (els) =>
+        els.map((el) => [el.querySelector("h2")?.textContent?.trim(), el.dataset.open, el.querySelector("[id$='-body']")?.checkVisibility() ?? null]),
+      );
+      assert(
+        JSON.stringify(sections) ===
+          JSON.stringify(
+            ["ช่วงปิดซ่อมห้องผ่าตัด", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "โหมดทดสอบ"].map((title) => [title, "false", false]),
+          ),
+        `every section closed: ${JSON.stringify(sections)}`,
+      );
+      const inertActions = await page.$$eval("[data-testid$='-actions']", (els) =>
+        els.map((el) => [el.dataset.testid, el.inert, [...el.querySelectorAll("a, button")].length]),
+      );
+      assert(
+        JSON.stringify(inertActions) === JSON.stringify([["mx-actions", true, 1], ["test-mode-actions", true, 1]]),
+        `the headings' buttons are inert while closed: ${JSON.stringify(inertActions)}`,
+      );
+      assert(!(await page.isVisible('[data-testid="repair-save"]')), "nothing of a closed section's body shows");
+      await noSideScroll(page, "/admin closed at 390px");
+      await ownerShot(page, "admin-closed.png", { tall: true });
+      await openSection(page, "repair-periods");
+      assert((await page.getAttribute("#repair-periods-toggle", "aria-expanded")) === "true", "opened by its heading");
       const dates = async () =>
         Promise.all(["1-from", "1-to", "2-from", "2-to"].map((k) => dateValue(page, `repair-half-${k}`)));
       assert(JSON.stringify(await dates()) === JSON.stringify(["2026-11-14", "2027-01-26", "2027-01-27", "2027-03-17"]), `the planned dates: ${await dates()}`);
       assert((await textOf(page, '[data-testid="repair-half-1"]')).includes("กำลังปิดซ่อม"), "half 1 is running today");
       assert(!(await textOf(page, '[data-testid="repair-half-2"]')).includes("กำลังปิดซ่อม"), "half 2 is not");
-      assert((await textOf(page, "#repair-periods-title + p")) === "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข", "nobody has saved yet");
+      assert((await textOf(page, '[data-testid="repair-changed"]')) === "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข", "nobody has saved yet");
       assert(await page.isDisabled('[data-testid="repair-save"]'), "nothing to save yet");
 
       // the second half must start after the first ends: refused here (the server checks again)
       // the dates are written out and picked in Thai (Pong, 15 Nov 2026)
       assert((await textOf(page, '[data-testid="repair-half-1-from"]')).includes("วันเสาร์ที่ 14 พฤศจิกายน 2569"), "the first day in Thai");
       await pickDate(page, "repair-half-2-from", "2027-01-20");
+      // a date changed and not saved: the heading says so, and closing the section keeps it
+      assert(await page.isVisible('[data-testid="repair-unsaved"]'), "ยังไม่บันทึก in the heading");
+      await page.click("#repair-periods-toggle");
+      await page.locator("#repair-periods-body").waitFor({ state: "hidden" });
+      assert(await page.isVisible('[data-testid="repair-unsaved"]'), "ยังไม่บันทึก while closed");
+      await openSection(page, "repair-periods");
+      assert((await dateValue(page, "repair-half-2-from")) === "2027-01-20", "the draft is kept while closed");
       await page.click('[data-testid="repair-save"]');
       await page.waitForSelector('[aria-labelledby="repair-periods-title"] [role="alert"]');
       assert((await textOf(page, '[aria-labelledby="repair-periods-title"] [role="alert"]')) === "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1", "order message");
@@ -2597,7 +2638,8 @@ async function main() {
       await save("2026-11-01", "2026-11-10", "2026-11-11", "2027-03-17");
       await ownerShot(page, "admin-repair-saved.png", { tall: true, upTo: 'section[aria-labelledby="repair-periods-title"]' });
       assert((await stored()).every((r) => r.updated_by === ADMIN_SUB), "saved by the admin's LINE id");
-      assert(/^แก้ไขล่าสุด .+ โดย วิไล แสงทอง$/.test(await textOf(page, "#repair-periods-title + p")), `who saved: ${await textOf(page, "#repair-periods-title + p")}`);
+      assert(/^แก้ไขล่าสุด .+ โดย วิไล แสงทอง$/.test(await textOf(page, '[data-testid="repair-changed"]')), `who saved: ${await textOf(page, '[data-testid="repair-changed"]')}`);
+      assert((await page.locator('[data-testid="repair-unsaved"]').count()) === 0, "nothing unsaved after a save");
       const nurse = await contextAs(RP.nurse);
       const board = await nurse.newPage();
       await board.goto(`${APP}/`, { waitUntil: "networkidle" });
@@ -2645,6 +2687,15 @@ async function main() {
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      // เพิ่ม MX shows in the closed section's heading, greyed out: a tap on it only opens the section
+      const addButton = page.locator('[data-testid="mx-add"]');
+      assert(await addButton.evaluate((el) => Boolean(el.closest("[inert]"))), "เพิ่ม MX is inert while the section is closed");
+      assert(Number(await addButton.evaluate((el) => getComputedStyle(el.closest("[inert]")).opacity)) < 0.6, "and greyed out");
+      const addBox = await addButton.boundingBox();
+      await page.mouse.click(addBox.x + addBox.width / 2, addBox.y + addBox.height / 2);
+      await page.locator("#mx-body").waitFor({ state: "visible" });
+      assert((await page.locator("dialog[open]").count()) === 0, "the tap opened the section, not the picker");
+      assert(await addButton.evaluate((el) => !el.closest("[inert]")), "เพิ่ม MX works once the section is open");
       const add = async (search, name) => {
         await page.click('[data-testid="mx-add"]');
         await page.fill('[data-testid="mx-search"]', search);
@@ -2685,6 +2736,93 @@ async function main() {
       assert((await htmlAs(RP.nurse, "/upload")).status === 404, "/upload for the nurse after the revoke");
       assert((await htmlAs(RP.mx)).html.includes('href="/upload"'), "an upload link on MX's board");
       for (const person of [RP.nurse, RP.drX]) assert(!(await htmlAs(person)).html.includes('href="/upload"'), "no upload link for others");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+    });
+
+    await t("admin: every name on the staff list on /admin, by type (DR, RN, PN, PCA), then specialty or unit, and by name", async () => {
+      setNow("2026-11-16T10:00:00+07:00");
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      assert((await textOf(page, "#staff-title")) === "รายชื่อทั้งหมด", "the section's title");
+      // The active users of the table, as the list orders them: doctors, nurses, assistants, aides, each in Thai order.
+      const order = ["DR", "RN", "PN", "PCA"];
+      const active = (await db.query("SELECT first_name || ' ' || last_name AS name, type, subtype FROM users WHERE active")).rows.sort(
+        (a, b) => order.indexOf(a.type) - order.indexOf(b.type) || a.name.localeCompare(b.name, "th"),
+      );
+      assert(active.length >= 10 && order.every((type) => active.some((u) => u.type === type)), `every type on the list: ${active.length}`);
+      assert((await textOf(page, '[data-testid="staff-summary"]')) === `ผู้ใช้ที่ใช้งานอยู่ ${active.length} คน`, "the count in the closed heading");
+      assert(!(await page.isVisible('[data-testid="staff-list"]')), "the list starts closed");
+      await openSection(page, "staff");
+      const rows = () => page.$$eval('[data-testid="staff-list"] li', (els) => els.map((el) => [el.querySelector("p")?.textContent?.trim(), el.dataset.type]));
+      const count = () => textOf(page, '[data-testid="staff-count"]');
+      assert(JSON.stringify(await rows()) === JSON.stringify(active.map((u) => [u.name, u.type])), `everyone, by type then name: ${JSON.stringify(await rows())}`);
+      assert((await count()) === `ทั้งหมด ${active.length} คน`, `count: ${await count()}`);
+      const typeCounts = await page.$$eval('[data-testid="staff-types"] button', (els) => els.map((el) => [el.dataset.testid, el.getAttribute("aria-pressed"), el.textContent.replace(/\s+/g, " ").trim()]));
+      assert(
+        JSON.stringify(typeCounts) ===
+          JSON.stringify([
+            ["staff-type-all", "true", `ทั้งหมด${active.length} คน`],
+            ...[["DR", "แพทย์"], ["RN", "พยาบาล"], ["PN", "ผู้ช่วยพยาบาล"], ["PCA", "พนักงานช่วยเหลือคนไข้"]].map(([type, name]) => [
+              `staff-type-${type}`,
+              "false",
+              `${type}${name}${active.filter((u) => u.type === type).length} คน`,
+            ]),
+          ]),
+        `the type buttons with their counts: ${JSON.stringify(typeCounts)}`,
+      );
+      assert(!(await page.isVisible('[data-testid="staff-subtype"]')), "no specialty or unit to pick under all types");
+
+      // DR: only doctors, then one specialty
+      await page.click('[data-testid="staff-type-DR"]');
+      assert((await page.getAttribute('[data-testid="staff-type-DR"]', "aria-pressed")) === "true", "DR picked");
+      const doctors = active.filter((u) => u.type === "DR");
+      assert(JSON.stringify(await rows()) === JSON.stringify(doctors.map((u) => [u.name, "DR"])), `doctors only: ${JSON.stringify(await rows())}`);
+      assert((await count()) === `แสดง ${doctors.length} จาก ${active.length} คน · แพทย์`, `count: ${await count()}`);
+      assert((await textOf(page, '[data-testid="staff-subtype"] option:first-child')) === `ทุกสาขา (${doctors.length})`, "every specialty");
+      assert((await textOf(page, `[data-testid="staff-subtype"] option[value="OBGYN"]`)) === `สูติ-นรีเวชกรรม (${doctors.filter((u) => u.subtype === "OBGYN").length})`, "OBGYN in Thai with its count");
+      await page.selectOption('[data-testid="staff-subtype"]', "OBGYN");
+      assert(JSON.stringify(await rows()) === JSON.stringify(doctors.filter((u) => u.subtype === "OBGYN").map((u) => [u.name, "DR"])), "OBGYN only");
+      assert((await textOf(page, '[data-testid="staff-list"] li')).includes("OBGYNแพทย์ · สูติ-นรีเวชกรรม"), `a doctor's line: ${await textOf(page, '[data-testid="staff-list"] li')}`);
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.selectOption('[data-testid="staff-subtype"]', "");
+      await ownerShot(page, "admin-staff-doctors.png", { tall: true, upTo: '[data-testid="staff-section"]' });
+
+      // RN, then a unit; another type starts from every unit again
+      await page.click('[data-testid="staff-type-RN"]');
+      assert((await page.inputValue('[data-testid="staff-subtype"]')) === "", "a new type starts with every unit");
+      assert((await textOf(page, '[data-testid="staff-subtype"] option:first-child')).startsWith("ทุกหน่วย"), "units for nurses");
+      await page.selectOption('[data-testid="staff-subtype"]', "ANES");
+      const anes = active.filter((u) => u.type === "RN" && u.subtype === "ANES");
+      assert(JSON.stringify(await rows()) === JSON.stringify(anes.map((u) => [u.name, "RN"])), `RN ANES: ${JSON.stringify(await rows())}`);
+      assert((await textOf(page, '[data-testid="staff-list"] li')).includes("พยาบาล · วิสัญญี"), "a nurse's unit in Thai");
+
+      // by name, across every type; nothing found says so
+      await page.click('[data-testid="staff-type-all"]');
+      assert(!(await page.isVisible('[data-testid="staff-subtype"]')), "no unit picker under all types");
+      await page.fill('[data-testid="staff-search"]', "  วิไล  ");
+      assert(JSON.stringify((await rows()).map(([name]) => name)) === JSON.stringify([RP.admin.name]), `search: ${JSON.stringify(await rows())}`);
+      await page.fill('[data-testid="staff-search"]', "xyz");
+      assert((await page.locator('[data-testid="staff-list"]').count()) === 0, "no rows");
+      assert((await textOf(page, "#staff-body")).includes("ไม่พบชื่อที่ตรงกับคำค้นหรือตำแหน่งที่เลือก"), "nothing found");
+      await page.fill('[data-testid="staff-search"]', "");
+
+      // read only: no button on any row; fits a small phone; 44px targets
+      assert((await page.locator('[data-testid="staff-list"] button').count()) === 0, "no buttons on the rows");
+      await page.setViewportSize({ width: 360, height: 780 });
+      await noSideScroll(page, "/admin with the staff list at 360px");
+      await page.setViewportSize({ width: 390, height: 844 });
+      await touchTargets(page, "/admin with the staff list open");
+      await page.evaluate(() => document.querySelector("main")?.scrollTo(0, 0));
+      await ownerShot(page, "admin-staff-list.png", { tall: true, upTo: '[data-testid="staff-section"]' });
+      // a tap on the chevron closes it again (turned over while open, it must not take the tap)
+      const chevron = await page.locator('[data-testid="staff-section"] .section-head svg').boundingBox();
+      await page.mouse.click(chevron.x + chevron.width / 2, chevron.y + chevron.height / 2);
+      await page.locator("#staff-body").waitFor({ state: "hidden" });
+      assert((await page.getAttribute("#staff-toggle", "aria-expanded")) === "false", "closed by its chevron");
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
     });
@@ -3509,6 +3647,9 @@ async function main() {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
       const section = page.locator('[data-testid="demo-section"]');
+      // closed to start with, like every section: the half buttons show once it is opened
+      assert(!(await page.isVisible('[data-testid="demo-half-1"]')), "the demo section starts closed");
+      await openSection(page, "demo");
       assert((await textOf(page, "#demo-title")) === "ตารางตัวอย่าง", "the section's title");
       const half = (n) => page.locator(`[data-testid="demo-half-${n}"]`);
       assert((await half(1).getAttribute("href")) === "/?demo=1&half=1" && (await half(2).getAttribute("href")) === "/?demo=1&half=2", "a link for each half");
@@ -3561,6 +3702,7 @@ async function main() {
 
       // ครึ่งหลัง: its first workday, Wednesday 27 Jan 2027, by its address
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      await openSection(page, "demo");
       await half(2).click();
       await page.waitForURL((url) => url.searchParams.get("demo") === "1" && url.searchParams.get("date") === "2027-01-27" && !url.searchParams.has("half"));
       assert((await page.getAttribute("header time", "datetime")) === "2027-01-27", "the second half's first day");
@@ -3584,6 +3726,7 @@ async function main() {
       // to a day of the second half
       setNow("2027-02-01T10:00:00+07:00");
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      await openSection(page, "demo");
       assert((await half(1).getAttribute("aria-disabled")) === "true" && (await half(1).getAttribute("href")) === null, "the first half is over");
       assert((await half(1).innerText()).replace(/\s+/g, " ") === "ครึ่งแรก จบแล้ว", `the first half: ${await half(1).innerText()}`);
       assert((await half(2).getAttribute("href")) === "/?demo=1&half=2", "the second half still opens");
