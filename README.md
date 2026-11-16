@@ -134,7 +134,7 @@ If MX has not uploaded, every user sees "ยังไม่มีตาราง
 - **a database** (Lucide's, not the vendor's logo): a HOSxP case nobody booked.
 - **a calendar with a check** (Lucide's): a doctor's booking, before the day has an upload.
 - **a handshake** (Lucide's, green): a workbook case that matches a booking by HN on the same day.
-- In **the dressing room**, whether a case was booked does not matter (Pong, 15 Nov 2026), so its rows show who does the dressing instead: **a doctor** (แพทย์ทำเอง) or **a nurse** (ฝาก scrub ทำ), the booking's answer to "scrub ทำให้แทนไหม ?". A case nobody booked there is the doctor's, since the question asks whether the scrub does it instead. These two are Healthicons' doctor and nurse (MIT licence).
+- In **the dressing room**, whether a case was booked does not matter (Pong, 15 Nov 2026), so its rows show who does the dressing instead: **a doctor** (แพทย์ทำเอง) or **a nurse** (ฝาก scrub ทำ), the booking's answer to "scrub ทำให้แทนไหม ?". A case nobody booked there is the doctor's, since the question asks whether the scrub does it instead. These two are small round portraits drawn for this app in the logo's colours: the doctor in the logo's teal scrub cap and mask, the nurse in a white nurse cap with a red cross.
 
 **Order.** In each room the booked cases come first, the earliest booking first ("sort by prior set"), then HOSxP's cases nobody booked, in the workbook's order (Pong, 15 Nov 2026).
 

@@ -16,24 +16,14 @@ import type { DoneBy, RowSource } from "@/lib/board-rows";
  * dressing, the doctor or the scrub nurse (BoardRow.doneBy).
  *
  * The source icons are Lucide's (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): database,
- * calendar-check and handshake, copied from lucide-static 0.460.0. The doctor and nurse are Healthicons' filled
- * "doctor" and "nurse" (https://healthicons.org, MIT licence, Copyright (c) 2023 Sten Raadschelders), copied from
- * healthicons-react 3.5.0 and cropped to the figure.
+ * calendar-check and handshake, copied from lucide-static 0.460.0. The doctor and nurse portraits are drawn for this
+ * app (Pong, 16 Nov 2026, found the earlier stock figures "weird and not represent").
  */
 
 /** A Lucide icon: strokes on a 24-unit grid. */
 function Stroke({ children, size }: { children: ReactNode; size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      {children}
-    </svg>
-  );
-}
-
-/** A Healthicons figure: filled shapes on a 48-unit grid, cropped to the figure (it spans 6 to 42). */
-function Figure({ children, size }: { children: ReactNode; size: number }) {
-  return (
-    <svg width={size} height={size} viewBox="5 5 38 38" fill="currentColor" aria-hidden="true">
       {children}
     </svg>
   );
@@ -70,38 +60,71 @@ const SOURCE_ICONS: Record<RowSource, ReactNode> = {
   ),
 };
 
+// The doctor and the scrub nurse as small round portraits, drawn for this app in the logo's colours (src/app/icon.svg,
+// components/brand-mark.tsx): the tile's brown, teal scrubs, pale mask and face. The doctor wears the logo's scrub cap
+// and mask; the nurse wears a white folded nurse cap with a black stripe and a red cross, and rose scrubs. They differ
+// in shape (cap, mask, smile), not only in colour.
+const TILE = "#54402f";
+const TILE_EDGE = "#3f2f24";
+const SCRUBS = "#7fbfb7";
+const SCRUBS_DARK = "#5a9e96";
+const MASK = "#eaf4f5";
+const PLEAT = "#a7c9cf";
+const FACE = "#f1e7da";
+const INK = "#241c16";
+const HAIR = "#2a1f18";
+const ROSE = "#e49aa2";
+const ROSE_DARK = "#c97a84";
+const CROSS = "#d63c3c";
+
+/** Shoulders on the tile, cut by its round edge. */
+const SHOULDERS = "M5.27 39 C7.6 35.7 14 34.3 24 34.3 C34 34.3 40.4 35.7 42.73 39 A24 24 0 0 1 5.27 39 Z";
+
 const DOER_ICONS: Record<DoneBy, ReactNode> = {
-  // Healthicons "doctor" (filled): a figure with a stethoscope.
+  // The doctor: the logo's surgeon, in scrub cap and mask.
   surgeon: (
     <>
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M14.4326 33.4416C13.5732 33.9692 13 34.9177 13 36C13 37.6569 14.3431 39 16 39C17.6569 39 19 37.6569 19 36C19 34.476 17.8636 33.2174 16.3919 33.0254C16.3591 32.9079 16.3249 32.7725 16.2901 32.6206C16.1703 32.0972 16.056 31.4332 15.9709 30.7512C15.8856 30.0679 15.8327 29.3904 15.8292 28.8375C15.8279 28.6348 15.8334 28.4582 15.8446 28.3101C16.2293 28.1997 16.6151 28.1003 17 28.0126C17.4413 27.9121 17.7025 28.433 17.9141 28.8551C17.9436 28.9139 17.9721 28.9707 18 29.0237H22.0639C22.9797 29.0235 23.4324 29.0236 23.8903 29.0237C24.3376 29.0238 24.7906 29.0239 25.6851 29.0237H29.7493C29.9775 28.5902 30.4972 27.8981 31 28.0126C31.5363 28.1348 32.0745 28.2798 32.6089 28.4456L32.6056 28.4472C32.6044 28.4449 32.6045 28.4453 32.6057 28.4487C32.6104 28.4627 32.6324 28.5281 32.6542 28.6699C32.6791 28.8313 32.6964 29.0411 32.7035 29.2937C32.7177 29.798 32.6894 30.411 32.6297 31.0287C32.5699 31.6456 32.4811 32.2429 32.3811 32.7144C32.359 32.8188 32.3369 32.9141 32.3152 33H31C30.6212 33 30.275 33.214 30.1056 33.5528L29.1056 35.5528C29.0361 35.6916 29 35.8448 29 36V38C29 38.5523 29.4477 39 30 39H32V37H31V36.2361L31.618 35H34.382L35 36.2361V37H34V39H36C36.5523 39 37 38.5523 37 38V36C37 35.8448 36.9639 35.6916 36.8944 35.5528L35.8944 33.5528C35.725 33.214 35.3788 33 35 33H34.3643C34.4711 32.4673 34.56 31.8448 34.6203 31.2213C34.6856 30.5473 34.7198 29.8478 34.7027 29.2376L34.7019 29.2101C38.6895 30.8949 42 33.6661 42 36.5699V42H6V36.5699C6 33.5376 9.60993 30.6499 13.831 28.993C13.8424 29.6146 13.9013 30.3182 13.9862 30.9988C14.0779 31.7335 14.2029 32.4653 14.3406 33.0669C14.3701 33.1958 14.4008 33.3213 14.4326 33.4416ZM16 37.0147C16.5384 37.0147 17 36.5742 17 36C17 35.4258 16.5384 34.9853 16 34.9853C15.4616 34.9853 15 35.4258 15 36C15 36.5742 15.4616 37.0147 16 37.0147Z"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M24 24C28.4183 24 32 20.4183 32 16C32 11.5817 28.4183 8 24 8C19.5817 8 16 11.5817 16 16C16 20.4183 19.5817 24 24 24ZM24 26C29.5228 26 34 21.5228 34 16C34 10.4772 29.5228 6 24 6C18.4772 6 14 10.4772 14 16C14 21.5228 18.4772 26 24 26Z"
-      />
+      <path d={SHOULDERS} fill={SCRUBS} />
+      <path d="M18.8 34.4 L24 41.6 L29.2 34.4 Z" fill={SCRUBS_DARK} />
+      <circle cx="24" cy="21.5" r="12" fill={FACE} />
+      <path d="M11.7 20.3 C8.6 16.4 9.4 5.4 24 5.4 C38.6 5.4 39.4 16.4 36.3 20.3 Q24 16.6 11.7 20.3 Z" fill={SCRUBS} />
+      <path d="M11.9 20.1 Q24 16.6 36.1 20.1" fill="none" stroke={SCRUBS_DARK} strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="19.7" cy="21.8" r="1.65" fill={INK} />
+      <circle cx="28.3" cy="21.8" r="1.65" fill={INK} />
+      <path d="M12.45 24.4 Q24 22.6 35.55 24.4 L34.4 29.4 Q24 36.6 13.6 29.4 Z" fill={MASK} />
+      <path d="M16.1 26.9 Q24 25.9 31.9 26.9 M16.8 29.5 Q24 28.6 31.2 29.5" fill="none" stroke={PLEAT} strokeWidth="1.1" strokeLinecap="round" />
     </>
   ),
-  // Healthicons "nurse" (filled): a figure with a cap and a cross.
+  // The scrub nurse: nurse cap, no mask, a smile.
   scrub: (
     <>
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M24 6C21.1943 6 17.7625 7.02621 15.7359 7.73119C14.7482 8.0748 14.2528 9.14841 14.58 10.1417L16.7278 16.662C16.2604 17.6789 16 18.8103 16 20C16 24.4183 19.5817 28 24 28C28.4183 28 32 24.4183 32 20C32 18.8103 31.7396 17.6789 31.2721 16.6619L33.42 10.1417C33.7472 9.14841 33.2518 8.0748 32.2641 7.73119C30.2375 7.02621 26.8056 6 24 6ZM18.3799 18.425C22.1365 16.8821 25.8635 16.8821 29.6201 18.425C29.6807 18.4498 29.743 18.4685 29.8063 18.481C29.9327 18.9656 30 19.4746 30 20C30 23.3137 27.3137 26 24 26C20.6863 26 18 23.3137 18 20C18 19.4746 18.0673 18.9656 18.1937 18.481C18.257 18.4685 18.3193 18.4498 18.3799 18.425ZM25 11H27V13H25V15H23V13H21V11H23V9H25V11Z"
-      />
-      <path
-        fillRule="evenodd"
-        clipRule="evenodd"
-        d="M22.8508 32.1931L16.8786 28C16.8786 28 6 31.3932 6 35.4669V42.0002H42V35.4669C42 31.3932 31.1214 28 31.1214 28L25.1492 32.1931C24.4596 32.6773 23.5404 32.6773 22.8508 32.1931ZM32 32H34V34H36V36H34V38H32V36H30V34H32V32Z"
-      />
+      <path d={SHOULDERS} fill={ROSE} />
+      <path d="M20 29 H28 V35 H20 Z" fill={FACE} />
+      <path d="M19.2 34.4 L24 40.6 L28.8 34.4 Z" fill={ROSE_DARK} />
+      <path d="M36.3 22.8 A12.3 12.3 0 0 0 11.7 22.8 L12.2 27.6 L35.8 27.6 Z" fill={HAIR} />
+      <circle cx="24" cy="23" r="11.2" fill={FACE} />
+      <path d="M12.8 22.6 C13.1 17.8 17.4 15.4 22.4 15.3 Q25.4 15.4 26.9 13.8 Q28.6 16.2 31.6 17 C33.9 18 35 20 35.2 22.6 A11.2 11.2 0 0 0 12.8 22.6 Z" fill={HAIR} />
+      <path d="M15.4 15 Q24 12.9 32.6 15 L35.6 4.6 Q24 6.4 12.4 4.6 Z" fill="#ffffff" />
+      <path d="M15.4 15 L12.4 4.6 L16.6 5.4 L18 14.4 Z M32.6 15 L35.6 4.6 L31.4 5.4 L30 14.4 Z" fill="#dfe3e8" />
+      <path d="M12.74 5.8 Q24 7.6 35.26 5.8 L34.77 7.5 Q24 9.3 13.23 7.5 Z" fill={HAIR} />
+      <path d="M23.15 8.9 h1.7 v1.45 h1.45 v1.7 h-1.45 v1.45 h-1.7 v-1.45 h-1.45 v-1.7 h1.45 Z" fill={CROSS} />
+      <circle cx="19.8" cy="23.6" r="1.65" fill={INK} />
+      <circle cx="28.2" cy="23.6" r="1.65" fill={INK} />
+      <path d="M21 28.3 Q24 30.5 27 28.3" fill="none" stroke="#b0624a" strokeWidth="1.3" strokeLinecap="round" />
     </>
   ),
 };
+
+/** A portrait on a round tile in the logo's brown, 48 units across; it fills the 40px tile, which has no border of its own. */
+function Portrait({ children, size }: { children: ReactNode; size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" aria-hidden="true">
+      <circle cx="24" cy="24" r="24" fill={TILE} />
+      {children}
+      <circle cx="24" cy="24" r="23.4" fill="none" stroke={TILE_EDGE} strokeWidth="1.2" />
+    </svg>
+  );
+}
 
 /** What each source means, for the title and a screen reader. */
 export const SOURCE_TITLE: Record<RowSource, string> = {
@@ -120,8 +143,8 @@ export const DOER_TITLE: Record<DoneBy, string> = {
 export function CaseIcon({ source, doneBy }: { source: RowSource; doneBy?: DoneBy }) {
   if (doneBy) {
     return (
-      <span className="case-icon" title={DOER_TITLE[doneBy]} data-testid="row-icon" data-done-by={doneBy}>
-        <Figure size={26}>{DOER_ICONS[doneBy]}</Figure>
+      <span className="case-icon case-icon-doer" title={DOER_TITLE[doneBy]} data-testid="row-icon" data-done-by={doneBy}>
+        <Portrait size={40}>{DOER_ICONS[doneBy]}</Portrait>
         <span className="sr-only">{DOER_TITLE[doneBy]}</span>
       </span>
     );
