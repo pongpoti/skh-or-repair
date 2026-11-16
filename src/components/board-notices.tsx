@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { badgeText, bubblePlace, type BoardNotice, type NoticeIcon } from "@/lib/board-notices";
 
+import { NoTableIcon } from "@/components/no-table-icon";
+
 /**
- * The icons are Lucide's (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): calendar-x, database,
- * triangle-alert, flask-conical, chevron-down and x.
+ * The icons are Lucide's (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): database (in
+ * NoTableIcon), flask-conical, chevron-down and x.
  */
 function Glyph({ size = 16, children }: { size?: number; children: ReactNode }) {
   return (
@@ -15,39 +17,16 @@ function Glyph({ size = 16, children }: { size?: number; children: ReactNode }) 
   );
 }
 
-const ICON_PATHS: Record<NoticeIcon, ReactNode> = {
-  calendar: (
-    <>
-      <path d="M8 2v4" />
-      <path d="M16 2v4" />
-      <rect width="18" height="18" x="3" y="4" rx="2" />
-      <path d="M3 10h18" />
-      <path d="m14 14-4 4" />
-      <path d="m10 14 4 4" />
-    </>
-  ),
-  database: (
-    <>
-      <ellipse cx="12" cy="5" rx="9" ry="3" />
-      <path d="M3 5V19A9 3 0 0 0 21 19V5" />
-      <path d="M3 12A9 3 0 0 0 21 12" />
-    </>
-  ),
-  alert: (
-    <>
-      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
-      <path d="M12 9v4" />
-      <path d="M12 17h.01" />
-    </>
-  ),
-  flask: (
-    <>
+function NoticeGlyph({ icon, size = 16 }: { icon: NoticeIcon; size?: number }) {
+  if (icon === "no-table") return <NoTableIcon size={size} />;
+  return (
+    <Glyph size={size}>
       <path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" />
       <path d="M6.453 15h11.094" />
       <path d="M8.5 2h7" />
-    </>
-  ),
-};
+    </Glyph>
+  );
+}
 
 export const NOTICE_BUBBLE_ID = "board-notice-bubble";
 
@@ -58,7 +37,8 @@ export function noticeBadge(id: string): HTMLElement | null {
 
 /**
  * The strip above the plan (Pong, 15 Nov 2026). It always keeps the same height, with or without notices, so the plan
- * never moves. Its badges sit in one row that scrolls sideways; alone, a badge says the whole message, and with others
+ * never moves. Its badges sit in the middle of one row that scrolls sideways when they do not fit (Pong, 16 Nov 2026:
+ * "align this badge center"); alone, a badge says the whole message, and with others
  * each says its short form (the whole one stays in its spoken name). A tap opens the message as a chat bubble under
  * the badge, with a shadow; a tap outside it, its close button, the badge again, focus moving away or Escape (handled by
  * the board, which owns Escape) closes it. Each badge says what it means in words and an icon, never by colour alone.
@@ -170,7 +150,7 @@ export function BoardNotices({
                   onClick={() => onOpenChange(expanded ? null : notice.id)}
                   data-testid={notice.testId}
                 >
-                  <Glyph>{ICON_PATHS[notice.icon]}</Glyph>
+                  <NoticeGlyph icon={notice.icon} />
                   <span className="notice-badge-text">{badgeText(notice, notices.length)}</span>
                   {/* With others the badge shows the short form; the spoken name carries the whole message too. */}
                   {several ? <span className="sr-only">: {notice.text}</span> : null}
@@ -199,7 +179,7 @@ export function BoardNotices({
           data-testid="notice-bubble"
         >
           <span className="notice-bubble-icon">
-            <Glyph size={18}>{ICON_PATHS[open.icon]}</Glyph>
+            <NoticeGlyph icon={open.icon} size={18} />
           </span>
           <div className="min-w-0 flex-1 pt-0.5">
             <p id={`${NOTICE_BUBBLE_ID}-title`} className="text-[0.9375rem] leading-snug font-semibold text-ink">

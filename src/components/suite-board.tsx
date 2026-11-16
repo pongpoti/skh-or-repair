@@ -7,6 +7,7 @@ import { AddCase, type Doctor } from "@/components/add-case";
 import { BoardNotices, noticeBadge } from "@/components/board-notices";
 import { CaseList, isCaseBubbleOpen } from "@/components/case-list";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
+import { NoTableIcon } from "@/components/no-table-icon";
 import type { AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
@@ -173,7 +174,6 @@ export function SuiteBoard({
   board,
   today,
   periods,
-  holiday = null,
   roomId = null,
   pathname = "/",
   adding = null,
@@ -186,8 +186,6 @@ export function SuiteBoard({
   today: string;
   /** The repair's dates (lib/repair-store.ts), loaded by the page. */
   periods: RepairPeriods;
-  /** The name of today's Thai public or special holiday, if it is one. */
-  holiday?: string | null;
   roomId?: string | null;
   pathname?: string;
   /** Shown to doctors: the จองห้อง button and its booking form. */
@@ -219,12 +217,8 @@ export function SuiteBoard({
   if (!adding && addRequest) setAddRequest(null);
 
   const operations = board?.rows ?? NONE;
-  const mismatchCount = board?.mismatchCount ?? 0;
   const missingUpload = missingUploadDay(board, casesUnavailable);
-  const ownNotices = useMemo(
-    () => boardNotices({ closed: board === null, holiday, failed: casesUnavailable, missingUpload, mismatches: mismatchCount }),
-    [board, holiday, casesUnavailable, missingUpload, mismatchCount],
-  );
+  const ownNotices = useMemo(() => boardNotices({ missingUpload }), [missingUpload]);
   const notices = givenNotices ?? ownNotices;
   // A notice can go while its bubble is open (the 16:00 refresh, an upload): forget it, so its bubble does not open
   // again by itself when the notice comes back, and the next Escape is not spent on it.
@@ -295,6 +289,12 @@ export function SuiteBoard({
   const cases = room ? rowsOf(operations, room.id) : NONE;
   const allocation = room && planDate ? allocationFor(room.id, planDate, periods) : null;
   const wash = allocation?.am?.color ?? allocation?.pm?.color;
+  // While the strip says there is no HOSxP table yet, the header of every operating room's card says so too, except the
+  // emergency room's (Pong, 16 Nov 2026). The room's department on the day whose rooms are shown decides, so the
+  // emergency room is known even when the suite is closed (the preview's test mode).
+  const roomDept = room ? allocationFor(room.id, day, periods) : null;
+  const emergency = roomDept?.am?.code === "EMER" || roomDept?.pm?.code === "EMER";
+  const noTable = room?.kind === "or" && !emergency && notices.some((notice) => notice.id === "no-upload");
   const overviewRooms = useMemo(() => (planDate ? openRooms(planDate, periods) : []), [planDate, periods]);
 
   return (
@@ -374,6 +374,11 @@ export function SuiteBoard({
                       <span className="count-tag">
                         <span className="tabular-nums">{cases.length}</span> รายการ
                       </span>
+                      {noTable ? (
+                        <span className="room-no-table" data-testid="room-no-table">
+                          <NoTableIcon size={22} label="ยังไม่มีตาราง HOSxP" />
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   {/* On a computer it goes back to the list of open rooms (RoomOverview). */}

@@ -1864,9 +1864,7 @@ async function main() {
         assert(!body.includes("จัดการระบบ") && !body.includes("รายชื่อทั้งหมด"), "no admin page or loading screen for a non-admin");
         const html = await (await fetch(`${APP}/`, { headers: { cookie: `session=${token}` } })).text();
         assert(!html.includes('href="/admin"'), "no admin link on a non-admin's board");
-        // the test notices are for admins only: anyone else gets the board's own
-        const test = await (await fetch(`${APP}/?notices=all`, { headers: { cookie: `session=${token}` } })).text();
-        assert(!test.includes("วันปิยมหาราช") && !test.includes("โหลดไม่สำเร็จ"), "no test notices for a non-admin");
+        // the test notices are for admins only: checked on a day with its upload, in the 16:00 test below
       }
       // an admin sub with a number that is not authorized gets no session at all
       const unlisted = await rawRequest("/admin", headers(await sessionToken("0899999999", SESSION_SECRET, ADMIN_SUB)));
@@ -1909,9 +1907,10 @@ async function main() {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${APP}/?notices=all`, { waitUntil: "networkidle" });
       const kinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      assert(JSON.stringify(kinds) === JSON.stringify(["holiday", "failed", "no-upload", "mismatch"]), `every notice: ${JSON.stringify(kinds)}`);
+      // since 16 Nov 2026 the only kind is ยังไม่มีตาราง HOSxP (Pong: no วันหยุด, โหลดไม่สำเร็จ or ไม่ตรง badges)
+      assert(JSON.stringify(kinds) === JSON.stringify(["no-upload"]), `every notice: ${JSON.stringify(kinds)}`);
       await noSideScroll(page, "the test notices at 390px");
-      for (const [file, open] of [["board-test-notices.png", null], ["board-test-notices-open.png", "failed"]]) {
+      for (const [file, open] of [["board-test-notices.png", null], ["board-test-notices-open.png", "no-upload"]]) {
         if (open) {
           await page.click(`[data-notice-id="${open}"]`);
           await page.waitForSelector('[data-testid="notice-bubble"]');
@@ -3145,7 +3144,15 @@ async function main() {
       board.on("pageerror", (e) => errors.push(e.message));
       await board.goto(`${APP}/`, { waitUntil: "networkidle" });
       assert((await textOf(board, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569", "no-upload alert");
-      assert((await board.locator('[data-testid="mismatch-alert"]').count()) === 0, "nothing to compare yet");
+      assert((await board.locator('[data-notice-id]').count()) === 1, "the one badge (Pong, 16 Nov 2026)");
+      // in the middle of the strip, with the database-off icon (Pong, 16 Nov 2026)
+      const centred = await board.evaluate(() => {
+        const strip = document.querySelector('[data-testid="notice-strip"]').getBoundingClientRect();
+        const badge = document.querySelector('[data-testid="no-upload-alert"]').getBoundingClientRect();
+        return Math.abs(badge.left + badge.width / 2 - (strip.left + strip.width / 2));
+      });
+      assert(centred <= 1, `the badge is centred: ${centred}px off`);
+      assert((await board.locator('[data-testid="no-upload-alert"] svg[data-icon="no-table"]').count()) === 1, "the badge's icon");
       await ownerShot(board, "board-no-upload.png");
       // The strip above the plan keeps one height (Pong, 15 Nov 2026); a tap on the badge opens its message as a chat
       // bubble, and a tap outside, Escape (the badge gets the focus back) or the close button shuts it.
@@ -3176,8 +3183,19 @@ async function main() {
       await board.mouse.click(8, 830);
       await board.waitForSelector('[data-testid="notice-bubble"]', { state: "detached" });
       assert((await board.getAttribute('[data-testid="no-upload-alert"]', "aria-expanded")) === "false", "closed by a tap outside");
+      // the emergency room's card has no database-off icon in its header (Pong, 16 Nov 2026); OR 9 is EMER in the
+      // repair's first half
+      await board.click("#or-9 .fp-floor");
+      await board.waitForSelector(".sheet-head h2");
+      assert((await textOf(board, ".sheet-head h2")) === "OR 9", "OR 9's card");
+      assert((await board.locator('[data-testid="room-no-table"]').count()) === 0, "no icon on the emergency room's card");
+      await board.keyboard.press("Escape");
+      await board.waitForSelector(".sheet-head", { state: "detached" });
       await board.click("#or-11 .fp-floor");
       await board.waitForSelector(".case-row");
+      // every other OR room's card says there is no HOSxP table yet
+      assert((await board.getAttribute('[data-testid="room-no-table"] svg', "aria-label")) === "ยังไม่มีตาราง HOSxP", "the icon in OR 11's header");
+      await ownerShot(board, "room-no-table.png");
       assert(JSON.stringify(await sheetRows(board)) === JSON.stringify([["booking", null, null]]), `OR 11: ${JSON.stringify(await sheetRows(board))}`);
       assert((await textOf(board, ".case-row p")).startsWith("Perm cath insertion"), "the booking's operation, now required");
       // the row's icon alone at its right end (Pong, 15 Nov 2026: "no text"), with the longer name for a screen reader
@@ -3187,7 +3205,7 @@ async function main() {
       // a tap says what it means in a bubble beside it (Pong, 16 Nov 2026), white like the icon; Escape closes only it
       await icon.click();
       const tip = board.locator('[data-testid="row-icon-tip"]');
-      assert((await tip.textContent()) === "แพทย์จองห้อง" && (await tip.getAttribute("data-tone")) === "plain", "the booking's meaning in a bubble");
+      assert((await tip.textContent()) === "แพทย์จองห้อง" && (await tip.getAttribute("data-tone")) === "booking", "the booking's meaning in a bubble, amber");
       assert((await icon.getAttribute("aria-expanded")) === "true", "the icon says its bubble is open");
       await board.keyboard.press("Escape");
       await tip.waitFor({ state: "detached" });
@@ -3316,7 +3334,7 @@ async function main() {
       await ctx.close();
     });
 
-    await t("16:00: the board turns to Tuesday with the upload: booked rows first, a booking HOSxP lacks gone, icons, the mismatch alert; HN only for who may see it", async () => {
+    await t("16:00: the board turns to Tuesday with the upload: booked rows first, a booking HOSxP lacks gone, icons, an empty notice strip; HN only for who may see it", async () => {
       // until 16:00 the board keeps Monday: the upload is the next cycle's
       setNow("2026-11-16T15:59:00+07:00");
       const ctx = await contextAs(RP.admin);
@@ -3332,8 +3350,25 @@ async function main() {
       assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดถัดไป", "tomorrow's list");
       assert((await page.getAttribute("header time", "datetime")) === "2026-11-17", "dated Tuesday");
       assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "uploaded: no alert");
+      // no ไม่ตรง badge since 16 Nov 2026: the strip is empty; the rooms keep their mismatch marks
+      assert((await page.locator("[data-notice-id]").count()) === 0, `uploaded: an empty strip: ${await textOf(page, "[data-notice-strip]")}`);
+      // test mode is for admins only: on a day with its upload, a non-admin's /?notices=all has no false "no table" badge
+      // or room icon
+      {
+        const viewer = await contextAs(RP.nurse);
+        const other = await viewer.newPage();
+        await other.goto(`${APP}/?notices=all&room=or-12`, { waitUntil: "networkidle" });
+        await other.waitForSelector(".sheet-head h2");
+        assert((await other.locator("[data-notice-id]").count()) === 0, "no test notices for a non-admin");
+        assert((await other.locator('[data-testid="room-no-table"]').count()) === 0, "no room icon for a non-admin");
+        await viewer.close();
+        // and an admin's does show both, the room's icon too
+        await page.goto(`${APP}/?notices=all&room=or-12`, { waitUntil: "networkidle" });
+        await page.waitForSelector('[data-testid="room-no-table"]');
+        assert((await page.locator('[data-notice-id="no-upload"]').count()) === 1, "an admin's test notice");
+        await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      }
       // HOSxP's cases nobody booked, but not the dressing room's; the booking HOSxP does not list is off the board
-      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 3 รายการ", `mismatch alert: ${await textOf(page, '[data-testid="mismatch-alert"]')}`);
       for (const [room, flagged] of [["or-10", false], ["or-11", true], ["or-12", true], ["or-13", false]]) {
         const label = (await page.getAttribute(`#${room} .fp-floor`, "aria-label")) ?? "";
         assert(label.includes("ข้อมูลไม่ตรงกับการจอง") === flagged, `${room} mismatch mark: ${label}`);
@@ -3405,6 +3440,9 @@ async function main() {
       await page.click('.case-row [data-testid="row-icon"]');
       const matchedTip = page.locator('[data-testid="row-icon-tip"]');
       assert((await matchedTip.textContent()) === "ตาราง HOSxP ตรงกับการจอง" && (await matchedTip.getAttribute("data-tone")) === "matched", "the matched meaning");
+      // the HOSxP-only database icon has its own blue, apart from the calendar's amber (Pong, 16 Nov 2026)
+      const hosxpBg = await page.$eval('.case-row [data-testid="row-icon"][data-source="hosxp"]', (el) => getComputedStyle(el).backgroundColor);
+      assert(hosxpBg === "rgb(228, 238, 247)", `the database icon's blue tile: ${hosxpBg}`);
       await ownerShot(page, "room-sheet-icon-tip.png");
       // a tap on the dimmed plan above the sheet closes the bubble and keeps the room open, like the account menu
       await page.click('button[aria-label="ปิดรายการห้อง"]', { position: { x: 195, y: 300 } });
@@ -3567,8 +3605,7 @@ async function main() {
       await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-17");
       await dialog.waitFor({ state: "hidden" });
       assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดวันนี้", "today's eyebrow");
-      assert((await textOf(page, '[data-testid="mismatch-alert"]')) === "ไม่ตรงกับการจอง 3 รายการ", `Tuesday's list: ${await textOf(page, "[data-notice-strip]")}`);
-      assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "Tuesday has its upload");
+      assert((await page.locator("[data-notice-id]").count()) === 0, `Tuesday has its upload: ${await textOf(page, "[data-notice-strip]")}`);
       await ownerShot(page, "board-picked-day.png");
       // a room opened on the picked day keeps it, and shows that day's cases
       await page.goto(`${APP}/?date=2026-11-17&room=or-12`, { waitUntil: "networkidle" });
@@ -3729,7 +3766,7 @@ async function main() {
       assert((await page.getAttribute("header time", "datetime")) === "2026-11-16", "the first half's demo is the board's own day");
       assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "the first half's plan");
       const kinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      assert(JSON.stringify(kinds) === JSON.stringify(["demo", "mismatch"]), `the demo's badge comes first: ${JSON.stringify(kinds)}`);
+      assert(JSON.stringify(kinds) === JSON.stringify(["demo"]), `the demo's badge alone: ${JSON.stringify(kinds)}`);
       await ownerShot(page, "board-demo-first-half.png");
       await page.click('[data-notice-id="demo"]');
       await page.waitForSelector('[data-testid="notice-bubble"]');
@@ -3746,7 +3783,7 @@ async function main() {
       // with the test notices too, the demo's badge stays first
       await page.goto(`${APP}/?demo=1&notices=all`, { waitUntil: "networkidle" });
       const both = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      assert(JSON.stringify(both) === JSON.stringify(["demo", "holiday", "failed", "no-upload", "mismatch"]), `the demo with every notice: ${JSON.stringify(both)}`);
+      assert(JSON.stringify(both) === JSON.stringify(["demo", "no-upload"]), `the demo with every notice: ${JSON.stringify(both)}`);
 
       // ครึ่งหลัง: its first workday, Wednesday 27 Jan 2027, by its address
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });

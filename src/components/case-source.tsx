@@ -140,7 +140,7 @@ export const DOER_TITLE: Record<DoneBy, string> = {
 };
 
 /** The bubble's colour: the icon's own (Pong, 16 Nov 2026: "nurse = pink, surgeon = green"). */
-type Tone = DoneBy | "matched" | "plain";
+type Tone = DoneBy | RowSource;
 
 /**
  * The row's icon: who does the dressing in the dressing room, else where the row comes from. It is a button: a tap says
@@ -166,8 +166,9 @@ export function CaseIcon({
   onToggle?: () => void;
 }) {
   const label = doneBy ? DOER_TITLE[doneBy] : SOURCE_TITLE[source];
-  const tone: Tone = doneBy ?? (source === "matched" ? "matched" : "plain");
-  const look = doneBy ? " case-icon-doer" : source === "matched" ? " case-icon-matched" : "";
+  const tone: Tone = doneBy ?? source;
+  // Each source its own colour (Pong, 16 Nov 2026: "database and calendar should be different").
+  const look = doneBy ? " case-icon-doer" : ` case-icon-${source}`;
   return (
     <span className="case-icon-wrap">
       <button

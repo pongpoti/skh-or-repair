@@ -1,21 +1,23 @@
 import { shortThaiDate } from "./repair.ts";
 
 /**
- * The notices in the strip above the plan (Pong, 15 Nov 2026): the suite closed for a holiday, cases that could not be
- * loaded, no HOSxP file yet for the board's day, and cases that do not match the bookings. Each one is a badge; a tap
- * opens its full message as a chat bubble. The repair needs no notice: the plan's own "พื้นที่ปิดซ่อม" zone shows it.
+ * The notice in the strip above the plan. Since Pong's 16 Nov 2026 change there is only one: no HOSxP file yet for the
+ * board's day ("remove วันหยุด badge, it is unnecessary", and the โหลดไม่สำเร็จ and ไม่ตรง badges too). It is a badge
+ * in the middle of the strip; a tap opens its full message as a chat bubble. The repair needs no notice: the plan's own
+ * "พื้นที่ปิดซ่อม" zone shows it. The demo schedule has a badge of its own (DEMO_NOTICE), for admins only.
  */
 
-export type NoticeTone = "neutral" | "warning" | "danger";
-export type NoticeIcon = "calendar" | "database" | "alert" | "flask";
+export type NoticeTone = "neutral" | "warning";
+/** "no-table" is the database with a slash through it: no HOSxP table yet (components/no-table-icon.tsx). */
+export type NoticeIcon = "no-table" | "flask";
 
 export type BoardNotice = {
-  id: "demo" | "holiday" | "failed" | "no-upload" | "mismatch";
+  id: "demo" | "no-upload";
   tone: NoticeTone;
   icon: NoticeIcon;
   /** The whole message in one line: the badge's text when it is alone, and the bubble's title. */
   text: string;
-  /** The badge's text when several badges share the strip. */
+  /** The badge's text when several badges share the strip (only with the demo's). */
   short: string;
   /** What it means and what happens next, under the title in the bubble. */
   detail: string;
@@ -24,75 +26,32 @@ export type BoardNotice = {
 };
 
 export function boardNotices({
-  closed,
-  holiday,
-  failed,
   missingUpload,
-  mismatches,
 }: {
-  /** The suite runs no list on the day shown (a weekend or holiday). */
-  closed: boolean;
-  /** The holiday's name, when `closed` is for one. */
-  holiday: string | null;
-  /** The bookings and the HOSxP cases could not be read. */
-  failed: boolean;
   /** The board's date when MX has not uploaded its HOSxP file yet, else null. */
   missingUpload: string | null;
-  /** Case rows that do not match a booking, or bookings HOSxP does not list. */
-  mismatches: number;
 }): BoardNotice[] {
-  const notices: BoardNotice[] = [];
-  if (closed) {
-    notices.push({
-      id: "holiday",
-      tone: "neutral",
-      icon: "calendar",
-      text: holiday ? `วันหยุด ${holiday} · ไม่มีตารางผ่าตัด` : "วันนี้เป็นวันหยุด ไม่มีตารางผ่าตัด",
-      short: "วันหยุด",
-      detail: "วันหยุดไม่มีตารางผ่าตัดตามปกติ ตารางจะกลับมาในวันทำการถัดไป",
-    });
-  }
-  if (failed) {
-    notices.push({
-      id: "failed",
-      tone: "danger",
-      icon: "alert",
-      text: "โหลดเคสไม่สำเร็จ ลองรีเฟรช",
-      short: "โหลดไม่สำเร็จ",
-      detail: "อ่านการจองและตาราง HOSxP จากระบบไม่ได้ ห้องจึงยังไม่แสดงรายการ ลองรีเฟรชหน้านี้อีกครั้ง",
-    });
-  }
-  if (missingUpload) {
-    notices.push({
+  if (!missingUpload) return [];
+  return [
+    {
       id: "no-upload",
       tone: "warning",
-      icon: "database",
+      icon: "no-table",
       text: `ยังไม่มีตาราง HOSxP ของ ${shortThaiDate(missingUpload)}`,
       short: "ยังไม่มี HOSxP",
       detail: "MX อัปโหลดตารางจาก HOSxP ทุกวัน เวลา 15:00–16:00 สำหรับวันทำการถัดไป ระหว่างนี้ห้องแสดงเฉพาะการจองของแพทย์",
       testId: "no-upload-alert",
-    });
-  }
-  if (mismatches > 0) {
-    notices.push({
-      id: "mismatch",
-      tone: "warning",
-      icon: "alert",
-      text: `ไม่ตรงกับการจอง ${mismatches} รายการ`,
-      short: `ไม่ตรง ${mismatches}`,
-      detail: "เคสใน HOSxP กับการจองของแพทย์ไม่ตรงกัน ห้องที่มีสามเหลี่ยม ! ที่มุมคือห้องที่มีรายการไม่ตรง แตะห้องเพื่อดูรายละเอียด",
-      testId: "mismatch-alert",
-    });
-  }
-  return notices;
+    },
+  ];
 }
 
 /**
  * Every kind of notice at once, for seeing how the strip looks with all of them (Pong, 15 Nov 2026: "Test mode: show me
- * all possible notification badges stacked within noti bar"): an admin's /?notices=all, and the preview's.
+ * all possible notification badges stacked within noti bar"): an admin's /?notices=all, and the preview's. Since 16 Nov
+ * 2026 that is the one badge.
  */
-export function everyNotice(date: string, holiday = "วันปิยมหาราช"): BoardNotice[] {
-  return boardNotices({ closed: true, holiday, failed: true, missingUpload: date, mismatches: 3 });
+export function everyNotice(date: string): BoardNotice[] {
+  return boardNotices({ missingUpload: date });
 }
 
 /**

@@ -7,7 +7,7 @@ import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickedDay, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
-import { boardNotices, DEMO_NOTICE, everyNotice, type BoardNotice } from "@/lib/board-notices";
+import { DEMO_NOTICE, everyNotice, type BoardNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
  * The board's rows for its day: the cycle's latest HOSxP upload matched with the doctors' bookings
  * (lib/board-rows.ts), the add-case form for a doctor, and whether the viewer may upload. The HN is filtered here, on
  * the server: only the doctor who made a booking, MX and admins get it in the page at all. A database problem leaves
- * the rooms empty with a notice and hides the form. A day picked on the board (`picked`) shows the latest upload for that
+ * the rooms empty and hides the form (no notice since 16 Nov 2026). A day picked on the board (`picked`) shows the latest upload for that
  * day, whichever cycle made it (today's after 16:00, or none yet for a day further ahead).
  */
 async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriods, picked: boolean) {
@@ -91,8 +91,7 @@ function demoBoard(day: BoardDay, periods: RepairPeriods): { board: BoardView; n
     mismatchCount: built.mismatchCount,
     mismatchByRoom: built.mismatchByRoom,
   };
-  const own = boardNotices({ closed: false, holiday: null, failed: false, missingUpload: null, mismatches: built.mismatchCount });
-  return { board, notices: [DEMO_NOTICE, ...own] };
+  return { board, notices: [DEMO_NOTICE] };
 }
 
 export default async function BoardPage({
