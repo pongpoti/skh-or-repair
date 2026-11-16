@@ -15,8 +15,11 @@ export function pkceChallenge(verifier: string): string {
 }
 
 /**
- * LINE Login's authorization URL. `qr` (a computer or tablet) opens LINE's sign-in page on its QR code, which the LINE
- * app on the person's phone scans, instead of the email and password form most staff have never set up.
+ * LINE Login's authorization URL. `qr` (a computer or tablet browser) opens LINE's sign-in page on its QR code, which
+ * the LINE app on the person's phone scans, instead of the email and password form most staff have never set up. It
+ * also asks for that page every time (prompt=login): a browser LINE has signed in to before would otherwise offer
+ * "continue as" the last person, which on a computer the OR shares lets the next person in as them after they signed
+ * out of the board.
  */
 export function buildAuthorizeUrl(cfg: LineConfig, p: { state: string; nonce: string; challenge: string; qr?: boolean }): string {
   const u = new URL(cfg.authorizeUrl);
@@ -30,7 +33,7 @@ export function buildAuthorizeUrl(cfg: LineConfig, p: { state: string; nonce: st
     code_challenge: p.challenge,
     code_challenge_method: "S256",
     ui_locales: "th",
-    ...(p.qr ? { initial_amr_display: "lineqr" } : {}),
+    ...(p.qr ? { initial_amr_display: "lineqr", prompt: "login" } : {}),
   }).toString();
   return u.toString();
 }

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { lineSignIn } from "@/lib/auth/line-signin";
-import { clearCookie, setCookie } from "@/lib/cookies";
+import { clearCookie, sessionTtlFor, setCookie, setSessionCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { ConfigError, lineConfig, sessionSecret } from "@/lib/env";
 import { clientAllowed, gateMode } from "@/lib/gate";
@@ -43,13 +43,14 @@ export async function POST(req: NextRequest) {
     const secret = sessionSecret();
     const profile = await verifyIdToken(cfg, idToken, null);
     const pool = await db();
-    const result = await lineSignIn(pool, profile, next, secret, { ip: clientIp(req.headers), userAgent: userAgent(req.headers) });
+    const ua = req.headers.get("user-agent") ?? "";
+    const result = await lineSignIn(pool, profile, next, secret, { ip: clientIp(req.headers), userAgent: userAgent(req.headers) }, sessionTtlFor(ua));
     const res = json({ ok: true, redirect: result.kind === "session" ? next : "/login/verify" });
     clearCookie(res, "tx");
     if (result.kind === "session") {
       clearCookie(res, "pending");
       clearCookie(res, "access");
-      setCookie(res, "session", result.token);
+      setSessionCookie(res, result.token, ua);
     } else {
       setCookie(res, "pending", result.token);
     }

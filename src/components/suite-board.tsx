@@ -376,12 +376,14 @@ export function SuiteBoard({
                       </span>
                     </div>
                   </div>
+                  {/* On a computer it goes back to the list of open rooms (RoomOverview). */}
                   <button
                     type="button"
-                    className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0 lg:hidden"
+                    className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
                     aria-label="ปิด"
                     title="ปิด"
                     onClick={() => choose(null)}
+                    data-testid="room-close"
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                       <path d="M6 6l12 12M18 6L6 18" />

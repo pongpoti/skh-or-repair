@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { lineSignIn } from "@/lib/auth/line-signin";
-import { clearCookie, cookieName, setCookie } from "@/lib/cookies";
+import { clearCookie, cookieName, sessionTtlFor, setCookie, setSessionCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { appUrl, ConfigError, lineConfig, sessionSecret } from "@/lib/env";
 import { redirectToError, type ErrorCode } from "@/lib/http";
@@ -54,7 +54,8 @@ export async function GET(req: NextRequest) {
       console.error("[auth] database unavailable:", (e as Error).message);
       return fail(req, "config");
     }
-    const result = await lineSignIn(pool, profile, next, secret, { ip: clientIp(req.headers), userAgent: userAgent(req.headers) });
+    const ua = req.headers.get("user-agent") ?? "";
+    const result = await lineSignIn(pool, profile, next, secret, { ip: clientIp(req.headers), userAgent: userAgent(req.headers) }, sessionTtlFor(ua));
     // Signed in, or: prove a mobile number first (then sign in, or request access if it is not authorized), or, for a
     // doctor, their name by an email code (/login/doctor, linked from /login/verify).
     const res = NextResponse.redirect(new URL(result.kind === "session" ? next : "/login/verify", origin), 303);
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
     if (result.kind === "session") {
       clearCookie(res, "pending");
       clearCookie(res, "access");
-      setCookie(res, "session", result.token);
+      setSessionCookie(res, result.token, ua);
     } else {
       setCookie(res, "pending", result.token);
     }

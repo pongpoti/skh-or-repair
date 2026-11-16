@@ -1,6 +1,6 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { noteDoctorAuthorized, noteDoctorRevoked, noteRevoked } from "@/lib/authz";
-import { clearCookie, setCookie } from "@/lib/cookies";
+import { clearCookie, sessionTtlFor, setSessionCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { emailLoginFor, userIdFrom } from "@/lib/email-http";
 import { signInByEmail, verifyEmailCode } from "@/lib/email-otp";
@@ -81,11 +81,11 @@ export async function POST(req: NextRequest) {
       const before = replaced && replaced.lineSub !== login.sub ? replaced : null;
       after(() => notify(buildEmailSignInMessage(signed.user, { lineName: login.name, at, replaced: before })));
     }
-    const token = await signSession({ sub: login.sub, phone: null, userId, name: login.name, picture: login.picture }, sessionSecret());
+    const token = await signSession({ sub: login.sub, phone: null, userId, name: login.name, picture: login.picture }, sessionSecret(), sessionTtlFor(req.headers.get("user-agent") ?? ""));
     const res = NextResponse.json({ ok: true, redirect: safeNextPath(login.next) }, { headers: { "Cache-Control": "no-store" } });
     clearCookie(res, "pending");
     clearCookie(res, "access");
-    setCookie(res, "session", token);
+    setSessionCookie(res, token, req.headers.get("user-agent") ?? "");
     return res;
   } catch (e) {
     console.error("[email-otp] verify failed:", (e as Error).message);
