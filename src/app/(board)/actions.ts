@@ -55,7 +55,8 @@ export async function addCase(input: unknown): Promise<CaseResult> {
     // The app's clock (lib/clock.ts), the same one the page gave the form, so the two agree on today and on 15:00.
     const { date: today, minutes } = bangkokParts(now());
     const [periods, { holidays }] = await Promise.all([getRepairPeriods(pool), holidaysBetween(today, addDays(today, BOOK_AHEAD_DAYS))]);
-    // Again on the server: the day, the HN (stored normalised), the operation, the room choice and the scrub answer;
+    // Again on the server: the day, the HN (stored normalised), the operation, the room choice, the scrub answer and the
+    // note (cleanNote, at most MAX_NOTE characters);
     // the room itself is worked out from the doctor's own department as the database has it (never from the form).
     const earliest = earliestBookingDay(today, minutes, holidays);
     const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays });

@@ -18,6 +18,7 @@ import {
   closedDayNote,
   DRESSING_ROOM_NAME,
   earliestText,
+  MAX_NOTE,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
@@ -81,8 +82,10 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
  * room to use"), each named with the room it is that day. There is no in or out of hours choice: a booking is saved as
  * ในเวลา (Pong, 15 Nov 2026). Picking the dressing room asks, in
  * a dialog over the form, whether the scrub nurse does the dressing for the doctor (Pong's "scrub ทำให้แทนไหม ?");
- * closing it unanswered puts the choice back on the department's room. The surgeon is always the signed-in doctor.
- * Below it, the doctor's own bookings from today on, with their HN, each one cancellable. `request` opens it.
+ * closing it unanswered puts the choice back on the department's room. Last, an optional note to the OR team (หมายเหตุ;
+ * Pong, 17 Nov 2026), which everyone who opens the board sees on the booking's row, so the form says so and asks for
+ * no patient's name or HN in it. The surgeon is always the signed-in doctor.
+ * Below it, the doctor's own bookings from today on, with their HN and note, each one cancellable. `request` opens it.
  */
 export function AddCase({
   request,
@@ -119,6 +122,7 @@ export function AddCase({
   const ref = useRef<HTMLDialogElement>(null);
   const hnRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef<HTMLInputElement>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
   const dateRef = useRef<HTMLDivElement>(null);
   const roomRef = useRef<HTMLFieldSetElement>(null);
   const scrubRef = useRef<HTMLDialogElement>(null);
@@ -135,6 +139,7 @@ export function AddCase({
   const [date, setDate] = useState(first);
   const [hn, setHn] = useState("");
   const [operation, setOperation] = useState("");
+  const [note, setNote] = useState("");
   const [choice, setChoice] = useState<RoomChoice>("dept");
   // The answer to the scrub question, for the dressing room only; null until asked.
   const [scrubDoes, setScrubDoes] = useState<boolean | null>(null);
@@ -177,6 +182,7 @@ export function AddCase({
       setDate(first);
       setHn("");
       setOperation("");
+      setNote("");
       setChoice("dept");
       setScrubDoes(null);
       setInvalid(null);
@@ -206,6 +212,7 @@ export function AddCase({
   function focusField(field: CaseField | undefined) {
     if (field === "hn") hnRef.current?.focus();
     else if (field === "operation") operationRef.current?.focus();
+    else if (field === "note") noteRef.current?.focus();
     else if (field === "date") dateRef.current?.querySelector<HTMLElement>("button")?.focus();
     else if (field === "room") {
       const group = roomRef.current;
@@ -272,7 +279,7 @@ export function AddCase({
     event.preventDefault();
     // No ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026): a booking is saved as ในเวลา, and a HOSxP case it matches keeps
     // its own เวร on the board.
-    const input = { date, hn, operation, room: choice, scrubDoes };
+    const input = { date, hn, operation, room: choice, scrubDoes, note };
     const checked = checkCase(input, { today, earliest: first, periods, subtype: doctor.subtype, holidays });
     if (!checked.ok) {
       refuse(checked.error, checked.field);
@@ -298,6 +305,7 @@ export function AddCase({
           // Ready for the next patient on the same day, whose room is chosen afresh.
           setHn("");
           setOperation("");
+          setNote("");
           setChoice("dept");
           setScrubDoes(null);
           focusAfter.current = "hn";
@@ -563,6 +571,41 @@ export function AddCase({
               ) : null}
             </div>
           </fieldset>
+
+          {/*
+            The note to the OR team (Pong, 17 Nov 2026), optional, last. Everyone who opens the board sees it on the
+            booking's row, so the hint says so (the patient's name and HN stay with who may see them).
+          */}
+          <div>
+            <span className="flex items-baseline justify-between gap-2">
+              <label htmlFor="case-note" className="text-sm font-semibold text-ink">
+                หมายเหตุ <span className="font-normal text-muted">(ถ้ามี)</span>
+              </label>
+              <span className="text-xs text-muted tabular-nums">
+                {note.length}/{MAX_NOTE}
+              </span>
+            </span>
+            <textarea
+              id="case-note"
+              ref={noteRef}
+              value={note}
+              onChange={(event) => {
+                setNote(event.target.value);
+                edited("note");
+              }}
+              maxLength={MAX_NOTE}
+              rows={3}
+              autoComplete="off"
+              placeholder="เช่น ขอ C-arm, เตรียมเลือด 2 unit"
+              aria-invalid={invalid === "note" || undefined}
+              aria-describedby={describe("note", "case-note-hint")}
+              className="field field-text mt-1.5 block min-h-[5.5rem] resize-y leading-6"
+              data-testid="case-note"
+            />
+            <p id="case-note-hint" className="mt-1 text-xs leading-5 text-muted" data-testid="case-note-hint">
+              ทุกคนที่เปิดตารางเห็นข้อความนี้ ไม่ต้องใส่ชื่อหรือ HN ผู้ป่วย
+            </p>
+          </div>
         </fieldset>
 
         {/* A save's answer is said quietly beside จองห้อง: left of the buttons, or on its own line above them on a phone. */}
@@ -646,6 +689,11 @@ export function AddCase({
                     <p className={`text-sm break-words ${item.operation ? (item.hn ? "text-ink-2" : "font-semibold text-ink") : "text-muted"}`}>
                       {item.operation || NO_OPERATION_LABEL}
                     </p>
+                    {item.note ? (
+                      <p className="mt-0.5 text-xs leading-5 whitespace-pre-line text-muted [overflow-wrap:anywhere]" data-testid="my-case-note">
+                        หมายเหตุ: {item.note}
+                      </p>
+                    ) : null}
                   </div>
                   <button
                     type="button"

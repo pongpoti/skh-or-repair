@@ -25,6 +25,7 @@ interface CaseRow {
   shift: Shift;
   dressing: boolean | null;
   scrub_does: boolean | null;
+  note: string | null;
   surgeon_id: string;
   first_name: string;
   last_name: string;
@@ -33,7 +34,7 @@ interface CaseRow {
 }
 
 const COLUMNS =
-  "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.operation, c.shift, c.dressing, c.scrub_does, " +
+  "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.operation, c.shift, c.dressing, c.scrub_does, c.note, " +
   "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.created_at AS booked_at";
 
 function toCase(r: CaseRow): AddedCase {
@@ -48,6 +49,8 @@ function toCase(r: CaseRow): AddedCase {
     dressing: r.dressing,
     // Only a dressing-room booking has the answer (the table's CHECK says so).
     scrubDoes: r.dressing ? r.scrub_does : null,
+    // No note is NULL (db/schema.sql); the app reads it as "".
+    note: r.note ?? "",
     surgeonId: r.surgeon_id,
     surgeon: fullName({ firstName: r.first_name, lastName: r.last_name }),
     subtype: r.subtype,
@@ -95,13 +98,24 @@ export async function addedToday(pool: Q, surgeonId: string): Promise<number> {
 
 /**
  * Saves a checked case (lib/added-cases.ts checkCase: the HN normalised, the room worked out from the doctor's choice)
- * with this doctor as the surgeon. Returns its id. An empty operation name is stored as NULL, never as "".
+ * with this doctor as the surgeon. Returns its id. An empty operation name or note is stored as NULL, never as "".
  */
 export async function insertCase(pool: Q, surgeonId: string, lineSub: string, input: CaseInput): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, surgeon_id, line_sub)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id::text AS id`,
-    [input.date, input.roomId, input.hn, input.operation || null, input.shift, input.dressing, input.dressing ? input.scrubDoes : null, surgeonId, lineSub],
+    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, note, surgeon_id, line_sub)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id::text AS id`,
+    [
+      input.date,
+      input.roomId,
+      input.hn,
+      input.operation || null,
+      input.shift,
+      input.dressing,
+      input.dressing ? input.scrubDoes : null,
+      input.note || null,
+      surgeonId,
+      lineSub,
+    ],
   );
   return rows[0].id;
 }

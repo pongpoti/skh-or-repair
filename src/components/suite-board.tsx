@@ -407,12 +407,8 @@ export function SuiteBoard({
                   ) : null}
                 </div>
               </div>
-              {cases.length === 0 ? (
-                // The board may show the next workday (from 16:00), so the text names no day.
-                <p className="px-5 py-8 pb-[max(2rem,env(safe-area-inset-bottom))] text-center text-sm text-muted">ไม่มีรายการ</p>
-              ) : (
-                <CaseList key={room?.id} cases={cases} />
-              )}
+              {/* An empty room too: the list says ไม่มีรายการ itself, so a note open when a refresh empties the room stays. */}
+              <CaseList key={room?.id} cases={cases} />
             </div>
           ) : planDate && overviewRooms.length > 0 ? (
             <RoomOverview

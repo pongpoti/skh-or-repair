@@ -345,6 +345,7 @@ function booking(more: Partial<AddedCase>): AddedCase {
     shift: "in",
     dressing: false,
     scrubDoes: null,
+    note: "",
     surgeonId: "7",
     surgeon: "สมชาย ใจดี",
     subtype: "GENSX",
