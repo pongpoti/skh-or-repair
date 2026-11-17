@@ -250,11 +250,11 @@ describe("scripts/sync-users.mjs against the test database", () => {
   ].join("\r\n");
 
   before(async () => {
-    await pool.query("DROP TABLE IF EXISTS cases, mx_members, user_claims, email_codes, user_emails, users");
+    await pool.query("DROP TABLE IF EXISTS cases, mx_members, users_added, user_claims, email_codes, user_emails, users");
   });
   after(async () => {
     rmSync(dir, { recursive: true, force: true });
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.end();
   });
 
@@ -356,7 +356,7 @@ describe("scripts/sync-users.mjs against the test database", () => {
   });
 
   test("works on a users table made with the production DDL and rows loaded by someone else (their ids are kept)", async () => {
-    await pool.query("DROP TABLE cases, mx_members, user_claims, email_codes, user_emails, users");
+    await pool.query("DROP TABLE cases, mx_members, users_added, user_claims, email_codes, user_emails, users");
     await pool.query(PRODUCTION_USERS_DDL);
     await pool.query(
       `INSERT INTO users (first_name, last_name, type, subtype) VALUES
@@ -416,5 +416,23 @@ describe("scripts/sync-users.mjs against the test database", () => {
     assert.match(allowed.out, /applied/);
     assert.equal((await rows()).filter((x) => x.active).length, 6);
     assert.equal((await rows()).length, 14, "deactivated, never deleted");
+  });
+
+  test("a name an admin added on /admin (users_added) is not deactivated for missing from the CSV; a CSV row with it still updates it", async () => {
+    await ensureSchema(pool);
+    const { rows: ins } = await pool.query<{ id: string }>(
+      "INSERT INTO users (first_name, last_name, type, subtype) VALUES ('เพิ่มใหม่', 'จากแอป', 'RN', 'OR') RETURNING id::text AS id",
+    );
+    await pool.query("INSERT INTO users_added (user_id, added_by) VALUES ($1, 'U-admin')", [ins[0].id]);
+    const dry = sync(LIST);
+    assert.equal(dry.code, 0, dry.err);
+    assert.match(dry.out, /deactivated 0,/, "the app's name is not among the deactivated");
+    assert.equal(sync(LIST, "--apply").code, 0);
+    const added = (await rows()).find((x) => x.id === ins[0].id);
+    assert.equal(added?.active, true);
+    // the CSV lists it later, as another unit: the sync updates it as any other row
+    const withIt = sync(`${LIST}\r\nเพิ่มใหม่,จากแอป,RN,ANES`, "--apply");
+    assert.equal(withIt.code, 0, withIt.err);
+    assert.equal((await rows()).find((x) => x.id === ins[0].id)?.subtype, "ANES");
   });
 });

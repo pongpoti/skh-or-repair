@@ -54,8 +54,8 @@ CREATE INDEX IF NOT EXISTS login_events_sub_idx ON login_events (line_sub, at DE
 -- The list of people who may claim their name: table users, shared with the rest of the project, which created and
 -- loaded it in production and owns it. This statement mirrors that table's DDL exactly (tests/unit/schema.test.ts
 -- compares it with the text in README "Who may sign in"), so it is a no-op where users exists and identical locally.
--- The sign-in only reads users: it never adds columns to it and never writes it at runtime (only scripts/sync-users.mjs
--- does). Ids stay stable and removals are active = false, never deletes. Claims live in user_claims.
+-- The app never adds columns to users. Its writers are scripts/sync-users.mjs and, one name at a time, an admin's
+-- add-user on /admin (lib/user-admin.ts, table users_added; Pong, 17 Nov 2026). Ids stay stable and removals are active = false, never deletes. Claims live in user_claims.
 CREATE TABLE IF NOT EXISTS users (
   id          integer     GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   first_name  text        NOT NULL CHECK (btrim(first_name) <> ''),
@@ -270,6 +270,15 @@ CREATE TABLE IF NOT EXISTS mx_members (
   user_id   integer     PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
   added_at  timestamptz NOT NULL DEFAULT now(),
   added_by  text
+);
+
+-- Names an admin added on /admin (lib/user-admin.ts; Pong, 17 Nov 2026), one row per users row the app inserted or
+-- brought back. scripts/sync-users.mjs does not set these inactive for missing from the CSV. added_by is the admin's
+-- LINE sub. users itself keeps the production DDL: no column is added to it.
+CREATE TABLE IF NOT EXISTS users_added (
+  user_id   integer     PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+  added_at  timestamptz NOT NULL DEFAULT now(),
+  added_by  text        NOT NULL
 );
 
 -- HOSxP workbook uploads (lib/workbook-store.ts): MX uploads the next workday's list between 15:00 and 16:00 Bangkok

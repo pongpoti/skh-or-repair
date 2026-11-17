@@ -619,7 +619,7 @@ async function main() {
   // loaded once the app has created them, as in production: loadUsers() after the servers are up).
   const db = new pg.Pool({ connectionString: DB_URL, max: 2 });
   await assertDisposableUsers((sql) => db.query(sql), "E2E_DATABASE_URL"); // users holding real data: stop before the DROP
-  await db.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+  await db.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
 
   const appEnv = {
     ...baseEnv(),
@@ -2649,7 +2649,7 @@ async function main() {
         els.map((el) => [el.dataset.testid, el.inert, [...el.querySelectorAll("a, button")].length]),
       );
       assert(
-        JSON.stringify(inertActions) === JSON.stringify([["mx-actions", true, 1], ["test-mode-actions", true, 1]]),
+        JSON.stringify(inertActions) === JSON.stringify([["mx-actions", true, 1], ["staff-actions", true, 1], ["test-mode-actions", true, 1]]),
         `the headings' buttons are inert while closed: ${JSON.stringify(inertActions)}`,
       );
       assert(!(await page.isVisible('[data-testid="repair-save"]')), "nothing of a closed section's body shows");
@@ -2768,6 +2768,16 @@ async function main() {
       };
       const members = async () =>
         (await db.query("SELECT u.first_name || ' ' || u.last_name AS name, m.added_by FROM mx_members m JOIN users u ON u.id = m.user_id ORDER BY 1")).rows;
+      // only RN of the OR unit are offered (Pong, 17 Nov 2026)
+      await page.click('[data-testid="mx-add"]');
+      const offered = await page.$$eval('[data-testid="mx-users"] button .font-semibold', (els) => els.map((el) => el.textContent.trim()));
+      const rnOr = (await db.query("SELECT first_name || ' ' || last_name AS name FROM users WHERE active AND type = 'RN' AND subtype = 'OR'")).rows.map((r) => r.name);
+      assert(offered.length === rnOr.length && offered.every((name) => rnOr.includes(name)), `the picker offers RN-OR only: ${offered.length} of ${rnOr.length}`);
+      const roles = await page.$$eval('[data-testid="mx-users"] button .text-muted', (els) => [...new Set(els.map((el) => el.textContent.trim()))]);
+      assert(JSON.stringify(roles) === JSON.stringify(["พยาบาล · ห้องผ่าตัด"]), `roles offered: ${roles}`);
+      await ownerShot(page, "admin-mx-picker.png");
+      await page.locator("dialog[open]").getByRole("button", { name: "ยกเลิก" }).click();
+      await page.waitForSelector("dialog[open]", { state: "detached" });
       await add("ปราณี", RP.mx.name);
       await add("อรุณี", RP.nurse.name);
       assert(JSON.stringify(await members()) === JSON.stringify([{ name: RP.mx.name, added_by: ADMIN_SUB }, { name: RP.nurse.name, added_by: ADMIN_SUB }].sort((a, b) => (a.name < b.name ? -1 : 1))), `members: ${JSON.stringify(await members())}`);
@@ -2881,10 +2891,60 @@ async function main() {
       await page.evaluate(() => document.querySelector("main")?.scrollTo(0, 0));
       await ownerShot(page, "admin-staff-list.png", { tall: true, upTo: '[data-testid="staff-section"]' });
       // a tap on the chevron closes it again (turned over while open, it must not take the tap)
-      const chevron = await page.locator('[data-testid="staff-section"] .section-head svg').boundingBox();
+      const chevron = await page.locator('[data-testid="staff-section"] .section-head > div > svg').boundingBox();
       await page.mouse.click(chevron.x + chevron.width / 2, chevron.y + chevron.height / 2);
       await page.locator("#staff-body").waitFor({ state: "hidden" });
       assert((await page.getAttribute("#staff-toggle", "aria-expanded")) === "false", "closed by its chevron");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+    });
+
+    await t("admin: เพิ่มชื่อ on the all-names list adds a name with its type and specialty or unit; a name already listed is refused; the sync keeps it", async () => {
+      setNow("2026-11-16T10:00:00+07:00");
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      const addButton = page.locator('[data-testid="staff-add"]');
+      assert(await addButton.evaluate((el) => Boolean(el.closest("[inert]"))), "เพิ่มชื่อ is inert while the section is closed");
+      await openSection(page, "staff");
+      await addButton.click();
+      await page.waitForSelector("dialog[open] #staff-add-title");
+      assert((await page.inputValue('[data-testid="staff-add-subtype"]')) === "OR", "a nurse starts in the OR unit");
+      // a doctor: the specialty must be picked
+      await page.click('[data-testid="staff-add-type-DR"]');
+      await page.fill('[data-testid="staff-add-first"]', "  ทดลอง ");
+      await page.fill('[data-testid="staff-add-last"]', "เพิ่มชื่อ");
+      await page.click('[data-testid="staff-add-confirm"]');
+      assert((await textOf(page, "dialog[open] [role=alert]")) === "เลือกสาขา", "a specialty is needed");
+      await page.selectOption('[data-testid="staff-add-subtype"]', "ENT");
+      await ownerShot(page, "admin-staff-add.png");
+      await page.click('[data-testid="staff-add-confirm"]');
+      await page.waitForSelector("dialog[open]", { state: "detached" });
+      const row = (await db.query(
+        "SELECT u.type, u.subtype, u.active, a.added_by FROM users u JOIN users_added a ON a.user_id = u.id WHERE u.first_name = 'ทดลอง' AND u.last_name = 'เพิ่มชื่อ'",
+      )).rows;
+      assert(JSON.stringify(row) === JSON.stringify([{ type: "DR", subtype: "ENT", active: true, added_by: ADMIN_SUB }]), `saved: ${JSON.stringify(row)}`);
+      // the new name shows by itself in the list, and the heading says so
+      await page.locator('[data-testid="staff-list"] li', { hasText: "ทดลอง เพิ่มชื่อ" }).waitFor();
+      assert((await page.inputValue('[data-testid="staff-search"]')) === "ทดลอง เพิ่มชื่อ", "searched for the new name");
+      assert((await textOf(page, '[data-testid="staff-summary"]')).includes("เพิ่ม ทดลอง เพิ่มชื่อ แล้ว"), "the heading says it was added");
+      // the same name again is refused; nothing changes
+      await addButton.click();
+      await page.fill('[data-testid="staff-add-first"]', "ทดลอง");
+      await page.fill('[data-testid="staff-add-last"]', "เพิ่มชื่อ");
+      await page.click('[data-testid="staff-add-confirm"]');
+      await page.locator("dialog[open] [role=alert]", { hasText: "มี ทดลอง เพิ่มชื่อ ในรายชื่ออยู่แล้ว" }).waitFor();
+      await page.locator("dialog[open]").getByRole("button", { name: "ยกเลิก" }).click();
+      assert((await db.query("SELECT count(*)::int AS n FROM users WHERE first_name = 'ทดลอง'")).rows[0].n === 1, "one row");
+      // a non-admin's call of the action is refused (the page itself is a 404 for them)
+      assert((await htmlAs(RP.nurse, "/admin")).status === 404, "/admin for a nurse");
+      await page.setViewportSize({ width: 360, height: 780 });
+      await noSideScroll(page, "/admin after adding a name at 360px");
+      await page.setViewportSize({ width: 390, height: 844 });
+      // leave the list as the later tests expect it: the added name goes inactive again
+      await db.query("UPDATE users SET active = false WHERE first_name = 'ทดลอง' AND last_name = 'เพิ่มชื่อ'");
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
     });

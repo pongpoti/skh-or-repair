@@ -98,7 +98,7 @@ Bookings are stored in the `cases` table (`db/schema.sql`, created on first use 
 
 ### HOSxP upload (MX)
 
-**MX** (ผู้จัดการตาราง) is a role an admin grants on `/admin` (table `mx_members`, by `users.id`). It follows the user's claim: it ends when the claim ends or the user goes inactive. Admins can do everything MX can.
+**MX** (ผู้จัดการตาราง) is a role an admin grants on `/admin` (table `mx_members`, by `users.id`), to an RN of the OR unit only. It follows the user's claim: it ends when the claim ends or the user goes inactive. Admins can do everything MX can.
 
 MX and admins get an **อัปโหลดตาราง** button in the top bar and the same link in the account menu, both opening `/upload`. On phones the button is an icon. On the narrowest phones (below 390px, or 450px beside the admin button) it is left out so the date keeps its year, and the menu's link stands in. Everyone else gets a not-found page at `/upload`.
 
@@ -306,13 +306,13 @@ Claims are open with or without Telegram: names come only from the `users` list 
 
 ## Who may sign in (table `users`)
 
-The list of people who may claim their name is the Postgres table `users`. It is **shared with the rest of the project**: another workstream created it in production (Neon) and loaded it (196 rows), and it owns it. The agreement with its owner: ids stay stable, a removal is `active = false` (never a delete), and the sign-in never adds columns to `users` and never writes it at runtime; the claims live in their own table, `user_claims`, which references `users(id)`. The production DDL is:
+The list of people who may claim their name is the Postgres table `users`. It is **shared with the rest of the project**: another workstream created it in production (Neon) and loaded it (196 rows), and it owns it. The agreement with its owner: ids stay stable, a removal is `active = false` (never a delete), and the app never adds columns to `users`; since 17 Nov 2026 an admin's เพิ่มชื่อ on `/admin` writes it too, one name at a time (Pong asked for it; see Admin); the claims live in their own table, `user_claims`, which references `users(id)`. The production DDL is:
 
 ```sql
 CREATE TABLE users (id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY, first_name text NOT NULL CHECK (btrim(first_name) <> ''), last_name text NOT NULL CHECK (btrim(last_name) <> ''), type text NOT NULL CHECK (type IN ('DR','RN','PN','PCA')), subtype text NOT NULL CHECK (btrim(subtype) <> ''), active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(), CONSTRAINT users_name_key UNIQUE (first_name, last_name));
 ```
 
-`db/schema.sql` (applied by the app on first use) holds the same statement as `CREATE TABLE IF NOT EXISTS users (...)`, so it is a no-op where the table exists and gives a local database the identical table (a unit test compares the two texts and the resulting catalogs, and checks that applying the schema to a filled `users` writes nothing). `type` is `DR`, `RN`, `PN` or `PCA`; `subtype` is a code (doctors: the department, e.g. `ORTHO`, `GENSX`, `ANES`; nurses and aides: `OR` or `ANES`). It holds names only; the numbers come from the claims. One row per person (first and last name are unique). The app only reads the table: changes apply within 60 s, with no redeploy.
+`db/schema.sql` (applied by the app on first use) holds the same statement as `CREATE TABLE IF NOT EXISTS users (...)`, so it is a no-op where the table exists and gives a local database the identical table (a unit test compares the two texts and the resulting catalogs, and checks that applying the schema to a filled `users` writes nothing). `type` is `DR`, `RN`, `PN` or `PCA`; `subtype` is a code (doctors: the department, e.g. `ORTHO`, `GENSX`, `ANES`; nurses and aides: `OR` or `ANES`). It holds names only; the numbers come from the claims. One row per person (first and last name are unique). Apart from เพิ่มชื่อ the app only reads the table: changes apply within 60 s, with no redeploy.
 
 **Until people have claimed their names, only `ALLOWED_PHONES` can sign in.** In production the table is already loaded, so there is nothing to load. To load or update it from a CSV, use the sync script with a file kept **outside** this repository (UTF-8, header `first_name,last_name,type,subtype`; in Excel, Save As "CSV UTF-8"); the script refuses a file inside the repository:
 
@@ -330,7 +330,7 @@ first_name,last_name,type,subtype
 สุดา,คำดี,PN,ANES
 ```
 
-It reads `DATABASE_URL` from the environment or `.env.local`, prints the target database without credentials, the changes (names included, for your review) and a summary of counts per type. Rows are matched by first and last name (the table's unique key); a person whose type changes keeps their row and their claim, with the new type and subtype. It never sets an id (the table numbers new rows), never deletes a row (people missing from the CSV are set inactive; a claimed name that goes inactive stops signing in, and the dry run marks those), sets `updated_at` on every row it changes, never touches `user_claims`, refuses the whole file on a bad line (naming the line: wrong column count, unknown type, empty or malformed subtype, a duplicate name), and refuses to deactivate more than 5 rows and 10% of the list at once unless `--allow-mass-deactivate` is added. It is the only writer of `users` on the sign-in side; coordinate with the table's owner before running `--apply` against production.
+It reads `DATABASE_URL` from the environment or `.env.local`, prints the target database without credentials, the changes (names included, for your review) and a summary of counts per type. Rows are matched by first and last name (the table's unique key); a person whose type changes keeps their row and their claim, with the new type and subtype. It never sets an id (the table numbers new rows), never deletes a row (people missing from the CSV are set inactive; a claimed name that goes inactive stops signing in, and the dry run marks those), sets `updated_at` on every row it changes, never touches `user_claims`, refuses the whole file on a bad line (naming the line: wrong column count, unknown type, empty or malformed subtype, a duplicate name), and refuses to deactivate more than 5 rows and 10% of the list at once unless `--allow-mass-deactivate` is added. Names added on `/admin` (table `users_added`) are never set inactive by it. Coordinate with the table's owner before running `--apply` against production.
 
 Single edits in the Neon SQL editor (deactivate, never delete):
 
@@ -461,13 +461,13 @@ The page (จัดการระบบ) holds five sections. Every one starts 
   - A save changes the board for everyone at once. The section says who saved last and when ("แก้ไขล่าสุด … โดย …"), or that the planned dates are in use.
 - **ผู้จัดการตาราง (MX)**, the users who may upload the HOSxP file:
   - Each member shows with their name, role and the date they were added. A member whose user is inactive is marked "ปิดใช้งานอยู่ อัปโหลดไม่ได้": the role does nothing until the user is active again.
-  - **เพิ่ม MX** searches the active users by name (names and roles only). The admin picks a name, then confirms.
+  - **เพิ่ม MX** searches the active RN of the OR unit by name (Pong, 17 Nov 2026: "only RN-OR are allowed in list"; names and roles only). The admin picks a name, then confirms. The server refuses anyone else, and the role works only while the member's row is RN-OR: a member whose type or unit changes (a later sync) is marked "ไม่ใช่ RN-OR อัปโหลดไม่ได้".
   - Taking the role back asks for a confirmation first.
   - The role lives in the `mx_members` table, by `users.id`.
 - **รายชื่อทั้งหมด**, everyone on the staff list: the active rows of `users`, the names people sign in with.
   - Buttons pick a type, each with its count: ทั้งหมด, DR (แพทย์), RN (พยาบาล), PN (ผู้ช่วยพยาบาล) and PCA (พนักงานช่วยเหลือคนไข้). With a type picked, a dropdown narrows it to one specialty (doctors) or unit (everyone else), and a search finds a name (spaces and case ignored).
   - Each row shows the type, the name and the subtype in Thai, with a doctor's specialty on its department colour. Doctors come first, then RN, PN and PCA, each in Thai name order.
-  - Read only: `scripts/sync-users.mjs` is the only writer of `users` (see Who may sign in), so a name is added, corrected or removed there.
+  - **เพิ่มชื่อ** (Pong, 17 Nov 2026: "add user button") adds one name: first and last name (cleaned as the sync cleans them), the type, and a specialty (doctors) or unit (OR or ANES). A name already active is refused; an inactive one comes back with the type and unit given. The person can claim it at once. Table `users_added` records who added it, and the sync never sets such a name inactive for missing from the CSV (a CSV row with the same name still updates it). Corrections and removals are still made through the CSV.
 - **ตารางตัวอย่าง**, the demo schedule of either half (above), and **โหมดทดสอบ**, the board with the ยังไม่มีตาราง HOSxP notice in the strip.
 
 It replaced the surgeon list (`surgeons` table, add, edit and delete), which nothing else read. Every section goes through `pg` like the rest of the app, and each shows a notice when its data cannot be read while the others still work.
