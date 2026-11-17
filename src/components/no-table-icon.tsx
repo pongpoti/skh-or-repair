@@ -1,6 +1,6 @@
 /**
- * "No HOSxP table yet" (Pong, 16 Nov 2026): a database drawn with a black outline and filled solid white, with one slash
- * across it for "not working". The notice badge, its bubble and the header of each OR room card show it. The database is
+ * "No HOSxP table yet" (Pong, 16 Nov 2026): a database filled solid white, with one slash across it for "not working",
+ * outlined in the red of an alert (Pong, 17 Nov 2026: "red alert theme"; it was black). The notice badge, its bubble and the header of each OR room card show it. The database is
  * Lucide's (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors); the slash has a white edge so it reads
  * apart from the outline it crosses.
  */
@@ -12,7 +12,7 @@ export function NoTableIcon({ size = 16, label }: { size?: number; label?: strin
       height={size}
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#000"
+      stroke="#c62828"
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"

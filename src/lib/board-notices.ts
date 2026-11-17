@@ -7,7 +7,8 @@ import { shortThaiDate } from "./repair.ts";
  * "พื้นที่ปิดซ่อม" zone shows it. The demo schedule has a badge of its own (DEMO_NOTICE), for admins only.
  */
 
-export type NoticeTone = "neutral" | "warning";
+/** "alert" is the red alert theme of the no-table notice (Pong, 17 Nov 2026). */
+export type NoticeTone = "neutral" | "alert";
 /** "no-table" is the database with a slash through it: no HOSxP table yet (components/no-table-icon.tsx). */
 export type NoticeIcon = "no-table" | "flask";
 
@@ -35,7 +36,7 @@ export function boardNotices({
   return [
     {
       id: "no-upload",
-      tone: "warning",
+      tone: "alert",
       icon: "no-table",
       text: `ยังไม่มีตาราง HOSxP ของ ${shortThaiDate(missingUpload)}`,
       short: "ยังไม่มี HOSxP",
