@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Noto_Sans_Thai_Looped } from "next/font/google";
 import { connection } from "next/server";
+import { ConnectionWatch } from "@/components/connection-watch";
 import "./globals.css";
 
 const inter = Inter({
@@ -37,7 +38,10 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   await connection();
   return (
     <html lang="th" className={`${inter.variable} ${thai.variable} h-full overflow-hidden antialiased`}>
-      <body className="h-full overflow-hidden touch-manipulation font-sans text-ink">{children}</body>
+      <body className="h-full overflow-hidden touch-manipulation font-sans text-ink">
+        {children}
+        <ConnectionWatch />
+      </body>
     </html>
   );
 }

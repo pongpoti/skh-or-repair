@@ -618,7 +618,9 @@ body {
   }
   .notice-badge > svg { flex: none; }
   .notice-badge:hover { background: rgb(255 255 255 / 0.95); }
-  .notice-badge[data-tone="warning"] { color: var(--late); }
+  /* The no-table notice in the red alert theme (Pong, 17 Nov 2026). */
+  .notice-badge[data-tone="alert"] { color: var(--stop); background: rgb(253 236 234 / 0.92); border-color: rgb(198 40 40 / 0.35); }
+  .notice-badge[data-tone="alert"]:hover { background: rgb(253 236 234); }
   .notice-badge[aria-expanded="true"] {
     background: #fff;
     border-color: currentColor;
@@ -687,7 +689,9 @@ body {
     background: var(--brand-tint);
     color: var(--ink-2);
   }
-  .notice-bubble[data-tone="warning"] .notice-bubble-icon { background: var(--late-tint); color: var(--late); }
+  .notice-bubble[data-tone="alert"] { border-color: rgb(198 40 40 / 0.3); }
+  .notice-bubble[data-tone="alert"]::before { border-color: rgb(198 40 40 / 0.3); }
+  .notice-bubble[data-tone="alert"] .notice-bubble-icon { background: rgb(253 236 234); color: var(--stop); }
   .notice-bubble-close {
     display: grid;
     flex: none;

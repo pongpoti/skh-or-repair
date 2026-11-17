@@ -14,7 +14,7 @@ test("the one notice (Pong, 16 Nov 2026): no HOSxP table yet, with the database-
   assert.equal(noUpload.icon, "no-table");
   assert.equal(noUpload.text, "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569");
   assert.equal(noUpload.short, "ยังไม่มี HOSxP");
-  assert.equal(noUpload.tone, "warning");
+  assert.equal(noUpload.tone, "alert");
   assert.equal(noUpload.testId, "no-upload-alert");
   assert.ok(noUpload.detail.includes("15:00–16:00"), "the bubble says when MX uploads");
 });

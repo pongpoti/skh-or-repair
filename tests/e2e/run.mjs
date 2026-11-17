@@ -38,6 +38,7 @@ const pg = require("pg");
 
 const APP_PORT = Number(process.env.E2E_APP_PORT ?? 3100);
 const FILE_APP_PORT = Number(process.env.E2E_FILE_APP_PORT ?? 3101);
+const DOWN_APP_PORT = Number(process.env.E2E_DOWN_APP_PORT ?? 3102);
 const LINE_PORT = Number(process.env.E2E_LINE_PORT ?? 4010);
 const SMS_PORT = Number(process.env.E2E_SMS_PORT ?? 4011);
 const DB_URL = process.env.E2E_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/orskh_e2e";
@@ -48,6 +49,7 @@ const SCREENS = process.env.E2E_SCREENS_DIR ?? join(tmpdir(), `orskh-e2e-screens
 const LOG_DIR = join(tmpdir(), `orskh-e2e-logs-${APP_PORT}`);
 const APP = `http://localhost:${APP_PORT}`;
 const FILE_APP = `http://localhost:${FILE_APP_PORT}`;
+const DOWN_APP = `http://localhost:${DOWN_APP_PORT}`;
 const LINE = `http://127.0.0.1:${LINE_PORT}`;
 const SMS = `http://127.0.0.1:${SMS_PORT}`;
 
@@ -592,6 +594,7 @@ async function main() {
   const portsFree = async () => {
     await assertPortFree(APP_PORT, undefined, "E2E_APP_PORT");
     await assertPortFree(FILE_APP_PORT, undefined, "E2E_FILE_APP_PORT");
+    await assertPortFree(DOWN_APP_PORT, undefined, "E2E_DOWN_APP_PORT");
     await assertPortFree(LINE_PORT, "127.0.0.1", "E2E_LINE_PORT");
     await assertPortFree(SMS_PORT, "127.0.0.1", "E2E_SMS_PORT");
   };
@@ -668,6 +671,7 @@ async function main() {
   });
   const app = startProcess("app", ["node_modules/next/dist/bin/next", "start", "-p", String(APP_PORT)], appEnv);
   let fileApp = null; // the local file mode app, started by its test
+  let downApp = null; // the app with its database down, started by its test
   try {
     await waitFor(`${LINE}/__control/health`, line);
     await waitFor(`${SMS}/__control/health`, sms);
@@ -3834,9 +3838,62 @@ async function main() {
       }
     });
 
+    await t("outages (Pong, 17 Nov 2026): a database or server error goes to /unavailable, a lost connection covers the page; the session is kept", async () => {
+      // 1: the landing opens without signing in; "ลองอีกครั้ง" goes back only to a path on this site
+      for (const [from, back] of [["/?room=or-3", "/?room=or-3"], ["//evil.example/x", "/"], ["https://evil.example/", "/"], ["/unavailable?reason=server", "/"]]) {
+        const r = await fetch(`${APP}/unavailable?reason=server&from=${encodeURIComponent(from)}`, { redirect: "manual" });
+        const html = await r.text();
+        assert(r.status === 200 && html.includes("ระบบขัดข้องชั่วคราว"), `/unavailable without a session: ${r.status}`);
+        assert(html.includes(`href="${back.replace(/&/g, "&amp;")}"`) && !html.includes("evil.example\""), `retry for ${from} goes to ${back}`);
+      }
+
+      // 2: the app with its database down: a signed-in nurse goes to the outage page, not to sign in, and keeps the cookie
+      const downEnv = { ...appEnv, APP_URL: DOWN_APP, DATABASE_URL: "postgres://postgres:postgres@127.0.0.1:9/nothing_listens_here" };
+      downApp = startProcess("app-down", ["node_modules/next/dist/bin/next", "start", "-p", String(DOWN_APP_PORT)], downEnv);
+      await waitFor(`${DOWN_APP}/unavailable`, downApp);
+      let ctx = await newContext(browser);
+      await ctx.addCookies([{ name: "session", value: await sessionToken(NURSE), url: DOWN_APP, httpOnly: true, sameSite: "Lax" }]);
+      let page = await ctx.newPage();
+      await page.goto(`${DOWN_APP}/?room=or-3`);
+      await page.waitForSelector('[data-testid="outage"][data-reason="server"]');
+      let at = new URL(page.url());
+      assert(at.pathname === "/unavailable" && at.searchParams.get("reason") === "server" && at.searchParams.get("from") === "/?room=or-3", `nurse at ${page.url()}`);
+      assert((await page.getAttribute('[data-testid="outage-retry"]', "href")) === "/?room=or-3", "retry goes back to the board");
+      assert(await cookie(ctx, "session"), "the session cookie is kept through the outage");
+      await shoot(page, "outage-server");
+      await ctx.close();
+
+      // 3: break-glass needs no database to sign in, so the page itself fails: the board's error also lands there
+      ctx = await newContext(browser);
+      await ctx.addCookies([{ name: "session", value: await sessionToken(BREAK_GLASS), url: DOWN_APP, httpOnly: true, sameSite: "Lax" }]);
+      page = await ctx.newPage();
+      await page.goto(`${DOWN_APP}/`);
+      await page.waitForURL(/\/unavailable\?reason=server/);
+      await page.waitForSelector('[data-testid="outage"][data-reason="server"]');
+      await ctx.close();
+
+      // 4: offline on the real app: the network landing covers the board, and the board is back once online
+      ctx = await newContext(browser);
+      await ctx.addCookies([{ name: "session", value: await sessionToken(BREAK_GLASS), url: APP, httpOnly: true, sameSite: "Lax" }]);
+      page = await ctx.newPage();
+      await page.goto(`${APP}/`);
+      await page.waitForSelector('[data-testid="board-eyebrow"]');
+      assert((await page.locator('[data-testid="offline-cover"]').count()) === 0, "no cover while online");
+      await ctx.setOffline(true);
+      await page.waitForSelector('[data-testid="offline-cover"] [data-testid="outage"][data-reason="network"]');
+      assert((await plainText(page, '[data-testid="offline-cover"] h1')) === "ไม่มีการเชื่อมต่ออินเทอร์เน็ต", "the network title");
+      await shoot(page, "outage-network", { full: false });
+      const reloaded = page.waitForEvent("load");
+      await ctx.setOffline(false);
+      await reloaded;
+      await page.waitForSelector('[data-testid="offline-cover"]', { state: "detached" });
+      assert(new URL(page.url()).pathname === "/", `back on the board: ${page.url()}`);
+      await ctx.close();
+    });
+
     await t("no OTP code, deeSMSX token, key, HN or workbook row appears in server logs", async () => {
       assert(issuedCodes.length >= 20, `codes and tokens collected: ${issuedCodes.length}`);
-      for (const proc of [app, fileApp].filter(Boolean)) {
+      for (const proc of [app, fileApp, downApp].filter(Boolean)) {
         const log = proc.log();
         for (const code of issuedCodes) assert(!log.includes(code), `code or token found in the ${proc.name} log`);
         assert(!log.includes(SESSION_SECRET) && !log.includes(OTP_PEPPER) && !log.includes(TG_TOKEN), `secret in the ${proc.name} log`);
