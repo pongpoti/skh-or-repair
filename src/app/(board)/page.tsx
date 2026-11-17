@@ -5,7 +5,7 @@ import { TopBar } from "@/components/top-bar";
 import { addDays, BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
 import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
-import { requireUser } from "@/lib/auth/server";
+import { requestPath, requireUser } from "@/lib/auth/server";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickedDay, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
 import { DEMO_NOTICE, everyNotice, type BoardNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
@@ -19,6 +19,7 @@ import type { RepairPeriods } from "@/lib/repair";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import type { SessionUser } from "@/lib/tokens";
+import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
 import { workbookFor, workbookForDay } from "@/lib/workbook-store";
 import { addCase, deleteCase } from "./actions";
@@ -28,8 +29,8 @@ export const dynamic = "force-dynamic";
 /**
  * The board's rows for its day: the cycle's latest HOSxP upload matched with the doctors' bookings
  * (lib/board-rows.ts), the add-case form for a doctor, and whether the viewer may upload. The HN is filtered here, on
- * the server: only the doctor who made a booking, MX and admins get it in the page at all. A database problem leaves
- * the rooms empty and hides the form (no notice since 16 Nov 2026). A day picked on the board (`picked`) shows the latest upload for that
+ * the server: only the doctor who made a booking, MX and admins get it in the page at all. A database problem returns
+ * null, and the page goes to the outage page (Pong, 17 Nov 2026; it used to leave the rooms empty). A day picked on the board (`picked`) shows the latest upload for that
  * day, whichever cycle made it (today's after 16:00, or none yet for a day further ahead).
  */
 async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriods, picked: boolean) {
@@ -69,11 +70,10 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
       };
     }
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
-    return { board, adding, canUpload: viewer.allHn, failed: false };
+    return { board, adding, canUpload: viewer.allHn };
   } catch (error) {
     console.error("[board] cases unavailable:", (error as Error).message);
-    const board: BoardView = { date: day.boardDate, rows: [], uploaded: false, mismatchCount: 0, mismatchByRoom: {} };
-    return { board, adding: null, canUpload: isAdmin(user.sub), failed: true };
+    return null;
   }
 }
 
@@ -133,9 +133,10 @@ export default async function BoardPage({
   // The demo schedule, for admins only (Pong, 15 Nov 2026): /?demo=1 fills every room of the day shown with made-up
   // cases (/admin opens it on a day of either half; the date picker keeps it on). Anyone else gets the real board.
   const demo = params.demo === "1" && admin ? demoBoard(view, periods) : null;
-  const { board, adding, canUpload, failed } = demo
-    ? { board: demo.board, adding: null, canUpload: true, failed: false }
-    : await loadBoard(user, view, periods, view !== day);
+  const loaded = demo ? { board: demo.board, adding: null, canUpload: true } : await loadBoard(user, view, periods, view !== day);
+  // Outside the try of loadBoard: redirect() works by throwing.
+  if (!loaded) redirect(unavailablePath("server", await requestPath()));
+  const { board, adding, canUpload } = loaded;
   // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
   // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
   // The demo's own badge stays first whatever else the strip shows, so made-up cases are never taken for real ones.
@@ -165,7 +166,6 @@ export default async function BoardPage({
         periods={periods}
         roomId={params.room ?? null}
         adding={adding}
-        casesUnavailable={failed}
         notices={testNotices}
       />
     </div>

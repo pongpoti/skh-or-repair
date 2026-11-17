@@ -30,7 +30,8 @@ type AuthzState = {
   cache: { set: Set<string>; at: number } | null;
   lastAttempt: number;
   inflight: Promise<boolean> | null;
-  misses: Map<string, number>;
+  /** Keys looked up and not found (known: the database said no) or not read (known: false, an outage). */
+  misses: Map<string, { at: number; known: boolean }>;
 };
 
 /**
@@ -87,7 +88,7 @@ function phoneCheck(e: string): Check {
  * from the database leaves it (so a removal seen by a fresh check also applies to this instance's later cached
  * checks). A failed read authorizes nobody.
  */
-async function lookUp(e: string, check: Check, rememberMiss: boolean): Promise<boolean> {
+async function lookUp(e: string, check: Check, rememberMiss: boolean): Promise<Access> {
   let ok = false;
   let read = false;
   try {
@@ -99,14 +100,14 @@ async function lookUp(e: string, check: Check, rememberMiss: boolean): Promise<b
   if (ok) {
     misses.delete(e);
     state.cache?.set.add(e);
-    return true;
+    return "yes";
   }
   if (read) state.cache?.set.delete(e);
   if (rememberMiss) {
     if (misses.size >= MAX_MISSES) misses.clear();
-    misses.set(e, Date.now());
+    misses.set(e, { at: Date.now(), known: read });
   }
-  return false;
+  return read ? "no" : "unknown";
 }
 
 /**
@@ -114,10 +115,19 @@ async function lookUp(e: string, check: Check, rememberMiss: boolean): Promise<b
  * made, e.g. right after a code check); a failed read then authorizes only ALLOWED_PHONES.
  */
 export async function isAuthorizedPhone(phone: string, opts: { fresh?: boolean } = {}): Promise<boolean> {
-  if (isAllowedPhone(phone)) return true;
+  return (await phoneAccess(phone, opts)) === "yes";
+}
+
+/**
+ * isAuthorizedPhone() with the reason for a "no": "unknown" when the database could not answer (an outage, not a
+ * removal). Still fail closed: "unknown" lets nobody in; it only lets the caller show the outage page instead of the
+ * sign-in page (Pong, 17 Nov 2026).
+ */
+export async function phoneAccess(phone: string, opts: { fresh?: boolean } = {}): Promise<Access> {
+  if (isAllowedPhone(phone)) return "yes";
   const e = normalizePhone(phone);
-  if (!e) return false;
-  return isAuthorizedKey(e, phoneCheck(e), opts);
+  if (!e) return "no";
+  return accessFor(e, phoneCheck(e), opts);
 }
 
 /**
@@ -125,18 +135,26 @@ export async function isAuthorizedPhone(phone: string, opts: { fresh?: boolean }
  * active: the cached list, like isAuthorizedPhone(). `fresh: true` reads the database now.
  */
 export async function isAuthorizedDoctor(userId: string, sub: string, opts: { fresh?: boolean } = {}): Promise<boolean> {
-  if (!/^[1-9]\d{0,9}$/.test(userId) || !sub) return false;
-  return isAuthorizedKey(emailKey(userId, sub), async (pool) => (await userForEmailClaim(pool, userId, sub)) !== null, opts);
+  return (await doctorAccess(userId, sub, opts)) === "yes";
 }
 
-async function isAuthorizedKey(e: string, check: Check, opts: { fresh?: boolean }): Promise<boolean> {
+/** isAuthorizedDoctor() with "unknown" for a database that could not answer, like phoneAccess(). */
+export async function doctorAccess(userId: string, sub: string, opts: { fresh?: boolean } = {}): Promise<Access> {
+  if (!/^[1-9]\d{0,9}$/.test(userId) || !sub) return "no";
+  return accessFor(emailKey(userId, sub), async (pool) => (await userForEmailClaim(pool, userId, sub)) !== null, opts);
+}
+
+/** "unknown": the list could not be loaded and the key could not be looked up (the database is down). */
+export type Access = "yes" | "no" | "unknown";
+
+async function accessFor(e: string, check: Check, opts: { fresh?: boolean }): Promise<Access> {
   if (opts.fresh) return lookUp(e, check, false);
   // Missing or expired list: load it, or wait for the load that is already running.
   if (!fresh(Date.now()) && (state.inflight || Date.now() - state.lastAttempt >= RETRY_MS)) await load();
-  if (!fresh(Date.now())) return false;
-  if (state.cache!.set.has(e)) return true;
-  const missedAt = misses.get(e);
-  if (missedAt !== undefined && Date.now() - missedAt < RETRY_MS) return false;
+  if (!fresh(Date.now())) return "unknown";
+  if (state.cache!.set.has(e)) return "yes";
+  const missed = misses.get(e);
+  if (missed !== undefined && Date.now() - missed.at < RETRY_MS) return missed.known ? "no" : "unknown";
   return lookUp(e, check, true);
 }
 

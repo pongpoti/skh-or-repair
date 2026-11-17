@@ -2,7 +2,7 @@ import "./_setup";
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 import type { Pool } from "pg";
-import { isAuthorizedPhone, isListedUser, LIST_TTL_MS, noteAuthorized, noteRevoked, resetAuthzCache, RETRY_MS } from "@/lib/authz";
+import { isAuthorizedPhone, isListedUser, phoneAccess, LIST_TTL_MS, noteAuthorized, noteRevoked, resetAuthzCache, RETRY_MS } from "@/lib/authz";
 import { db } from "@/lib/db";
 import { setTestEnv, TEST_DB } from "./_setup";
 
@@ -282,6 +282,30 @@ describe("authorization: a number with a current claim on an active user (a clai
     advance(RETRY_MS);
     assert.equal(await isAuthorizedPhone("0910000001"), true);
     assert.equal(await isAuthorizedPhone("0910000002"), true);
+  });
+
+  test("phoneAccess: an outage answers unknown (the outage page), never no (sign in again); a real no stays no", async () => {
+    await claimed("0910000001");
+    assert.equal(await phoneAccess("0910000001"), "yes");
+    assert.equal(await phoneAccess("0910000009"), "no", "read from the database: not listed");
+    assert.equal(await phoneAccess("not a number"), "no");
+    process.env.DATABASE_URL = DOWN;
+    // a fresh list that lacks the number, and the lookup of that number fails: unknown, remembered as unknown
+    const miss = await quietly(async () => [await phoneAccess("0910000003"), await phoneAccess("0910000003")]);
+    assert.deepEqual(miss.value, ["unknown", "unknown"]);
+    assert.equal(miss.logged.length, 1, "the second answer comes from memory");
+    assert.equal(await phoneAccess("0910000009"), "no", "a remembered real miss stays no");
+    advance(LIST_TTL_MS);
+    const down = await quietly(async () => [
+      await phoneAccess("0910000001"),
+      await phoneAccess("0910000001", { fresh: true }),
+      await phoneAccess("0812345678"),
+    ]);
+    assert.deepEqual(down.value, ["unknown", "unknown", "yes"], "list expired: unknown; ALLOWED_PHONES still yes");
+    assert.equal(await isAuthorizedPhone("0910000001"), false, "still fail closed");
+    process.env.DATABASE_URL = TEST_DB;
+    advance(RETRY_MS);
+    assert.equal(await phoneAccess("0910000001"), "yes");
   });
 
   test("isListedUser: ALLOWED_PHONES or an active row, read now (not cached); a failed read is not listed", async () => {

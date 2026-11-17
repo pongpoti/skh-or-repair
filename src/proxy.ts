@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/admin";
-import { userFromToken } from "@/lib/auth/user";
+import { checkSession } from "@/lib/auth/user";
 import { cookieName, cookieOptions } from "@/lib/cookies";
 import { appUrl } from "@/lib/env";
 import { GATE_PATH, clientAllowed, gateMode } from "@/lib/gate";
 import { isSameOrigin, safeNextPath } from "@/lib/security";
 import { TELEGRAM_WEBHOOK_PATH } from "@/lib/telegram";
+import { UNAVAILABLE_PATH, unavailablePath } from "@/lib/unavailable";
 
 /**
  * Runs before every request except static build assets and a few public files (see matcher):
@@ -15,9 +16,11 @@ import { TELEGRAM_WEBHOOK_PATH } from "@/lib/telegram";
  * 4. device gate (lib/gate.ts): on Vercel, a phone outside the LIFF app in LINE (or a client that is no browser) gets
  *    the "open in LINE" page for every page and 403 for every API call, before the sign-in gate. Computers and tablets
  *    pass. The Telegram webhook and /preview* are exempt.
- * 5. auth gate: everything except /login*, /api/auth/*, the Telegram webhook and /preview* needs a valid session
- *    (pages ALSO verify the session themselves; this is the first line, not the only one). The /preview pages answer
- *    404 unless NODE_ENV is development.
+ * 5. auth gate: everything except /login*, /api/auth/*, the Telegram webhook, /unavailable and /preview* needs a valid
+ *    session (pages ALSO verify the session themselves; this is the first line, not the only one). The /preview pages
+ *    answer 404 unless NODE_ENV is development. When the database cannot check a valid session (an outage), a page goes
+ *    to the outage page /unavailable (lib/unavailable.ts) and an API call gets 503; the cookie is kept, so the user is
+ *    still signed in once the database is back.
  * 6. admin gate: /admin* answers the mistyped-address 404 to a session whose sub is not in AUTH_ADMIN_LINE_IDS, before
  *    anything renders (the page's own check runs behind its loading screen, whose response is already a 200).
  * The Telegram webhook is server-to-server (no Origin, no session): its route checks Telegram's secret header.
@@ -30,6 +33,7 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/auth/") ||
     pathname === TELEGRAM_WEBHOOK_PATH ||
     pathname === GATE_PATH ||
+    pathname === UNAVAILABLE_PATH ||
     pathname === "/preview" ||
     pathname.startsWith("/preview/")
   );
@@ -92,6 +96,9 @@ export async function proxy(req: NextRequest) {
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
+  // The address asked for, for the outage page's "try again" (requestPath() in lib/auth/server.ts). Always set here, so
+  // a value sent by the browser never gets through.
+  requestHeaders.set("x-orskh-path", safeNextPath(`${pathname}${search}`));
 
   // 4. Device gate: the LIFF app in LINE on a phone, or a computer or tablet browser. Runs before the sign-in gate, so a
   //    phone browser outside LINE never reaches the LINE login. The answer depends on the User-Agent, so it must not be
@@ -116,7 +123,20 @@ export async function proxy(req: NextRequest) {
     } catch {
       sessionCookie = null;
     }
-    const user = sessionCookie ? await userFromToken(req.cookies.get(sessionCookie)?.value) : null;
+    const { user, unavailable } = sessionCookie
+      ? await checkSession(req.cookies.get(sessionCookie)?.value)
+      : { user: null, unavailable: false };
+    if (!user && unavailable) {
+      if (pathname.startsWith("/api/")) {
+        return withCsp(
+          NextResponse.json({ error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } }),
+          csp,
+        );
+      }
+      const res = NextResponse.redirect(new URL(unavailablePath("server", safeNextPath(`${pathname}${search}`)), req.nextUrl.origin), 307);
+      res.headers.set("Cache-Control", "no-store");
+      return withCsp(res, csp);
+    }
     if (!user) {
       if (pathname.startsWith("/api/")) {
         return withCsp(
