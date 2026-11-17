@@ -12,7 +12,8 @@
 // updated_at = now() on every row it changes, and never touches user_claims (a claim survives a sync; a deactivated
 // claimed name stops authorizing, and authorizes again when it comes back). --apply refuses to deactivate more than 5
 // rows and more than 10% of the active ones at once (a partial CSV?) unless --allow-mass-deactivate. The app sees the
-// change within 60 s. This script is the only writer of users on the sign-in side; the app only reads it.
+// change within 60 s. Names an admin added on /admin (table users_added, lib/user-admin.ts) are never deactivated for
+// missing from the CSV; a CSV row with the same name still updates them.
 // The CSV holds names: it must live OUTSIDE the repository ("-" reads stdin). DATABASE_URL comes from env or
 // .env.local. Missing tables are created from db/schema.sql (as lib/db.ts does) before the sync; where users already
 // exists (production) that statement is a no-op.
@@ -111,8 +112,10 @@ async function currentRows(c) {
   const claimed = (await hasTable(c, "user_claims"))
     ? "EXISTS (SELECT 1 FROM user_claims c WHERE c.user_id = u.id AND c.undone_at IS NULL)"
     : "false";
+  // Names an admin added on /admin (table users_added) are kept when the CSV lacks them.
+  const added = (await hasTable(c, "users_added")) ? "EXISTS (SELECT 1 FROM users_added a WHERE a.user_id = u.id)" : "false";
   const { rows } = await c.query(
-    `SELECT u.id::text AS id, u.first_name, u.last_name, u.type, u.subtype, u.active, ${claimed} AS claimed
+    `SELECT u.id::text AS id, u.first_name, u.last_name, u.type, u.subtype, u.active, ${claimed} AS claimed, ${added} AS added
      FROM users u ORDER BY u.id`,
   );
   return rows;

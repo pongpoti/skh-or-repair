@@ -2,7 +2,7 @@ import "./_setup";
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, test } from "node:test";
 import { createPool, ensureSchema } from "@/lib/db";
-import { addMx, boardViewer, canUpload, isMx, listActiveUsers, listMx, removeMx, userIdOf } from "@/lib/roles";
+import { addMx, boardViewer, canUpload, isMx, listActiveUsers, listMx, mxEligible, removeMx, userIdOf } from "@/lib/roles";
 import { setTestEnv, TEST_DB } from "./_setup";
 
 describe("roles: MX and admins (database)", () => {
@@ -13,7 +13,7 @@ describe("roles: MX and admins (database)", () => {
 
   before(async () => {
     await ensureSchema(pool);
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const { rows } = await pool.query<{ id: string; first_name: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype, active) VALUES
          ('สมหญิง', 'รักงาน', 'RN', 'OR', true), ('กมล', 'ใจดี', 'DR', 'ORTHO', true),
@@ -31,7 +31,7 @@ describe("roles: MX and admins (database)", () => {
   });
   afterEach(() => setTestEnv());
   after(async () => {
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.end();
   });
 
@@ -44,11 +44,26 @@ describe("roles: MX and admins (database)", () => {
     assert.equal(await isMx(pool, phone("0812345678", "U-other-line")), true, "the number's claim decides, whatever LINE account");
     assert.equal(await isMx(pool, phone("0899999999", "U-x")), false, "a number with no claim");
 
-    const email = { sub: "U-email", phone: null, userId: ids["ประเสริฐ"] };
-    assert.equal(await isMx(pool, email), false);
-    assert.equal(await addMx(pool, ids["ประเสริฐ"], "U-admin"), "added");
-    assert.equal(await isMx(pool, email), true, "a doctor signed in by email");
-    assert.equal(await isMx(pool, { ...email, sub: "U-someone-else" }), false, "only from the LINE account holding the claim");
+    // Only RN of the OR unit may be MX (Pong, 17 Nov 2026): a doctor is refused
+    assert.equal(await addMx(pool, ids["ประเสริฐ"], "U-admin"), "ineligible");
+    assert.equal((await pool.query("SELECT 1 FROM mx_members WHERE user_id = $1", [ids["ประเสริฐ"]])).rowCount, 0);
+  });
+
+  test("MX is for RN-OR only: the rule, and a member whose row stops being RN-OR keeps the row but not the role", async () => {
+    assert.equal(mxEligible("RN", "OR"), true);
+    assert.equal(mxEligible("RN", " OR "), true);
+    for (const [type, subtype] of [["RN", "ANES"], ["PN", "OR"], ["PCA", "OR"], ["DR", "ORTHO"], ["RN", null], ["RN", "or"]] as const) {
+      assert.equal(mxEligible(type, subtype), false, `${type} ${subtype}`);
+    }
+    const nurse = phone("0812345678", "U-nurse");
+    await addMx(pool, ids["สมหญิง"], "U-admin");
+    assert.equal(await isMx(pool, nurse), true);
+    await pool.query("UPDATE users SET subtype = 'ANES' WHERE id = $1", [ids["สมหญิง"]]);
+    assert.equal(await isMx(pool, nurse), false, "no longer RN-OR");
+    assert.equal((await boardViewer(pool, nurse)).allHn, false);
+    assert.equal((await listMx(pool)).find((m) => m.userId === ids["สมหญิง"])?.eligible, false, "listed as not eligible");
+    await pool.query("UPDATE users SET subtype = 'OR' WHERE id = $1", [ids["สมหญิง"]]);
+    assert.equal(await isMx(pool, nurse), true, "RN-OR again: the role works again");
   });
 
   test("no MX for a missing or inactive user, or an id that is no users.id", async () => {
@@ -74,13 +89,16 @@ describe("roles: MX and admins (database)", () => {
     assert.equal(await isMx(pool, nurse), true);
   });
 
-  test("lists the members by name, with who granted them", async () => {
+  test("lists the members by name, with who granted them and whether the role works for them", async () => {
+    // a member from before the RN-OR rule (added by hand): listed, but the role does nothing for a doctor
+    await pool.query("INSERT INTO mx_members (user_id, added_by) VALUES ($1, 'U-admin')", [ids["ประเสริฐ"]]);
+    assert.equal(await isMx(pool, byEmail(ids["ประเสริฐ"], "U-email")), false);
     const listed = await listMx(pool);
     assert.deepEqual(
-      listed.map((m) => [m.name, m.type, m.subtype, m.active, m.addedBy]),
+      listed.map((m) => [m.name, m.type, m.subtype, m.active, m.eligible, m.addedBy]),
       [
-        ["ประเสริฐ มีสุข", "DR", "GENSX", true, "U-admin"],
-        ["สมหญิง รักงาน", "RN", "OR", true, "U-admin"],
+        ["ประเสริฐ มีสุข", "DR", "GENSX", true, false, "U-admin"],
+        ["สมหญิง รักงาน", "RN", "OR", true, true, "U-admin"],
       ],
     );
     assert.ok(listed.every((m) => m.addedAt instanceof Date));

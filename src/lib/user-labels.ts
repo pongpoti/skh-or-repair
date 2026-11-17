@@ -1,5 +1,5 @@
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
-import { specialtyOf } from "./specialties.ts";
+import { SPECIALTY_CODES, specialtyOf } from "./specialties.ts";
 
 /**
  * User types and their Thai labels: the `type` column of the `users` table (db/schema.sql), the position step of
@@ -48,6 +48,15 @@ export function subtypeLabel(type: string, subtype: string | null | undefined): 
     return Object.hasOwn(EXTRA_SPECIALTIES, code) ? EXTRA_SPECIALTIES[code] : code;
   }
   return Object.hasOwn(UNIT_LABELS, code) ? UNIT_LABELS[code] : code;
+}
+
+/**
+ * The subtypes an admin can give a name added on /admin (Pong, 17 Nov 2026): a doctor's specialty (the app's list, then
+ * วิสัญญี), everyone else's unit (ห้องผ่าตัด, วิสัญญี). The same codes Pong's CSV uses.
+ */
+export function subtypeChoices(type: UserType): Array<{ code: string; name: string }> {
+  const codes = type === "DR" ? [...SPECIALTY_CODES, ...Object.keys(EXTRA_SPECIALTIES)] : Object.keys(UNIT_LABELS);
+  return codes.map((code) => ({ code, name: subtypeLabel(type, code) ?? code }));
 }
 
 /** "แพทย์ · ออร์โธปิดิกส์", or just the type when there is no subtype. */

@@ -16,7 +16,7 @@ describe("database schema", () => {
   });
 
   test("applies to an empty database and is idempotent (also under concurrency)", async () => {
-    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
     await Promise.all([ensureSchema(pool), ensureSchema(pool), ensureSchema(pool)]);
     await ensureSchema(pool);
     const { rows } = await pool.query<{ table_name: string }>(
@@ -33,6 +33,7 @@ describe("database schema", () => {
       "repair_periods",
       "user_claims",
       "users",
+      "users_added",
       "workbook_cases",
       "workbook_uploads",
     ]) {
@@ -109,7 +110,7 @@ describe("database schema", () => {
   });
 
   test("on a database where users already exists with data (production), applying the schema twice leaves users untouched", async () => {
-    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+    await pool.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
     await pool.query(PRODUCTION_USERS_DDL);
     await pool.query(
       `INSERT INTO users (first_name, last_name, type, subtype) VALUES
@@ -132,7 +133,7 @@ describe("database schema", () => {
       "SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'user_claims'::regclass AND contype = 'f'",
     );
     assert.deepEqual(fk.rows.map((r) => r.def), ["FOREIGN KEY (user_id) REFERENCES users(id)"]);
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("users: one row per (first name, last name); valid types; names and subtype not blank; ids from the identity only", async () => {
@@ -144,7 +145,7 @@ describe("database schema", () => {
         subtype,
       ]);
     const code = (c: string) => (e: { code?: string }) => e.code === c;
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const a = (await insert("สมชาย", "ใจดี", "DR", "ORTHO")).rows[0].id;
     assert.equal(a, 1);
     await assert.rejects(insert("สมชาย", "ใจดี", "RN", "OR"), (e: { code?: string; constraint?: string }) => e.code === "23505" && e.constraint === "users_name_key");
@@ -157,11 +158,11 @@ describe("database schema", () => {
     const { rows } = await pool.query("SELECT active, created_at, updated_at FROM users WHERE id = $1", [a]);
     assert.equal(rows[0].active, true);
     assert.ok(rows[0].created_at instanceof Date && rows[0].updated_at instanceof Date);
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("user_claims: a real user, a valid number, one current claim per user, number and LINE account, an ended claim names its reason", async () => {
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.query("INSERT INTO users (first_name, last_name, type, subtype) VALUES ('ก', 'ข', 'DR', 'EYE'), ('ค', 'ง', 'RN', 'OR')");
     const claim = (user: number, phone: string, sub: string) =>
       pool.query("INSERT INTO user_claims (user_id, phone, line_sub) VALUES ($1, $2, $3) RETURNING *", [user, phone, sub]);
@@ -187,7 +188,7 @@ describe("database schema", () => {
       await claim(1, "0812345678", "U1"); // free again once ended
     }
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM user_claims")).rows[0].n, 4);
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("an old access_requests table (positions doctor and nurse) moves to the user types", async () => {
@@ -240,7 +241,7 @@ describe("database schema", () => {
   });
 
   test("an old cases table gains the HN column and an optional operation, keeping its rows", async () => {
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.query("DROP TABLE cases");
     // cases as it was before bookings carried an HN
     await pool.query(
@@ -276,7 +277,7 @@ describe("database schema", () => {
     await assert.rejects(pool.query("INSERT INTO mx_members (user_id) VALUES (2)"), (e: { code?: string }) => e.code === "23503");
     await pool.query("DELETE FROM users WHERE id = 1");
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM mx_members")).rows[0].n, 0);
-    await pool.query("TRUNCATE cases, mx_members, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
   });
 
   test("otp_codes has no column that could hold a plaintext code (only an HMAC or the sealed provider token)", async () => {

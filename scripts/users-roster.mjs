@@ -5,7 +5,7 @@
 /** @typedef {{ line: number, firstName: string, lastName: string, type: UserType, subtype: string }} UserEntry */
 /**
  * @typedef {{ id: string, first_name: string, last_name: string, type: string, subtype: string, active: boolean,
- *   claimed: boolean }} UserRow
+ *   claimed: boolean, added?: boolean }} UserRow
  */
 /**
  * @typedef {{
@@ -201,7 +201,8 @@ export function diffRoster(current, entries) {
     else if (row.type !== e.type || row.subtype !== e.subtype) changed.push({ ...e, before: row });
     else unchanged++;
   }
-  const deactivated = current.filter((r) => r.active && !inCsv.has(rowKey(r)));
+  // A name an admin added on /admin (`added`, table users_added) stays when the CSV lacks it.
+  const deactivated = current.filter((r) => r.active && !r.added && !inCsv.has(rowKey(r)));
   /** @param {any} a @param {any} b */
   const order = (a, b) => (sortKey(a) < sortKey(b) ? -1 : sortKey(a) > sortKey(b) ? 1 : 0);
   return {

@@ -16,7 +16,7 @@ import { now } from "@/lib/clock";
 import { DEMO_MIN_CASES, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { shortThaiDate } from "@/lib/repair";
-import { grantMx, revokeMx, saveRepair } from "./actions";
+import { addStaff, grantMx, revokeMx, saveRepair } from "./actions";
 import { loadPeople, loadRepairView } from "./data";
 
 export const dynamic = "force-dynamic";
@@ -57,7 +57,7 @@ export default async function AdminPage() {
           <RepairPeriodsForm initial={repair} onSave={saveRepair} />
           <MxMembers initial={people.mx} onAdd={grantMx} onRemove={revokeMx} />
           {/* Everyone on the staff list, by type (Pong, 16 Nov 2026), in place of the old surgeon list. */}
-          <StaffList initial={people.staff} />
+          <StaffList initial={people.staff} onAdd={addStaff} />
           {/* The demo schedule (Pong, 15 Nov 2026: "create a dummy OR schedule cases on all rooms, each room has at least
               10 cases. Do it for first half and second half. Add section on admin setting to select which part to
               see."): the board picks the day of the half (/?demo=1&half=N, lib/demo-schedule.ts demoDay). */}
