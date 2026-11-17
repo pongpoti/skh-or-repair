@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
-import { clientAllowed, gateMode, isDesktop, isLiff, isLineApp, isPhone, liffUrl } from "@/lib/gate";
+import { clientAllowed, gateMode, isDesktop, isLiff, isLineApp, isPhone, liffUrl, needsDeskRole } from "@/lib/gate";
 
 // Real-world shaped User-Agents (versions invented).
 const UA = {
@@ -83,6 +83,15 @@ describe("clientAllowed", () => {
       assert.ok(clientAllowed(ua, "liff"), ua);
     for (const ua of [UA.iosLine, UA.androidLine, UA.iosSafari, UA.androidChrome, UA.liffWord, UA.curl, "", null, undefined])
       assert.ok(!clientAllowed(ua, "liff"), String(ua));
+  });
+});
+
+describe("needsDeskRole: the computer board is for MX and admins only", () => {
+  test("every client the gate lets in but a phone in LIFF, and only with the gate on", () => {
+    for (const ua of [UA.desktopChrome, UA.windowsEdge, UA.macSafari, UA.linuxFirefox, UA.macLine, UA.ipadLine, UA.androidTabletLine, UA.androidTabletChrome])
+      assert.ok(needsDeskRole(ua, "liff"), ua);
+    for (const ua of [UA.iosLiff, UA.androidLiff]) assert.ok(!needsDeskRole(ua, "liff"), ua);
+    for (const ua of [UA.desktopChrome, UA.iosLiff, ""]) assert.ok(!needsDeskRole(ua, "off"), `${ua} with the gate off`);
   });
 });
 

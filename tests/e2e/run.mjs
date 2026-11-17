@@ -3,7 +3,7 @@
 // (Chromium). The main app runs in provider mode (SMS_PROVIDER=deesmsx against tests/mock-deesmsx.mjs through
 // DEESMSX_API_URL); a second app on the same build runs in local file mode (SMS_PROVIDER=file) near the end.
 // Configurable so several copies can run in parallel:
-//   E2E_APP_PORT (3100)  E2E_FILE_APP_PORT (3101)  E2E_LINE_PORT (4010)  E2E_SMS_PORT (4011)
+//   E2E_APP_PORT (3100)  E2E_FILE_APP_PORT (3101)  E2E_GATE_APP_PORT (3103)  E2E_LINE_PORT (4010)  E2E_SMS_PORT (4011)
 //   E2E_DATABASE_URL (postgres://postgres:postgres@localhost:5432/orskh_e2e)
 //   E2E_OUTBOX_DIR (tmp)  E2E_SCREENS_DIR (tmp)  E2E_SKIP_BUILD=1 (reuse .next)
 //   ALLOW_REMOTE_TEST_DB=1 (allow a non-local E2E_DATABASE_URL; see tests/db-guard.mjs)
@@ -39,6 +39,7 @@ const pg = require("pg");
 const APP_PORT = Number(process.env.E2E_APP_PORT ?? 3100);
 const FILE_APP_PORT = Number(process.env.E2E_FILE_APP_PORT ?? 3101);
 const DOWN_APP_PORT = Number(process.env.E2E_DOWN_APP_PORT ?? 3102);
+const GATE_APP_PORT = Number(process.env.E2E_GATE_APP_PORT ?? 3103);
 const LINE_PORT = Number(process.env.E2E_LINE_PORT ?? 4010);
 const SMS_PORT = Number(process.env.E2E_SMS_PORT ?? 4011);
 const DB_URL = process.env.E2E_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/orskh_e2e";
@@ -50,6 +51,7 @@ const LOG_DIR = join(tmpdir(), `orskh-e2e-logs-${APP_PORT}`);
 const APP = `http://localhost:${APP_PORT}`;
 const FILE_APP = `http://localhost:${FILE_APP_PORT}`;
 const DOWN_APP = `http://localhost:${DOWN_APP_PORT}`;
+const GATE_APP = `http://localhost:${GATE_APP_PORT}`;
 const LINE = `http://127.0.0.1:${LINE_PORT}`;
 const SMS = `http://127.0.0.1:${SMS_PORT}`;
 
@@ -169,6 +171,8 @@ const PNG_1PX = Buffer.from(
 
 // User-Agents for the checks that depend on the device (the e2e app runs with the device gate off)
 const UA_DESKTOP = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const UA_IPHONE_SAFARI =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 const UA_IPHONE_LIFF =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari Line/14.10.0 LIFF";
 
@@ -595,6 +599,7 @@ async function main() {
     await assertPortFree(APP_PORT, undefined, "E2E_APP_PORT");
     await assertPortFree(FILE_APP_PORT, undefined, "E2E_FILE_APP_PORT");
     await assertPortFree(DOWN_APP_PORT, undefined, "E2E_DOWN_APP_PORT");
+    await assertPortFree(GATE_APP_PORT, undefined, "E2E_GATE_APP_PORT");
     await assertPortFree(LINE_PORT, "127.0.0.1", "E2E_LINE_PORT");
     await assertPortFree(SMS_PORT, "127.0.0.1", "E2E_SMS_PORT");
   };
@@ -672,6 +677,7 @@ async function main() {
   const app = startProcess("app", ["node_modules/next/dist/bin/next", "start", "-p", String(APP_PORT)], appEnv);
   let fileApp = null; // the local file mode app, started by its test
   let downApp = null; // the app with its database down, started by its test
+  let gateApp = null; // the app with the device gate on (as on Vercel), started by its test
   try {
     await waitFor(`${LINE}/__control/health`, line);
     await waitFor(`${SMS}/__control/health`, sms);
@@ -3891,9 +3897,60 @@ async function main() {
       await ctx.close();
     });
 
+    await t("computers (Pong, 17 Nov 2026): with the device gate on, only MX and admins open the board on a computer, signed out otherwise; phones open it in LIFF", async () => {
+      // the same build with the gate on, as on Vercel (CLIENT_GATE=liff; the mocks stay allowed since VERCEL is unset)
+      const gateEnv = { ...appEnv, APP_URL: GATE_APP, CLIENT_GATE: "liff", LIFF_ID: "2001234567-AbCdEfGh" };
+      gateApp = startProcess("app-gate", ["node_modules/next/dist/bin/next", "start", "-p", String(GATE_APP_PORT)], gateEnv);
+      await waitFor(`${GATE_APP}/login`, gateApp);
+      const get = async (path, ua, person) => {
+        const r = await fetch(`${GATE_APP}${path}`, {
+          headers: { "user-agent": ua, ...(person ? { cookie: `session=${await sessionOf(person)}` } : {}) },
+          redirect: "manual",
+        });
+        return { status: r.status, location: r.headers.get("location"), cookie: r.headers.get("set-cookie") ?? "", body: await r.text() };
+      };
+      // the floor plan's own label (the site's description says แปลนห้องผ่าตัด on every page)
+      const PLAN = 'aria-label="แปลนห้องผ่าตัด"';
+      const isBoard = (r) => r.status === 200 && r.body.includes(PLAN) && !r.body.includes('data-testid="desktop-only"');
+      assert(JSON.stringify((await db.query("SELECT u.first_name || ' ' || u.last_name AS name FROM mx_members m JOIN users u ON u.id = m.user_id")).rows.map((r) => r.name)) === JSON.stringify([RP.mx.name]), "MX is the one member left by the admin test");
+
+      // a nurse (not MX) on a computer: the desktop-only page, signed out on this browser, 403 from the API
+      const nurseDesk = await get("/?room=or-3", UA_DESKTOP, RP.nurse);
+      assert(nurseDesk.status === 200 && nurseDesk.body.includes('data-testid="desktop-only"'), `nurse on a computer: ${nurseDesk.status}`);
+      assert(nurseDesk.body.includes("เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ") && !nurseDesk.body.includes(PLAN), "the page says who may, and no board");
+      assert(/(^|,\s*)session=;/.test(nurseDesk.cookie) && /Max-Age=0/i.test(nurseDesk.cookie), `signed out: ${nurseDesk.cookie}`);
+      const nurseApi = await get("/api/board", UA_DESKTOP, RP.nurse);
+      assert(nurseApi.status === 403 && JSON.parse(nurseApi.body).error === "desktop-mx-only", `nurse's API call from a computer: ${nurseApi.status}`);
+      // the same nurse in the LIFF app on a phone: the board, still signed in
+      const nursePhone = await get("/", UA_IPHONE_LIFF, RP.nurse);
+      assert(isBoard(nursePhone) && !/session=;/.test(nursePhone.cookie), `nurse in LIFF: ${nursePhone.status}`);
+      // MX and the admin on a computer: the board (and the admin page for the admin)
+      assert(isBoard(await get("/", UA_DESKTOP, RP.mx)), "MX on a computer");
+      assert((await get("/api/board", UA_DESKTOP, RP.mx)).status !== 403, "MX's API calls from a computer");
+      assert(isBoard(await get("/", UA_DESKTOP, RP.admin)), "the admin on a computer");
+      assert((await get("/admin", UA_DESKTOP, RP.admin)).status === 200, "/admin on a computer");
+      // a phone browser outside LINE: the open-in-LINE page, which says who a computer is for
+      const safari = await get("/", UA_IPHONE_SAFARI, RP.mx);
+      assert(safari.status === 200 && safari.body.includes('data-testid="open-in-line"') && safari.body.includes("เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ"), `phone Safari: ${safari.status}`);
+      // nobody signed in on a computer: LINE Login's QR code, as before
+      const login = await get("/login", UA_DESKTOP);
+      assert(login.status === 307 && login.location === "/api/auth/line/start", `computer /login: ${login.status} ${login.location}`);
+
+      // the page as a computer shows it
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, locale: "th-TH", userAgent: UA_DESKTOP });
+      await ctx.addCookies([{ name: "session", value: await sessionOf(RP.nurse), url: GATE_APP, httpOnly: true, sameSite: "Lax" }]);
+      const page = await ctx.newPage();
+      await page.goto(`${GATE_APP}/`);
+      await page.waitForSelector('[data-testid="desktop-only"]');
+      await noLineLogin(page, "/desktop-only");
+      assert(!(await ctx.cookies(GATE_APP)).some((c) => c.name === "session" && c.value), "no session left in the browser");
+      await shoot(page, "desktop-only", { full: false });
+      await ctx.close();
+    });
+
     await t("no OTP code, deeSMSX token, key, HN or workbook row appears in server logs", async () => {
       assert(issuedCodes.length >= 20, `codes and tokens collected: ${issuedCodes.length}`);
-      for (const proc of [app, fileApp, downApp].filter(Boolean)) {
+      for (const proc of [app, fileApp, downApp, gateApp].filter(Boolean)) {
         const log = proc.log();
         for (const code of issuedCodes) assert(!log.includes(code), `code or token found in the ${proc.name} log`);
         assert(!log.includes(SESSION_SECRET) && !log.includes(OTP_PEPPER) && !log.includes(TG_TOKEN), `secret in the ${proc.name} log`);

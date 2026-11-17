@@ -72,4 +72,17 @@ export function clientAllowed(ua: string | null | undefined, mode: GateMode): bo
   return isPhone(s) ? isLiff(s) : isDesktop(s);
 }
 
+/**
+ * Whether the client is on the computer board, which only MX (ผู้จัดการตาราง) and admins may open (Pong, 17 Nov 2026:
+ * "only MX and admin is allowed to open desktop version"): any client the gate lets in other than a phone, which only
+ * gets in through the LIFF app. The proxy checks the role once the session is known. Never with the gate off (local
+ * development and tests, the CLIENT_GATE=off break-glass).
+ */
+export function needsDeskRole(ua: string | null | undefined, mode: GateMode): boolean {
+  return mode === "liff" && !isPhone(ua ?? "");
+}
+
 export const GATE_PATH = "/open-in-line";
+
+/** Where the proxy sends a signed-in computer user who is neither MX nor an admin. */
+export const DESK_ONLY_PATH = "/desktop-only";
