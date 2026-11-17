@@ -92,7 +92,7 @@ export async function proxy(req: NextRequest) {
   const method = req.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && pathname !== TELEGRAM_WEBHOOK_PATH) {
     if (!app || !isSameOrigin(req.headers, app.origin)) {
-      return NextResponse.json({ error: "คำขอไม่ถูกต้อง" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ error: app ? "ทำรายการไม่สำเร็จ โหลดหน้าใหม่แล้วลองอีกครั้ง" : "ระบบยังไม่พร้อม ติดต่อผู้ดูแล" }, { status: 403, headers: { "Cache-Control": "no-store" } });
     }
   }
 

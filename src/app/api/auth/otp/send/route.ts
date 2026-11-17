@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
       await sleepUntil(started, MIN_RESPONSE_MS);
       // The daily limits depend only on this LINE account's own requests, so naming them reveals nothing.
       const daily = result.reason === "pair_day" || result.reason === "sub_phones";
-      const error = daily ? `${MSG.tooManyToday} ลองใหม่ได้ในอีก ${waitText(result.retryAfterS)}` : MSG.tooMany;
+      const error = daily ? `${MSG.tooManyToday} ลองใหม่ในอีก ${waitText(result.retryAfterS)}` : MSG.tooMany;
       return json({ error, retryAfter: result.retryAfterS, ...(codePending ? { codePending: true } : {}) }, 429, {
         headers: { "Retry-After": String(result.retryAfterS) },
       });

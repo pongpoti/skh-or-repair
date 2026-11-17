@@ -448,7 +448,7 @@ describe("users and claims (database)", () => {
       const byLine = await post("0900000220", "U-off", Number(ids["PCA:กมล"]));
       assert.equal(byLine.status, 403);
       assert.deepEqual(await byLine.json(), { error: MSG.claimBlockedLine, reason: "blocked", by: "line" });
-      assert.ok(MSG.claimBlockedLine.includes("บัญชี LINE นี้") && MSG.claimBlocked.includes("เบอร์นี้"));
+      assert.ok(MSG.claimBlockedLine.includes("LINE นี้") && MSG.claimBlocked.includes("เบอร์นี้"));
       assert.equal(await current(ids["PCA:กมล"]), null, "nothing claimed");
       // ids outside users.id's range (an integer column), or not whole numbers, are refused before the database
       for (const bad of [2147483648, "2147483648", "99999999999", 0, -1, 1.5, "1; DROP TABLE users", "", null, "01"]) {

@@ -28,7 +28,7 @@ export default async function OpenInLinePage() {
   }
 
   return (
-    <AuthShell title="เปิดผ่าน LINE" description="บนโทรศัพท์มือถือ ตารางห้องผ่าตัดเปิดได้ในแอป LINE">
+    <AuthShell title="เปิดผ่าน LINE" description="บนมือถือ เปิดได้ใน LINE เท่านั้น">
       <div data-testid="open-in-line" data-phone={phone ? "1" : "0"}>
         {link ? (
           <>
@@ -36,13 +36,13 @@ export default async function OpenInLinePage() {
               เปิดใน LINE
             </a>
             <p className="mt-4 text-center text-sm leading-6 text-muted">
-              ถ้าปุ่มไม่เปิดแอป ให้เปิดลิงก์ของระบบจากแชทหรือเมนูใน LINE
+              ปุ่มไม่ทำงาน? เปิดจากแชทหรือเมนูใน LINE
             </p>
           </>
         ) : (
-          <Notice tone="info">เปิดลิงก์ของระบบจากแชทหรือเมนูในแอป LINE บนมือถือ</Notice>
+          <Notice tone="info">เปิดจากแชทหรือเมนูใน LINE บนมือถือ</Notice>
         )}
-        <p className="mt-4 text-center text-sm leading-6 text-muted">บนคอมพิวเตอร์ เปิดได้เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ</p>
+        <p className="mt-4 text-center text-sm leading-6 text-muted">คอมพิวเตอร์ใช้ได้เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ</p>
       </div>
     </AuthShell>
   );

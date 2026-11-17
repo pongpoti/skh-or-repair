@@ -55,7 +55,7 @@ export type XlsxResult =
   | { ok: false; error: XlsxError; message: string };
 
 /** Also for the upload form, which refuses a file named .xls before reading it. */
-export const XLS_MESSAGE = "ไฟล์นี้เป็น .xls หรือตั้งรหัสผ่านไว้ กรุณาเปิดใน Excel แล้วบันทึกเป็น .xlsx (ไม่ตั้งรหัสผ่าน) ก่อน";
+export const XLS_MESSAGE = "ไฟล์เป็น .xls หรือมีรหัสผ่าน เปิดใน Excel แล้วบันทึกเป็น .xlsx แบบไม่มีรหัสผ่าน";
 
 function messageFor(error: XlsxError, limits: XlsxLimits): string {
   switch (error) {
@@ -63,9 +63,9 @@ function messageFor(error: XlsxError, limits: XlsxLimits): string {
     case "encrypted":
       return XLS_MESSAGE;
     case "not-xlsx":
-      return "ไฟล์นี้ไม่ใช่ .xlsx กรุณาเปิดใน Excel แล้วบันทึกเป็น .xlsx ก่อน";
+      return "ไฟล์นี้ไม่ใช่ .xlsx เปิดใน Excel แล้วบันทึกเป็น .xlsx";
     case "corrupt":
-      return "อ่านไฟล์ไม่ได้ ไฟล์อาจเสียหรือส่งมาไม่ครบ กรุณาบันทึกเป็น .xlsx ใหม่แล้วลองอีกครั้ง";
+      return "เปิดไฟล์ไม่ได้ ไฟล์อาจเสีย บันทึกเป็น .xlsx ใหม่แล้วลองอีกครั้ง";
     case "too-large":
       return "ไฟล์ใหญ่เกินไป";
     case "too-many-rows":
@@ -73,7 +73,7 @@ function messageFor(error: XlsxError, limits: XlsxLimits): string {
     case "too-many-columns":
       return `ไฟล์มีเกิน ${limits.maxColumns} คอลัมน์`;
     case "no-sheet":
-      return "ไม่พบแผ่นงานในไฟล์";
+      return "ไม่พบข้อมูลในไฟล์";
   }
 }
 

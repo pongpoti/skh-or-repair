@@ -20,7 +20,7 @@ import { fileProblem } from "./file-check";
 /** The page shows the saved upload itself (it is revalidated), so an answer is one line. */
 export type UploadResult = { ok: true; message: string } | { ok: false; error: string };
 
-const NOT_ALLOWED: UploadResult = { ok: false, error: "เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบเท่านั้น ลองออกจากระบบแล้วเข้าใหม่" };
+const NOT_ALLOWED: UploadResult = { ok: false, error: "อัปโหลดได้เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ" };
 const FAILED: UploadResult = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
 
 const RULES = { maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE };
@@ -58,21 +58,21 @@ export async function uploadWorkbook(form: FormData): Promise<UploadResult> {
     if (!admin && !(await isMx(pool, user))) return NOT_ALLOWED;
 
     const at = now();
-    if (!admin && !inUploadWindow(at)) return { ok: false, error: "อัปโหลดได้เฉพาะเวลา 15:00–16:00 น." };
+    if (!admin && !inUploadWindow(at)) return { ok: false, error: "อัปโหลดได้เฉพาะ 15:00–16:00 น." };
 
     const file = form.get("file");
     const problem = fileProblem(file instanceof File ? file : null, RULES);
-    if (problem || !(file instanceof File)) return { ok: false, error: problem ?? "เลือกไฟล์ตารางผ่าตัดก่อน" };
+    if (problem || !(file instanceof File)) return { ok: false, error: problem ?? "เลือกไฟล์ก่อน" };
 
     const slot = await loadUploadSlot(at);
     if (!slot.target.ok) {
-      return { ok: false, error: slot.target.reason === "none" ? "ไม่พบวันทำการใน 14 วันข้างหน้า" : HOLIDAYS_UNAVAILABLE };
+      return { ok: false, error: slot.target.reason === "none" ? "ไม่มีวันทำการใน 14 วันข้างหน้า" : HOLIDAYS_UNAVAILABLE };
     }
     const target = slot.target.date;
     // The page names the day the file is for; should the day have moved on since (midnight), MX checks the file again.
     const shown = form.get("target");
     if (typeof shown === "string" && shown && shown !== target) {
-      return { ok: false, error: `ตอนนี้เป็นรอบตารางของ${thaiDate(target, "short")} โหลดหน้านี้ใหม่แล้วอัปโหลดอีกครั้ง` };
+      return { ok: false, error: `ตอนนี้รับตารางของ${thaiDate(target, "short")} โหลดหน้าใหม่แล้วลองอีกครั้ง` };
     }
 
     const [periods, bookings] = await Promise.all([getRepairPeriods(pool), listCasesOn(pool, target)]);

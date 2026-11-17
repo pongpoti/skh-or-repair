@@ -188,10 +188,7 @@ export function DoctorPanel({ names: initialNames, back }: { names: DoctorChoice
   if (restart) {
     return (
       <div role="alert">
-        <h2 className={H2}>หมดเวลา</h2>
-        <div className="mt-3">
-          <Notice tone="warning">{restart}</Notice>
-        </div>
+        <Notice tone="warning">{restart}</Notice>
         <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
           เริ่มใหม่
         </a>
@@ -208,7 +205,7 @@ export function DoctorPanel({ names: initialNames, back }: { names: DoctorChoice
   if (!names) {
     return (
       <div role="alert">
-        <Notice tone="warning">ระบบยังไม่พร้อม กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแล</Notice>
+        <Notice tone="warning">ระบบยังไม่พร้อม ลองใหม่ หรือติดต่อผู้ดูแล</Notice>
         <a className="btn btn-secondary mt-4 w-full" href="/login/doctor">
           ลองอีกครั้ง
         </a>

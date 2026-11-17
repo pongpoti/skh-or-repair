@@ -23,7 +23,7 @@ const ENDS = [
   ["to", "วันสุดท้าย"],
 ] as const;
 
-const UNSAVED = "บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
+const UNSAVED = "บันทึกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
 
 /**
  * The operating rooms of a half as the admin knows them, "ผ่าตัดที่ห้อง 9–13", taken from the layout itself so the hint
@@ -140,7 +140,7 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
       <form onSubmit={save} noValidate>
         {fallback ? (
           <div className="px-4 pt-4 sm:px-5 sm:pt-5">
-            <Notice tone="warning">อ่านวันที่จากระบบไม่ได้ ตอนนี้แสดงวันที่ตามแผนเดิม</Notice>
+            <Notice tone="warning">โหลดวันที่ไม่ได้ แสดงตามแผนเดิม ลองโหลดหน้าใหม่</Notice>
           </div>
         ) : null}
 

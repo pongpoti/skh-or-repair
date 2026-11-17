@@ -11,9 +11,9 @@ export const metadata: Metadata = { title: "เปิดบนคอมพิว
  */
 export default function DesktopOnlyPage() {
   return (
-    <AuthShell title="เปิดบนคอมพิวเตอร์ไม่ได้" description="บนคอมพิวเตอร์ ตารางห้องผ่าตัดเปิดได้เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ">
+    <AuthShell title="เปิดบนคอมพิวเตอร์ไม่ได้" description="คอมพิวเตอร์ใช้ได้เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ">
       <div data-testid="desktop-only">
-        <Notice tone="info">เปิดจากเมนูในแอป LINE บนโทรศัพท์มือถือ</Notice>
+        <Notice tone="info">เปิดจากเมนูใน LINE บนมือถือ</Notice>
         <Link className="btn btn-secondary mt-4 min-h-12 w-full" href="/" data-testid="desktop-only-reopen">
           เปิดตารางห้องผ่าตัดอีกครั้ง
         </Link>

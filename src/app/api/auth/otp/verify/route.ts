@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
     }
     await logEvent(pool, { event: "otp_failed", sub: pending.sub, phone, ip, userAgent: ua });
     return json(
-      { ok: false, error: `${MSG.wrongCode} เหลือโอกาสอีก ${result.remaining}\u00A0ครั้ง`, reason: "invalid", remaining: result.remaining },
+      { ok: false, error: `${MSG.wrongCode} เหลืออีก ${result.remaining}\u00A0ครั้ง`, reason: "invalid", remaining: result.remaining },
       400,
     );
   } catch (e) {

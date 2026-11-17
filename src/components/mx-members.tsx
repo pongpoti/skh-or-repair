@@ -27,7 +27,7 @@ function Icon({ name, size = 18 }: { name: keyof typeof icon; size?: number }) {
 const DIALOG =
   "m-auto w-[min(28rem,calc(100%-2rem))] rounded-[18px] border border-line bg-surface p-6 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px]";
 
-const UNSAVED = "บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
+const UNSAVED = "บันทึกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
 
 /** A name matches when the query is found in it, spaces and case ignored (lib/user-labels.ts searchKey). */
 function matches(query: string, name: string): boolean {
@@ -74,10 +74,10 @@ export function MxMembers({
 
   if (!initial) {
     return (
-      <AdminSection id="mx" title="ผู้จัดการตาราง (MX)" summary="อ่านรายชื่อจากระบบไม่ได้">
+      <AdminSection id="mx" title="ผู้จัดการตาราง (MX)" summary="โหลดรายชื่อไม่ได้">
         <div className="p-4 sm:p-5">
           <Notice tone="warning" role="alert">
-            อ่านรายชื่อจากระบบไม่ได้ ลองโหลดหน้านี้ใหม่
+            โหลดรายชื่อไม่ได้ ลองโหลดหน้าใหม่
           </Notice>
         </div>
       </AdminSection>
@@ -188,7 +188,7 @@ export function MxMembers({
                 </p>
                 {member.active ? null : (
                   <span className="mt-1 flex">
-                    <span className="badge badge-muted">ปิดใช้งานอยู่ สิทธิ์ยังไม่มีผล</span>
+                    <span className="badge badge-muted">ปิดใช้งานอยู่ อัปโหลดไม่ได้</span>
                   </span>
                 )}
               </div>
@@ -228,7 +228,7 @@ export function MxMembers({
           />
         </label>
         <p className="mt-2 text-xs text-muted" role="status">
-          {shown.length ? `พบ ${shown.length} คน` : users?.length ? "ไม่พบชื่อนี้ ลองพิมพ์เฉพาะชื่อหรือเฉพาะนามสกุล" : "ยังไม่มีผู้ใช้ที่ใช้งานอยู่"}
+          {shown.length ? `พบ ${shown.length} คน` : users?.length ? "ไม่พบชื่อนี้ ลองพิมพ์แค่ชื่อ หรือแค่นามสกุล" : "ยังไม่มีผู้ใช้ที่ใช้งานอยู่"}
         </p>
         {shown.length ? (
           <ul className="choice-list mt-1 grid max-h-[min(20rem,40dvh)] gap-1.5 overflow-y-auto overscroll-contain" data-testid="mx-users">

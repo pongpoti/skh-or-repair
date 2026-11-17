@@ -28,7 +28,7 @@ export interface ApiResult {
   by?: string;
 }
 
-export const NETWORK_ERROR = "เชื่อมต่อไม่สำเร็จ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่";
+export const NETWORK_ERROR = "เชื่อมต่อไม่ได้ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
 
 export async function postJson(url: string, body: unknown): Promise<{ status: number; data: ApiResult }> {
   const res = await fetch(url, {

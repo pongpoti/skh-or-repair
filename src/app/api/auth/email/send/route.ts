@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
       // Whether this LINE account has a usable code for this doctor (it can then be typed in).
       const codePending = await hasLiveEmailCode(pool, userId, login.sub);
       const daily = result.reason === "pair_day" || result.reason === "sub_users";
-      const error = daily ? `${MSG.tooManyToday} ลองใหม่ได้ในอีก ${waitText(result.retryAfterS)}` : MSG.tooMany;
+      const error = daily ? `${MSG.tooManyToday} ลองใหม่ในอีก ${waitText(result.retryAfterS)}` : MSG.tooMany;
       return json({ error, retryAfter: result.retryAfterS, ...(codePending ? { codePending: true } : {}) }, 429, {
         headers: { "Retry-After": String(result.retryAfterS) },
       });

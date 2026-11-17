@@ -16,7 +16,7 @@ import {
 } from "./board-day.ts";
 import { BOOK_AHEAD_DAYS } from "./added-cases.ts";
 import { DEFAULT_REPAIR_PERIODS as REPAIR } from "./repair.ts";
-import type { Holiday } from "./holidays.ts";
+import { forgetHolidayFeeds, type Holiday } from "./holidays.ts";
 
 /** A moment given as Bangkok wall time. */
 const at = (local: string) => new Date(`${local}+07:00`);
@@ -131,6 +131,7 @@ test("loading the board's day: BOT holidays when they come, weekdays and EXTRA_H
   process.env.BOT_API_TOKEN = "token";
   delete process.env.BOT_HOLIDAYS_URL;
   process.env.EXTRA_HOLIDAYS = "2026-12-08=ปิดปรับปรุง";
+  forgetHolidayFeeds();
 
   const day = await loadBoardDay(at("2026-12-04T16:00:00"));
   assert.equal(day.holidaysOk, true);
@@ -139,7 +140,12 @@ test("loading the board's day: BOT holidays when they come, weekdays and EXTRA_H
   assert.equal(yearEnd.boardDate, "2027-01-04");
   assert.ok(years.includes("2027"), "the next year's list is fetched too");
 
+  // A kept list stands for six hours (lib/holidays.ts keptHolidayFeed): forget it to see the BOT go down.
+  const asked = years.length;
+  await loadBoardDay(at("2026-12-04T16:00:00"));
+  assert.equal(years.length, asked, "a year's list is kept, not asked for again");
   up = false;
+  forgetHolidayFeeds();
   const fallback = await loadBoardDay(at("2026-12-04T16:00:00"));
   assert.equal(fallback.holidaysOk, false);
   assert.equal(fallback.boardDate, "2026-12-07", "weekdays only, plus EXTRA_HOLIDAYS");
@@ -147,6 +153,7 @@ test("loading the board's day: BOT holidays when they come, weekdays and EXTRA_H
   const slot = await loadUploadSlot(at("2026-12-04T15:30:00"));
   assert.deepEqual(slot, { cycleDay: "2026-12-04", target: { ok: false, reason: "failed" }, windowOpen: true });
   up = true;
+  forgetHolidayFeeds();
   assert.deepEqual(await loadUploadSlot(at("2026-12-04T17:00:00")), {
     cycleDay: "2026-12-04",
     target: { ok: true, date: "2026-12-09" },

@@ -142,9 +142,9 @@ export function checkRepairPeriods(input: unknown): CheckedPeriods {
   const dates = [raw.half1?.from, raw.half1?.to, raw.half2?.from, raw.half2?.to];
   if (dates.some((value) => typeof value !== "string" || !value.trim())) return { ok: false, error: "ใส่วันที่ให้ครบทั้ง 4 ช่อง" };
   const [from1, to1, from2, to2] = dates.map((value) => (value as string).trim());
-  if (![from1, to1, from2, to2].every(isCalendarDate)) return { ok: false, error: "วันที่ไม่ถูกต้อง เลือกจากปฏิทินอีกครั้ง" };
-  if (from1 > to1) return { ok: false, error: "ช่วงที่ 1: วันเริ่มต้องไม่หลังวันสิ้นสุด" };
-  if (from2 > to2) return { ok: false, error: "ช่วงที่ 2: วันเริ่มต้องไม่หลังวันสิ้นสุด" };
-  if (from2 <= to1) return { ok: false, error: "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1" };
+  if (![from1, to1, from2, to2].every(isCalendarDate)) return { ok: false, error: "วันที่ไม่ถูกต้อง เลือกจากปฏิทิน" };
+  if (from1 > to1) return { ok: false, error: "ช่วงที่ 1: วันเริ่มอยู่หลังวันสุดท้าย" };
+  if (from2 > to2) return { ok: false, error: "ช่วงที่ 2: วันเริ่มอยู่หลังวันสุดท้าย" };
+  if (from2 <= to1) return { ok: false, error: "ช่วงที่ 2 ต้องเริ่มหลังช่วงที่ 1 จบ" };
   return { ok: true, periods: { half1: { from: from1, to: to1 }, half2: { from: from2, to: to2 } } };
 }

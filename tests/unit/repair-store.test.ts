@@ -37,7 +37,7 @@ describe("repair periods (database)", () => {
   test("a refused input saves nothing and says why in Thai", async () => {
     const before = await getRepairPeriods(pool);
     const bad = { half1: { from: "2026-11-20", to: "2027-01-31" }, half2: { from: "2027-01-31", to: "2027-03-31" } };
-    assert.deepEqual(await saveRepairPeriods(pool, bad, "U-admin"), { ok: false, error: "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1" });
+    assert.deepEqual(await saveRepairPeriods(pool, bad, "U-admin"), { ok: false, error: "ช่วงที่ 2 ต้องเริ่มหลังช่วงที่ 1 จบ" });
     assert.deepEqual(await saveRepairPeriods(pool, { half1: { from: "x" } }, "U-admin"), { ok: false, error: "ใส่วันที่ให้ครบทั้ง 4 ช่อง" });
     assert.deepEqual(await getRepairPeriods(pool), before);
   });

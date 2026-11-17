@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       if (result.reason === "expired") return json({ ok: false, error: MSG.expired, reason: "expired", remaining: 0 }, 400);
       await event("email_failed");
       return json(
-        { ok: false, error: `${MSG.wrongCode} เหลือโอกาสอีก ${result.remaining} ครั้ง`, reason: "invalid", remaining: result.remaining },
+        { ok: false, error: `${MSG.wrongCode} เหลืออีก ${result.remaining} ครั้ง`, reason: "invalid", remaining: result.remaining },
         400,
       );
     }

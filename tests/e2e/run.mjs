@@ -86,9 +86,9 @@ const PHONE_DOC = NO_EMAIL_DOC;
 const PHONE_DOC_PHONE = "0900000010";
 const RACE_DOC = "ณัฐพล วงศ์ใหญ่";
 // MSG texts (src/lib/http.ts) of a name someone else holds: the way on is the administrator, never a typed name
-const CLAIM_TAKEN = "ชื่อนี้มีผู้เลือกแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล";
-const EMAIL_TAKEN = "ชื่อนี้มีผู้ยืนยันตัวตนแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล";
-const ASK_ADMIN = "ไม่พบชื่อ หรือชื่อมีผู้เลือกแล้ว? กรุณาติดต่อผู้ดูแล";
+const CLAIM_TAKEN = "ชื่อนี้มีคนเลือกแล้ว ถ้าเป็นชื่อคุณ ติดต่อผู้ดูแล";
+const EMAIL_TAKEN = "ชื่อนี้มีคนใช้แล้ว ถ้าเป็นชื่อคุณ ติดต่อผู้ดูแล";
+const ASK_ADMIN = "ไม่พบชื่อ หรือมีคนเลือกไปแล้ว? ติดต่อผู้ดูแล";
 const LOCKED = "0900000008"; // locks its code with 5 wrong guesses
 const USERS_CSV = [
   "\uFEFFfirst_name,last_name,type,subtype",
@@ -446,9 +446,14 @@ async function noSideScroll(page, label) {
 
 /** Every visible button, link and field is at least 44 px tall (touch targets). */
 async function touchTargets(page, label) {
+  const frames = await page.evaluate(() =>
+    [...document.querySelectorAll("main .file-picker")].map((el) => Math.round(el.getBoundingClientRect().height)).filter((h) => h < 44),
+  );
+  assert(frames.length === 0, `${label}: file picker under 44 px: ${JSON.stringify(frames)}`);
   const small = await page.evaluate(() =>
     [...document.querySelectorAll("main a, main button, main input, main select")]
-      .filter((el) => el.checkVisibility())
+      // A visually hidden input (the upload's file input) is tapped through its label, whose frame is measured instead.
+      .filter((el) => el.checkVisibility() && !el.classList.contains("sr-only"))
       .map((el) => [el.textContent?.trim() || el.id || el.tagName, Math.round(el.getBoundingClientRect().height)])
       .filter(([, h]) => h < 44),
   );
@@ -1386,7 +1391,7 @@ async function main() {
       await page.fill("#phone", "02-123-4567");
       await page.click('button[type="submit"]');
       await page.waitForSelector("#phone-error");
-      assert((await page.textContent("#phone-error")).includes("เบอร์มือถือไม่ถูกต้อง"), "invalid number message");
+      assert((await page.textContent("#phone-error")).includes("ใส่เบอร์มือถือ 10"), "invalid number message");
       assert((await page.getAttribute("#phone", "aria-invalid")) === "true", "the number is marked invalid");
       await page.waitForFunction(() => document.activeElement?.id === "phone", null, { timeout: 2000 });
       await page.keyboard.press("End");
@@ -1397,7 +1402,7 @@ async function main() {
       const wrong = sms.pin === "000000" ? "111111" : "000000";
       for (let i = 1; i <= 5; i++) {
         await page.fill("#code", wrong);
-        const expected = i < 5 ? `เหลือโอกาสอีก ${5 - i} ครั้ง` : "ใส่รหัสผิดเกินจำนวนครั้งที่กำหนด";
+        const expected = i < 5 ? `เหลืออีก ${5 - i} ครั้ง` : "ใส่รหัสผิดหลายครั้ง";
         // the server keeps the count with its unit by U+00A0
         await page.waitForFunction(
           (txt) => document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/ /g, " ").includes(txt),
@@ -1450,7 +1455,7 @@ async function main() {
       // a wrong code gets exactly the same answer as for a listed number
       await page.fill("#code", sms.pin === "000000" ? "111111" : "000000");
       await page.waitForFunction(() =>
-        document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/\u00a0/g, " ").includes("เหลือโอกาสอีก 4 ครั้ง"),
+        document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/\u00a0/g, " ").includes("เหลืออีก 4 ครั้ง"),
       );
       await page.fill("#code", sms.pin);
       await page.waitForURL(`${APP}/login/claim?type=PN`);
@@ -1689,11 +1694,11 @@ async function main() {
         assert(await page.isVisible("#phone"), `still on the number step after ${mode}`);
       };
       const invalidMark = () => page.getAttribute("#phone", "aria-invalid");
-      await sendAndExpect("102", "ขณะนี้ระบบส่ง SMS ไม่ได้ กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล");
+      await sendAndExpect("102", "ส่ง SMS ไม่ได้ตอนนี้ ลองใหม่ภายหลัง");
       assert((await invalidMark()) === null, "no credit: the number is not marked invalid");
-      await sendAndExpect("9", "ระบบยังไม่พร้อม กรุณาติดต่อผู้ดูแล");
+      await sendAndExpect("9", "ระบบยังไม่พร้อม ติดต่อผู้ดูแล");
       assert((await invalidMark()) === null, "settings: the number is not marked invalid");
-      await sendAndExpect("99", "ส่ง SMS ไปที่เบอร์นี้ไม่ได้ กรุณาตรวจสอบเบอร์มือถือ");
+      await sendAndExpect("99", "ส่ง SMS ไปเบอร์นี้ไม่ได้ ตรวจเบอร์อีกครั้ง");
       assert((await invalidMark()) === "true", "deeSMSX refused the number: marked invalid");
       const rows = await db.query("SELECT count(*)::int AS n FROM otp_codes WHERE line_sub = $1", [SUB_I]);
       assert(rows.rows[0].n === 0, `refused sends leave no row (no quota, no cooldown): ${rows.rows[0].n}`);
@@ -1701,7 +1706,7 @@ async function main() {
       assert(failedEv.rows[0].n === 3, `otp_send_failed logged: ${failedEv.rows[0].n}`);
       // A gateway's HTML page: deeSMSX may have sent the SMS. The send counts (the row stays, unusable), the user
       // waits out the cooldown on the number step.
-      await sendAndExpect("html", "ส่งรหัสไม่สำเร็จ หากได้รับ SMS ภายหลัง รหัสนั้นใช้ไม่ได้");
+      await sendAndExpect("html", "ส่งรหัสไม่สำเร็จ รอ 1");
       assert((await invalidMark()) === null, "maybe sent: the number is not marked invalid");
       const kept = await db.query("SELECT code_hash, provider_token, expires_at <= created_at AS dead FROM otp_codes WHERE line_sub = $1", [SUB_I]);
       assert(kept.rows.length === 1 && kept.rows[0].dead && !kept.rows[0].code_hash && !kept.rows[0].provider_token, `maybe-sent row kept, unusable: ${JSON.stringify(kept.rows)}`);
@@ -1779,7 +1784,7 @@ async function main() {
       await page.goto(callback.toString());
       assert(page.url().includes("/login/error?code=state"), `at ${page.url()}`);
       const text = await page.textContent('[data-testid="login-error"]');
-      assert(text.includes("หมดอายุหรือไม่ถูกต้อง") && !/error|stack|exception/i.test(text), "friendly Thai message");
+      assert(text.includes("ลิงก์นี้ใช้ไม่ได้แล้ว") && !/error|stack|exception/i.test(text), "friendly Thai message");
       assert(!(await cookie(ctx, "session")), "no session");
       await touchTargets(page, "/login/error");
       await shoot(page, "login-error");
@@ -2035,7 +2040,7 @@ async function main() {
       await page.click('button[type="submit"]');
       await page.waitForSelector("#phone-error");
       const err = (await page.textContent("#phone-error")).trim();
-      assert(err === "ระบบส่ง SMS ครบจำนวนของวันนี้แล้ว กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล", `cap message: ${err}`);
+      assert(err === "วันนี้ส่ง SMS ครบจำนวนแล้ว ติดต่อผู้ดูแล", `cap message: ${err}`);
       assert((await page.getAttribute("#phone", "aria-invalid")) === null, "the cap does not mark a valid number invalid");
       await sleep(500);
       assert(outboxFiles().length === files, "nothing sent over the cap");
@@ -2110,7 +2115,7 @@ async function main() {
       // the undone claim was this LINE account's: another number would end here too, so none is offered
       const blocked = await plainText(page, '[data-testid="claim-blocked"] p');
       assert(
-        blocked === "ผู้ดูแลยกเลิกการยืนยันชื่อของบัญชี LINE นี้แล้ว จึงเลือกชื่อใหม่ได้หลังจาก 24 ชั่วโมง หากต้องการใช้งานตอนนี้ กรุณาติดต่อผู้ดูแล",
+        blocked === "ผู้ดูแลยกเลิกชื่อของ LINE นี้แล้ว เลือกใหม่ได้หลัง 24 ชั่วโมง หรือติดต่อผู้ดูแล",
         `blocked text: ${blocked}`,
       );
       assert((await page.locator('[data-testid="claim-types"], [data-testid="claim-names-step"]').count()) === 0, "no names offered");
@@ -2145,7 +2150,7 @@ async function main() {
       await page.waitForSelector('[data-testid="claim-blocked"]');
       const byNumber = await plainText(page, '[data-testid="claim-blocked"] p');
       assert(
-        byNumber === "ผู้ดูแลยกเลิกการยืนยันชื่อของเบอร์นี้แล้ว จึงเลือกชื่อใหม่ได้หลังจาก 24 ชั่วโมง หากต้องการใช้งานตอนนี้ กรุณาติดต่อผู้ดูแล",
+        byNumber === "ผู้ดูแลยกเลิกชื่อของเบอร์นี้แล้ว เลือกใหม่ได้หลัง 24 ชั่วโมง หรือติดต่อผู้ดูแล",
         `blocked text (number): ${byNumber}`,
       );
       const otherPhone = page.locator('[data-testid="claim-blocked"] [data-testid="other-phone"]');
@@ -2226,7 +2231,7 @@ async function main() {
       // a wrong code first, then the one from the email (Thai digits too)
       await page.fill("#email-code", mail.code === "000000" ? "111111" : "000000");
       await page.waitForSelector('[data-testid="doctor-error"]');
-      assert((await page.textContent('[data-testid="doctor-error"]')).includes("เหลือโอกาสอีก 4"), "attempts left");
+      assert((await page.textContent('[data-testid="doctor-error"]')).replace(/\u00a0/g, " ").includes("เหลืออีก 4"), "attempts left");
       await page.fill("#email-code", mail.code.replace(/\d/g, (d) => String.fromCharCode(0x0e50 + Number(d))));
       await page.waitForURL(`${APP}/`);
       assert((await boardName(page)) === EMAIL_DOC, `the doctor's name: ${await boardName(page)}`);
@@ -2673,7 +2678,7 @@ async function main() {
       assert((await dateValue(page, "repair-half-2-from")) === "2027-01-20", "the draft is kept while closed");
       await page.click('[data-testid="repair-save"]');
       await page.waitForSelector('[aria-labelledby="repair-periods-title"] [role="alert"]');
-      assert((await textOf(page, '[aria-labelledby="repair-periods-title"] [role="alert"]')) === "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1", "order message");
+      assert((await textOf(page, '[aria-labelledby="repair-periods-title"] [role="alert"]')) === "ช่วงที่ 2 ต้องเริ่มหลังช่วงที่ 1 จบ", "order message");
       // the refusal is said quietly beside บันทึก, inside the card (Pong, 15 Nov 2026)
       await ownerShot(page, "admin-repair-error.png", { tall: true, upTo: 'section[aria-labelledby="repair-periods-title"]' });
       const stored = async () =>
@@ -2864,7 +2869,7 @@ async function main() {
       assert(JSON.stringify((await rows()).map(([name]) => name)) === JSON.stringify([RP.admin.name]), `search: ${JSON.stringify(await rows())}`);
       await page.fill('[data-testid="staff-search"]', "xyz");
       assert((await page.locator('[data-testid="staff-list"]').count()) === 0, "no rows");
-      assert((await textOf(page, "#staff-body")).includes("ไม่พบชื่อที่ตรงกับคำค้นหรือตำแหน่งที่เลือก"), "nothing found");
+      assert((await textOf(page, "#staff-body")).includes("ไม่พบชื่อนี้ ลองคำอื่นหรือตำแหน่งอื่น"), "nothing found");
       await page.fill('[data-testid="staff-search"]', "");
 
       // read only: no button on any row; fits a small phone; 44px targets
@@ -3285,21 +3290,27 @@ async function main() {
         );
         return result();
       };
+      // the picker speaks Thai (Pong, 17 Nov 2026: "translate upload input to Thai"), the file's name once one is chosen
+      assert((await textOf(page, '[data-testid="upload-picker"]')).includes("เลือกไฟล์"), "a Thai เลือกไฟล์ button");
+      assert((await textOf(page, '[data-testid="upload-file-name"]')) === "ยังไม่ได้เลือกไฟล์", "no file yet");
       // an .xls is refused by its name before it is sent
       await page.setInputFiles('[data-testid="upload-file"]', { name: "or-export.xls", mimeType: "application/vnd.ms-excel", buffer: OLE });
+      assert((await textOf(page, '[data-testid="upload-file-name"]')) === "or-export.xls", "the chosen file's name");
       await page.waitForSelector("#upload-file-problem");
       assert((await textOf(page, "#upload-file-problem")).includes("บันทึกเป็น .xlsx"), `xls by name: ${await textOf(page, "#upload-file-problem")}`);
       // an .xls renamed .xlsx is refused by the server, which reads the file itself
       assert((await send({ name: "or-export.xlsx", mimeType: XLSX_TYPE, buffer: OLE })).includes("บันทึกเป็น .xlsx"), "renamed xls refused");
       // the whole sample holds several days: refused, and the message names the day it must be
       const several = await send(SAMPLE_WORKBOOK);
-      assert(several.includes("ต้องเป็นวันที่ 17 พ.ย. 2569 ทุกแถว"), `a file of other days: ${several}`);
+      assert(several.includes("ต้องเป็นตารางวันที่ 17 พ.ย. 2569 เท่านั้น"), `a file of other days: ${several}`);
+      // one short line however many days the file holds (Pong, 17 Nov 2026: "concise alert message")
+      assert(!several.includes(",") && several.length < 120, `a span of days, not a list: ${several}`);
       // the right file, but 16:00 has struck by the time it is sent: the server's clock decides
       await page.setInputFiles('[data-testid="upload-file"]', E2E_WORKBOOK);
       setNow("2026-11-16T16:00:00+07:00");
       await page.click('[data-testid="upload-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"]')?.textContent?.includes("15:00–16:00"));
-      assert((await result()) === "อัปโหลดได้เฉพาะเวลา 15:00–16:00 น.", `after 16:00: ${await result()}`);
+      assert((await result()) === "อัปโหลดได้เฉพาะ 15:00–16:00 น.", `after 16:00: ${await result()}`);
       assert((await db.query("SELECT count(*)::int AS n FROM workbook_uploads")).rows[0].n === 0, "nothing saved so far");
 
       // inside the window: saved, and the page shows the upload with its summary and the matching
@@ -3724,7 +3735,7 @@ async function main() {
       await page.click('#board-date-calendar [data-nav="next"]');
       assert((await textOf(page, "#board-date-calendar-title")) === "มกราคม 2571", "January 2571");
       assert(
-        (await textOf(page, '[data-testid="board-date-calendar-unlisted"]')) === "ยังไม่มีวันหยุดปี 2571 จากธนาคารแห่งประเทศไทย",
+        (await textOf(page, '[data-testid="board-date-calendar-unlisted"]')) === "ปฏิทินยังไม่มีวันหยุดปี 2571",
         `the note: ${await textOf(page, "#board-date-calendar ul")}`,
       );
       await ownerShot(page, "board-date-unlisted-year.png");

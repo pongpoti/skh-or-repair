@@ -96,10 +96,10 @@ export function StaffList({ initial }: { initial: readonly StaffView[] | null })
 
   if (!initial) {
     return (
-      <AdminSection id="staff" title="รายชื่อทั้งหมด" summary="อ่านรายชื่อจากระบบไม่ได้" testId="staff-section">
+      <AdminSection id="staff" title="รายชื่อทั้งหมด" summary="โหลดรายชื่อไม่ได้" testId="staff-section">
         <div className="p-4 sm:p-5">
           <Notice tone="warning" role="alert">
-            อ่านรายชื่อจากระบบไม่ได้ ลองโหลดหน้านี้ใหม่
+            โหลดรายชื่อไม่ได้ ลองโหลดหน้าใหม่
           </Notice>
         </div>
       </AdminSection>
@@ -172,7 +172,7 @@ export function StaffList({ initial }: { initial: readonly StaffView[] | null })
 
       {shown.length === 0 ? (
         <p className="px-5 py-10 text-center text-sm text-muted">
-          {people.length ? "ไม่พบชื่อที่ตรงกับคำค้นหรือตำแหน่งที่เลือก" : "ยังไม่มีผู้ใช้ที่ใช้งานอยู่"}
+          {people.length ? "ไม่พบชื่อนี้ ลองคำอื่นหรือตำแหน่งอื่น" : "ยังไม่มีผู้ใช้ที่ใช้งานอยู่"}
         </p>
       ) : (
         <ul className="divide-y divide-line" data-testid="staff-list">

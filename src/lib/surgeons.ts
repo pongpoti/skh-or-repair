@@ -34,9 +34,9 @@ export function checkSurgeon(
   specialty: unknown,
 ): { ok: true; name: string; specialty: SpecialtyCode } | { ok: false; error: string } {
   const clean = typeof name === "string" ? normaliseName(name) : "";
-  if (!clean) return { ok: false, error: "กรุณากรอกชื่อ-นามสกุล" };
+  if (!clean) return { ok: false, error: "ใส่ชื่อ-นามสกุล" };
   if (clean.length > NAME_MAX_LENGTH) return { ok: false, error: `ชื่อยาวได้ไม่เกิน ${NAME_MAX_LENGTH} ตัวอักษร` };
-  if (typeof specialty !== "string" || !isSpecialtyCode(specialty)) return { ok: false, error: "กรุณาเลือกสาขา" };
+  if (typeof specialty !== "string" || !isSpecialtyCode(specialty)) return { ok: false, error: "เลือกสาขา" };
   return { ok: true, name: clean, specialty };
 }
 

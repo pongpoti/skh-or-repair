@@ -335,7 +335,12 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
   const header = headerAt >= 0 ? sheetRows[headerAt] : [];
   const missing = missingHeaders(header);
   if (missing.length > 0) {
-    const message = `ไม่พบหัวคอลัมน์ ${missing.join(", ")} กรุณาใช้ไฟล์ที่ส่งออกจาก HOSxP โดยไม่แก้หัวตาราง`;
+    // Short and plain (Pong, 17 Nov 2026: "concise alert message"): a few missing columns are named; a file missing
+    // more is simply not the HOSxP export.
+    const message =
+      missing.length <= 3
+        ? `ไฟล์ไม่มีคอลัมน์ ${missing.join(", ")} ใช้ไฟล์จาก HOSxP ที่ไม่ได้แก้ไข`
+        : "ไฟล์นี้ไม่ใช่ตารางผ่าตัดจาก HOSxP";
     return { ok: false, rows: [], missingHeaders: missing, message };
   }
   const col = (name: (typeof REQUIRED_HEADERS)[number]) => headerIndex(header, name);
@@ -429,6 +434,16 @@ function thaiShortDate(iso: string): string {
   return `${day} ${THAI_SHORT_MONTHS[month - 1]} ${year + 543}`;
 }
 
+/** First to last of sorted dates, as short as reads clearly: "1–31 ต.ค. 2569", "28 ต.ค. – 3 พ.ย. 2569". */
+export function thaiDateSpan(first: string, last: string): string {
+  if (first === last) return thaiShortDate(first);
+  const [y1, m1, d1] = first.split("-").map(Number);
+  const [y2, m2] = last.split("-").map(Number);
+  if (y1 === y2 && m1 === m2) return `${d1}–${thaiShortDate(last)}`;
+  if (y1 === y2) return `${d1} ${THAI_SHORT_MONTHS[m1 - 1]} – ${thaiShortDate(last)}`;
+  return `${thaiShortDate(first)} – ${thaiShortDate(last)}`;
+}
+
 export type GuardResult =
   | { ok: true }
   | {
@@ -450,13 +465,17 @@ export function guardTargetDate(rows: readonly WorkbookRow[], target: string): G
   }
   if (blank === 0 && [...found].every((date) => date === target)) return { ok: true };
   const dates = [...found].sort();
-  const listed = [...dates.map(thaiShortDate), ...(blank ? [`ไม่มีวันที่ ${blank} แถว`] : [])].join(", ");
-  return {
-    ok: false,
-    dates,
-    blank,
-    message: `ไฟล์นี้มีวันสั่งผ่าตัด ${listed} แต่ต้องเป็นวันที่ ${thaiShortDate(target)} ทุกแถว กรุณาส่งออกจาก HOSxP ใหม่เฉพาะวันนั้น`,
-  };
+  const day = thaiShortDate(target);
+  // One short line (Pong, 17 Nov 2026: a month's export listed all 31 dates).
+  if (dates.every((date) => date === target)) {
+    // The right day, but some rows have no date: say so, not that the day is wrong.
+    return { ok: false, dates, blank, message: `ไฟล์นี้มี ${blank} แถวที่ไม่มีวันที่ ทุกแถวต้องเป็นวันที่ ${day} ส่งออกจาก HOSxP ใหม่` };
+  }
+  // Other days: the file's day or span of days, and the day it must be.
+  const days =
+    dates.length === 1 ? `เป็นตารางวันที่ ${thaiShortDate(dates[0])}` : `มีตาราง ${dates.length} วัน (${thaiDateSpan(dates[0], dates[dates.length - 1])})`;
+  const blanks = blank ? ` และมี ${blank} แถวที่ไม่มีวันที่` : "";
+  return { ok: false, dates, blank, message: `ไฟล์นี้${days}${blanks} ต้องเป็นตารางวันที่ ${day} เท่านั้น` };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
