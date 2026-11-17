@@ -24,7 +24,10 @@ const PREVIEW_PEOPLE: Array<[name: string, type: UserType, subtype: string]> = [
   ["สมใจ ใจเย็น", "DR", "URO"],
   ["ประเสริฐ กล้าหาญ", "DR", "ORTHO"],
 ];
-const PREVIEW_USERS = PREVIEW_PEOPLE.map(([name, type, subtype], index) => ({ id: String(index + 1), name, role: roleLabel(type, subtype) }));
+// The MX picker offers RN of the OR unit only (lib/roles.ts).
+const PREVIEW_USERS = PREVIEW_PEOPLE.flatMap(([name, type, subtype], index) =>
+  type === "RN" && subtype === "OR" ? [{ id: String(index + 1), name, role: roleLabel(type, subtype) }] : [],
+);
 const PREVIEW_STAFF: StaffView[] = PREVIEW_PEOPLE.map(([name, type, subtype], index) => ({
   id: String(index + 1),
   name,
@@ -40,7 +43,7 @@ const PREVIEW_STAFF: StaffView[] = PREVIEW_PEOPLE.map(([name, type, subtype], in
 export default function PreviewAdminPage() {
   if (process.env.NODE_ENV !== "development") notFound();
 
-  const members = PREVIEW_USERS.slice(0, 2).map((user) => ({ userId: user.id, name: user.name, role: user.role, active: true, addedOn: "14 พ.ย. 2569" }));
+  const members = PREVIEW_USERS.slice(0, 2).map((user) => ({ userId: user.id, name: user.name, role: user.role, active: true, eligible: true, addedOn: "14 พ.ย. 2569" }));
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">

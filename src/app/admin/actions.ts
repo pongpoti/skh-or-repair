@@ -6,8 +6,9 @@ import { getUser } from "@/lib/auth/server";
 import { db } from "@/lib/db";
 import { saveRepairPeriods } from "@/lib/repair-store";
 import { addMx, removeMx, userIdOf } from "@/lib/roles";
+import { addUser, checkNewUser } from "@/lib/user-admin";
 import { fullName, getListedUser } from "@/lib/user-list";
-import { mxMembersFrom, repairViewFrom, type MxView, type RepairView } from "./data";
+import { mxMembersFrom, repairViewFrom, staffFrom, type MxView, type RepairView, type StaffView } from "./data";
 
 type Refused = { ok: false; error: string };
 
@@ -16,6 +17,9 @@ export type RepairResult = { ok: true; repair: RepairView; message: string } | R
 
 /** The MX list as it now stands, after a refusal too when it could be read, so the page picks up another admin's changes. */
 export type MxResult = { ok: true; members: MxView[]; message: string } | (Refused & { members?: MxView[] });
+
+/** An added name answers with the whole list as it now stands, so the new name shows in its place. */
+export type StaffResult = { ok: true; staff: StaffView[]; message: string; id: string } | Refused;
 
 const NOT_ADMIN: Refused = { ok: false, error: "เฉพาะผู้ดูแลระบบเท่านั้น ลองออกจากระบบแล้วเข้าใหม่" };
 const FAILED: Refused = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
@@ -67,6 +71,7 @@ export async function grantMx(userId: string): Promise<MxResult> {
     const result = await addMx(pool, id, user.sub);
     const members = await mxMembersFrom(pool);
     if (result === "missing") return { ok: false, error: "ไม่พบชื่อนี้ในผู้ใช้ที่ใช้งานอยู่ อาจถูกปิดใช้งานไปแล้ว", members };
+    if (result === "ineligible") return { ok: false, error: "ผู้จัดการตารางต้องเป็นพยาบาลห้องผ่าตัด (RN-OR) เท่านั้น", members };
     if (result === "added") refreshPages();
     const name = members.find((member) => member.userId === id)?.name ?? "ชื่อนี้";
     return { ok: true, members, message: result === "added" ? `เพิ่ม ${name} เป็นผู้จัดการตารางแล้ว` : `${name} เป็นผู้จัดการตารางอยู่แล้ว` };
@@ -93,5 +98,29 @@ export async function revokeMx(userId: string): Promise<MxResult> {
   } catch (error) {
     console.error("Removing an MX member failed", error);
     return { ok: false, error: "ถอดสิทธิ์ไม่สำเร็จ ลองอีกครั้ง" };
+  }
+}
+
+/**
+ * Adds a name to the staff list (Pong, 17 Nov 2026: "on section all name: add user button"), or brings an inactive one
+ * back with the type and subtype given (lib/user-admin.ts). The person can then claim it when they sign in.
+ */
+export async function addStaff(input: { firstName: string; lastName: string; type: string; subtype: string }): Promise<StaffResult> {
+  const user = await signedInAdmin();
+  if (!user) return NOT_ADMIN;
+  const checked = checkNewUser(input ?? {});
+  if (!checked.ok) return checked;
+  const name = fullName(checked.user);
+
+  try {
+    const pool = await db();
+    const result = await addUser(pool, checked.user, user.sub);
+    if (result.status === "exists") return { ok: false, error: `มี ${name} ในรายชื่ออยู่แล้ว` };
+    refreshPages();
+    const message = result.status === "added" ? `เพิ่ม ${name} แล้ว` : `เปิดใช้งาน ${name} อีกครั้งแล้ว`;
+    return { ok: true, staff: await staffFrom(pool), message, id: result.id };
+  } catch (error) {
+    console.error("Adding a name failed", (error as Error).message);
+    return FAILED;
   }
 }

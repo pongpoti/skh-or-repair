@@ -37,7 +37,7 @@ function matches(query: string, name: string): boolean {
 
 /**
  * The admin's list of MX members (ผู้จัดการตาราง, who upload the HOSxP workbook; lib/roles.ts): remove one, or add one by
- * picking an active user by name. Picking takes two steps (choose, then add) because the role lets that person replace
+ * picking an active user by name, from the RN of the OR unit only (Pong, 17 Nov 2026: `users` holds only them). Picking takes two steps (choose, then add) because the role lets that person replace
  * everyone's schedule. With `onAdd` and `onRemove` (the server actions) every change is saved; without them, as in the
  * development preview, changes stay in this page. `initial` null means the list could not be read. Closed until opened
  * (components/admin-section.tsx): เพิ่ม MX shows in the heading, greyed out and inert until then.
@@ -108,7 +108,7 @@ export function MxMembers({
 
     if (!onAdd) {
       setMembers((list) =>
-        [...list, { userId: person.id, name: person.name, role: person.role, active: true, addedOn: "วันนี้" }].sort((a, b) =>
+        [...list, { userId: person.id, name: person.name, role: person.role, active: true, eligible: true, addedOn: "วันนี้" }].sort((a, b) =>
           a.name.localeCompare(b.name, "th"),
         ),
       );
@@ -191,6 +191,11 @@ export function MxMembers({
                     <span className="badge badge-muted">ปิดใช้งานอยู่ สิทธิ์ยังไม่มีผล</span>
                   </span>
                 )}
+                {member.active && !member.eligible ? (
+                  <span className="mt-1 flex">
+                    <span className="badge badge-muted">ไม่ใช่ RN-OR สิทธิ์ไม่มีผล</span>
+                  </span>
+                ) : null}
               </div>
               <button
                 type="button"
@@ -211,7 +216,9 @@ export function MxMembers({
         <h2 id="mx-pick-title" className="text-lg font-bold">
           เพิ่มผู้จัดการตาราง
         </h2>
-        <p className="mt-1 text-sm leading-6 text-muted">เลือกจากผู้ใช้ที่ใช้งานอยู่ ผู้จัดการตารางอัปโหลดตาราง HOSxP ได้ทุกวัน 15:00–16:00 น.</p>
+        <p className="mt-1 text-sm leading-6 text-muted">
+          เลือกจากพยาบาลห้องผ่าตัด (RN-OR) เท่านั้น <span className="whitespace-nowrap">ผู้จัดการตาราง</span>อัปโหลดตาราง HOSxP ได้ทุกวัน 15:00–16:00 น.
+        </p>
         <label className="relative mt-4 block">
           <span className="sr-only">ค้นหาชื่อหรือนามสกุล</span>
           <span className="pointer-events-none absolute top-1/2 left-3.5 -translate-y-1/2 text-muted">
@@ -228,7 +235,7 @@ export function MxMembers({
           />
         </label>
         <p className="mt-2 text-xs text-muted" role="status">
-          {shown.length ? `พบ ${shown.length} คน` : users?.length ? "ไม่พบชื่อนี้ ลองพิมพ์เฉพาะชื่อหรือเฉพาะนามสกุล" : "ยังไม่มีผู้ใช้ที่ใช้งานอยู่"}
+          {shown.length ? `พบ ${shown.length} คน` : users?.length ? "ไม่พบชื่อนี้ ลองพิมพ์เฉพาะชื่อหรือเฉพาะนามสกุล" : "ยังไม่มีพยาบาลห้องผ่าตัดที่ใช้งานอยู่"}
         </p>
         {shown.length ? (
           <ul className="choice-list mt-1 grid max-h-[min(20rem,40dvh)] gap-1.5 overflow-y-auto overscroll-contain" data-testid="mx-users">

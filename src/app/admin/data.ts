@@ -4,7 +4,7 @@ import { today } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "@/lib/repair";
 import { getRepairPeriods } from "@/lib/repair-store";
-import { listActiveUsers, listMx, type MxMember, type PickableUser } from "@/lib/roles";
+import { listActiveUsers, listMx, mxEligible, type MxMember, type PickableUser } from "@/lib/roles";
 import { thaiDateTime } from "@/lib/telegram";
 import { roleLabel, subtypeLabel, type UserType } from "@/lib/user-labels";
 import { HOLDS } from "@/lib/user-list";
@@ -35,11 +35,13 @@ export type MxView = {
   role: string;
   /** False when the users row went inactive: the role does nothing until it is active again. */
   active: boolean;
+  /** False when the row is no longer RN-OR (lib/roles.ts): the role does nothing while it is not. */
+  eligible: boolean;
   /** "14 พ.ย. 2569". */
   addedOn: string;
 };
 
-/** An active user the admin can make MX: name and role only. */
+/** An active RN-OR user the admin can make MX (lib/roles.ts): name and role only. */
 export type PickView = { id: string; name: string; role: string };
 
 export type MxData = { members: MxView[]; users: PickView[] };
@@ -117,6 +119,7 @@ function memberView(member: MxMember): MxView {
     name: member.name,
     role: roleLabel(member.type, member.subtype),
     active: member.active,
+    eligible: member.eligible,
     addedOn: addedOnFormat.format(member.addedAt),
   };
 }
@@ -130,6 +133,11 @@ function staffView(user: PickableUser): StaffView {
   return { id: user.id, name: user.name, type: user.type, subtype, subtypeName: subtypeLabel(user.type, subtype) ?? subtype };
 }
 
+/** The all-names list as it now stands (after an admin added a name). */
+export async function staffFrom(pool: Pool): Promise<StaffView[]> {
+  return (await listActiveUsers(pool)).map(staffView);
+}
+
 /**
  * The MX list, the names to pick from, and the all-names list, from one read of the active users. Never throws: when
  * the database cannot be read both sections say so and the rest of the page still opens.
@@ -139,7 +147,13 @@ export async function loadPeople(): Promise<PeopleData> {
     const pool = await db();
     const [members, users] = await Promise.all([mxMembersFrom(pool), listActiveUsers(pool)]);
     return {
-      mx: { members, users: users.map((user) => ({ id: user.id, name: user.name, role: roleLabel(user.type, user.subtype) })) },
+      // Only RN of the OR unit may be MX (Pong, 17 Nov 2026), so only they are offered.
+      mx: {
+        members,
+        users: users
+          .filter((user) => mxEligible(user.type, user.subtype))
+          .map((user) => ({ id: user.id, name: user.name, role: roleLabel(user.type, user.subtype) })),
+      },
       staff: users.map(staffView),
     };
   } catch (error) {
