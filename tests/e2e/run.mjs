@@ -447,7 +447,11 @@ async function noSideScroll(page, label) {
 /** Every visible button, link and field is at least 44 px tall (touch targets). */
 async function touchTargets(page, label) {
   const frames = await page.evaluate(() =>
-    [...document.querySelectorAll("main .file-picker")].map((el) => Math.round(el.getBoundingClientRect().height)).filter((h) => h < 44),
+    // A file picker in a closed /admin section is hidden: not a target until the section opens.
+    [...document.querySelectorAll("main .file-picker")]
+      .filter((el) => el.checkVisibility())
+      .map((el) => Math.round(el.getBoundingClientRect().height))
+      .filter((h) => h < 44),
   );
   assert(frames.length === 0, `${label}: file picker under 44 px: ${JSON.stringify(frames)}`);
   const small = await page.evaluate(() =>
@@ -2648,7 +2652,11 @@ async function main() {
       assert(
         JSON.stringify(sections) ===
           JSON.stringify(
-            ["ช่วงปิดซ่อมห้องผ่าตัด", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "โหมดทดสอบ"].map((title) => [title, "false", false]),
+            ["ช่วงปิดซ่อมห้องผ่าตัด", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ตารางย้อนหลังจาก HOSxP", "โหมดทดสอบ"].map((title) => [
+              title,
+              "false",
+              false,
+            ]),
           ),
         `every section closed: ${JSON.stringify(sections)}`,
       );
