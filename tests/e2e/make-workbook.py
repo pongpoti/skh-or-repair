@@ -4,7 +4,9 @@
 It is the made-up sample export (tests/fixtures/sample-or-export.xlsx) cut to rows 1-17, the rows that make one
 day's file (the sample's own answers: 9 kept, 7 dropped, 1 repeated ID, 2 cut), moved from Thu 5 Nov 2026 to the
 e2e upload's day, Tue 17 Nov 2026. Every date column moves by the same 12 days, so the rules see the same gaps
-between request, booking and operation. The HNs are replaced by other invented ones of 7 digits, as the hospital's
+between request, booking and operation, with one exception: 900007, "Appendectomy (on call)", is keyed in on its
+operation day rather than the day before, so its "on call" still drops it (Pong, 18 Nov 2026: "If it is booked in
+advance, that is elective case. Just ignore 'on call' word"; the unit tests cover the case booked ahead). The HNs are replaced by other invented ones of 7 digits, as the hospital's
 are (7 + the case number), one written with leading zeros so the matching's normalisation is exercised. Every name, HN and AN in it is invented.
 
 Run with: python3 -I tests/e2e/make-workbook.py (needs openpyxl). The e2e tests read the result; they never run this.
@@ -23,6 +25,8 @@ SHIFT = datetime.timedelta(days=12)  # Thu 2026-11-05 -> Tue 2026-11-17
 KEEP_ROWS = 17
 # Written with leading zeros: the board must still match it with a booking typed without them.
 PADDED = {900015}
+# Keyed in on its operation day, so "on call" counts and the file keeps the sample's 9 kept.
+SAME_DAY = {900007}
 
 
 def main() -> int:
@@ -32,6 +36,8 @@ def main() -> int:
     hn_col = header.index("HN") + 1
     id_col = header.index("ID") + 1
     date_cols = [i + 1 for i, name in enumerate(header) if name in ("วันที่", "สั่งผ่าตัดวันที่", "วันที่ผ่าตัด")]
+    request_col = header.index("วันที่") + 1
+    booked_col = header.index("สั่งผ่าตัดวันที่") + 1
     if len(date_cols) != 3:
         print(f"expected three date columns, found {len(date_cols)}", file=sys.stderr)
         return 1
@@ -44,6 +50,8 @@ def main() -> int:
             if isinstance(cell.value, datetime.datetime):
                 cell.value = cell.value + SHIFT
         case_id = int(sheet.cell(row=row, column=id_col).value)
+        if case_id in SAME_DAY:
+            sheet.cell(row=row, column=request_col).value = sheet.cell(row=row, column=booked_col).value
         hn = f"7{case_id - 900000:06d}"
         sheet.cell(row=row, column=hn_col).value = f"00{hn}" if case_id in PADDED else hn
 

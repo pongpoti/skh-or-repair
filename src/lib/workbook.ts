@@ -67,6 +67,18 @@ export function headerIndex(header: readonly XlsxCell[], name: string, occurrenc
   return -1;
 }
 
+/**
+ * The request time's column (R): the เวลา beside วันที่, on either side, so a reordered export still reads it; else
+ * the first เวลา. The other เวลา (AF, beside วันที่ผ่าตัด) is always empty.
+ */
+export function requestTimeIndex(header: readonly XlsxCell[]): number {
+  const date = headerIndex(header, "วันที่");
+  const isTime = (index: number) => index >= 0 && index < header.length && headerKey(header[index]) === headerKey("เวลา");
+  if (date >= 0 && isTime(date + 1)) return date + 1;
+  if (date >= 0 && isTime(date - 1)) return date - 1;
+  return headerIndex(header, "เวลา");
+}
+
 /** The required headers the row lacks, in the rules' order. */
 export function missingHeaders(header: readonly XlsxCell[]): string[] {
   return REQUIRED_HEADERS.filter((name) => headerIndex(header, name) < 0);
@@ -294,6 +306,10 @@ export type WorkbookRow = {
   /** Marked Stat or Emergency. */
   emergency: boolean;
   shift: WorkbookShift | null;
+  /** วันที่ (Q), the day the request was keyed in, as an ISO date. Null when blank or unreadable. */
+  requestDate: string | null;
+  /** The first เวลา (R), the time the request was keyed in, "HH:MM" or "HH:MM:SS". Null when blank or unreadable. */
+  requestTime: string | null;
   /** สั่งผ่าตัดวันที่ (W), the booked operation date, as an ISO date. */
   bookedDate: string | null;
   /** สั่งผ่าตัดเวลา (X), "HH:MM" ("HH:MM:SS" when it has seconds), often blank. */
@@ -351,6 +367,8 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
     operation: col("ชื่อการผ่าตัด"),
     surgeon: col("แพทย์ผู้สั่ง"),
     urgency: col("ความเร่งด่วน"),
+    requestDate: col("วันที่"),
+    requestTime: requestTimeIndex(header),
     dept: col("แผนก"),
     type: col("ชนิด"),
     shift: col("เวร"),
@@ -385,6 +403,8 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
       urgency,
       emergency: isEmergencyUrgency(urgency),
       shift: shiftOf(text(at.shift)),
+      requestDate: parseDateCell(cells[at.requestDate], options.date1904),
+      requestTime: parseTimeCell(cells[at.requestTime]),
       bookedDate: parseDateCell(cells[at.bookedDate], options.date1904),
       bookedTime: parseTimeCell(cells[at.bookedTime]),
       dept: fromColumns?.dept ?? fromSurgeon,
@@ -482,11 +502,41 @@ export function guardTargetDate(rows: readonly WorkbookRow[], target: string): G
 // Rule set B, step two: the filter
 
 /** Section 6: words in the operation name that mark a case as not elective. `stat` and `today` whole words, `emer` starting one. */
-const NOT_ELECTIVE = /\bon\s*-?\s*call|\bemer|\bstat\b|\btoday\b|วันนี้|ด่วน|เพิ่ม/i;
+const NOT_ELECTIVE = /\bemer|\bstat\b|\btoday\b|วันนี้|ด่วน|เพิ่ม/i;
 
-/** The section 6 keyword in an operation name, or null. */
-export function notElectiveKeyword(operation: string): string | null {
-  return NOT_ELECTIVE.exec(operation)?.[0] ?? null;
+/**
+ * Section 6's "on call": on call, oncall, on-call, in any case, also stuck to the word before it ("LCPon call",
+ * "2569On call", seen in the Jan–Oct 2026 exports), but not after a small letter, so "revision call" is not one.
+ */
+const ON_CALL = /(?<![a-z])[Oo][Nn]\s*-?\s*[Cc][Aa][Ll][Ll]/;
+
+/**
+ * The section 6 keyword in an operation name (the first in the text), or null. Pong, 18 Nov 2026: "If it is booked in
+ * advance, that is elective case. Just ignore 'on call' word", so for a case booked ahead (`bookedAhead`) "on call"
+ * does not count; the other words still do.
+ */
+export function notElectiveKeyword(operation: string, bookedAhead = false): string | null {
+  const found = [NOT_ELECTIVE.exec(operation), bookedAhead ? null : ON_CALL.exec(operation)].filter((match) => match !== null);
+  found.sort((a, b) => a.index - b.index);
+  return found[0]?.[0] ?? null;
+}
+
+/** The day before an ISO date. */
+const dayBefore = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+/** MX's upload closes at 16:00 the day before; a request keyed from then on is the night's work. */
+const BOOKED_AHEAD_BY = 16 * 3600;
+
+/**
+ * Keyed in (Q + R) before 16:00 on a day before its booked date (W). A case keyed from 16:00 on the evening before may
+ * be a duty case operated after midnight, so it is not booked ahead (Pong, 18 Nov 2026: "The example no 3 and 4 may be
+ * duty cases and actually operated after midnight"); nor is one whose date, or whose time on the evening before, is
+ * blank or unreadable.
+ */
+export function isBookedAhead(row: Pick<WorkbookRow, "requestDate" | "requestTime" | "bookedDate">): boolean {
+  if (row.requestDate === null || row.bookedDate === null || row.requestDate >= row.bookedDate) return false;
+  if (row.requestDate < dayBefore(row.bookedDate)) return true;
+  return row.requestTime !== null && secondsOf(row.requestTime) < BOOKED_AHEAD_BY;
 }
 
 /** 1–6 are rule set B's rules in order; 0 is a row with no case ID, which cannot be counted or stored. */
@@ -535,7 +585,7 @@ export function dropRuleOf(row: WorkbookRow): { rule: DropRule; detail: string |
   if (!row.caseId) return { rule: 0, detail: null };
   if (row.status === "cancelled") return { rule: 1, detail: null };
   if (row.emergency) return { rule: 2, detail: row.urgency };
-  const keyword = notElectiveKeyword(row.operation);
+  const keyword = notElectiveKeyword(row.operation, isBookedAhead(row));
   if (keyword) return { rule: 3, detail: keyword };
   if (row.shift === "out" || row.smc) return { rule: 4, detail: row.shift === "out" ? null : "SMC" };
   // 08:00 and 15:00 both count as inside.

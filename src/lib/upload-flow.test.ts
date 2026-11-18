@@ -144,32 +144,34 @@ test("the whole sample file is refused: it holds several booked days, so nothing
   assert.match(!result.ok ? result.message : "", /5 พ\.ย\. 2569/);
 });
 
-test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 9 kept, 2 cut, 7 placed by the weekly schedule", () => {
+test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 10 kept, 2 cut, 8 placed by the weekly schedule", () => {
   const result = processed(runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: WEEKLY, bookings: [] }));
   // The answers sheet's placement: GENSX rooms, the ORTHO room, dressing to OR 1, the endoscopy to SCOPE (OR 3), the
   // ENT room. On Thursdays GENSX holds OR 2 and OR 5 (fewest cases first), ORTHO OR 11 and ENT OR 4. One change since
   // the sheet was made: 900003, "I&D abscess Rt thigh", is a dressing case now that I&D counts (Pong, 15 Nov 2026), so
-  // it goes to OR 1 rather than a GENSX room, and 900015 takes OR 5.
+  // it goes to OR 1 rather than a GENSX room. Two since: 900007, "Appendectomy (on call)", was keyed in the day before,
+  // so it is booked ahead and kept (Pong, 18 Nov 2026: "Just ignore 'on call' word"); it takes OR 5 and 900015 OR 2.
   assert.deepEqual(roomOf(result), {
     "900001": "or-2",
     "900002": "or-11",
     "900003": "or-1",
+    "900007": "or-5",
     "900010": "or-1",
     "900011": "or-3",
     "900014": "or-4",
-    "900015": "or-5",
+    "900015": "or-2",
   });
   const summary: FlowSummary = result.summary;
   assert.equal(summary.rows, 17);
   assert.equal(summary.unique, 16);
   assert.equal(summary.duplicates, 1);
-  assert.equal(summary.kept, 9);
+  assert.equal(summary.kept, 10);
   assert.deepEqual(
     summary.dropped.map((item) => [item.rule, item.count]),
     [
       [1, 1],
       [2, 1],
-      [3, 2],
+      [3, 1],
       [4, 1],
       [5, 1],
       [6, 1],
@@ -182,15 +184,15 @@ test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 9 kept, 2 cut, 
       ["vascular", 1],
     ],
   );
-  assert.equal(summary.toPlace, 7);
-  assert.equal(summary.placed, 7);
+  assert.equal(summary.toPlace, 8);
+  assert.equal(summary.placed, 8);
   assert.deepEqual(summary.unplaced, []);
   assert.equal(summary.repairHalf, null);
   assert.deepEqual(
     summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
       ["OR 1", DEPARTMENTS.INFECT.label, 2],
-      ["OR 2", "GENSX", 1],
+      ["OR 2", "GENSX", 2],
       ["OR 3", "SCOPE", 1],
       ["OR 4", "ENT", 1],
       ["OR 5", "GENSX", 1],
@@ -203,7 +205,7 @@ test("the stored cases hold what the board needs, in file order, and of the pati
   const result = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY));
   assert.deepEqual(
     result.cases.map((item) => item.position),
-    [1, 2, 3, 4, 5, 6, 7],
+    [1, 2, 3, 4, 5, 6, 7, 8],
   );
   assert.deepEqual(result.cases[0], {
     caseId: "900001",
@@ -235,19 +237,20 @@ test("the same file during the first half of the repair: the half's rooms, endos
     "900001": "or-12",
     "900002": "or-13",
     "900003": "or-10",
+    "900007": "or-12",
     "900010": "or-10",
     "900011": "or-11",
     "900014": "or-11",
     "900015": "or-12",
   });
   assert.equal(result.summary.repairHalf, 1);
-  assert.equal(result.summary.placed, 7);
+  assert.equal(result.summary.placed, 8);
   assert.deepEqual(
     result.summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
       ["OR 10", DEPARTMENTS.INFECT.label, 2],
       ["OR 11", DEPARTMENTS.MIXED.label, 2],
-      ["OR 12", "GENSX", 2],
+      ["OR 12", "GENSX", 3],
       ["OR 13", "ORTHO", 1],
     ],
   );
@@ -260,6 +263,7 @@ test("the second half of the repair uses OR 1 to 5", () => {
     "900001": "or-5",
     "900002": "or-2",
     "900003": "or-1",
+    "900007": "or-5",
     "900010": "or-1",
     "900011": "or-4",
     "900014": "or-4",
@@ -367,7 +371,7 @@ test("matching: a booking with the case's HN pairs with it; the rest are unbooke
   assert.equal(matching.bookings, 2, "only the target day's bookings count");
   assert.equal(matching.matched, 1);
   // Not 900003 and 900010, the dressings: nobody need book a case in the dressing room (Pong, 15 Nov 2026).
-  assert.deepEqual(matching.unbooked.map((row) => row.hn), ["99000002", "99000011", "99000014", "99000015"]);
+  assert.deepEqual(matching.unbooked.map((row) => row.hn), ["99000002", "99000007", "99000011", "99000014", "99000015"]);
   assert.deepEqual(matching.notInHosxp, [
     { key: `bk-${bookings[1].id}`, roomId: "or-4", room: "OR 4", surgeon: "สมหญิง ใจงาม", hn: "55555", operation: "Tonsillectomy" },
   ]);
@@ -388,7 +392,7 @@ test("the upload's own rooms are the board's: a case a doctor booked goes by the
   const board = buildBoardRows({ date: THURSDAY, periods: WEEKLY, workbook: result.cases, bookings: [mine], viewer: { allHn: true, userId: null } });
   const counted = Object.fromEntries(result.summary.rooms.map((room) => [room.roomId, room.count]));
   assert.deepEqual(counted, board.countByRoom);
-  assert.deepEqual(counted, { "or-1": 1, "or-2": 2, "or-3": 1, "or-4": 1, "or-5": 1, "or-11": 1 });
+  assert.deepEqual(counted, { "or-1": 1, "or-2": 2, "or-3": 1, "or-4": 1, "or-5": 2, "or-11": 1 });
   // Read again on the upload page with the same bookings: the same; without them, the name places it again.
   assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, WEEKLY, [mine]), result.summary);
   const alone = placedSummary(result.summary, result.cases, THURSDAY, WEEKLY);
@@ -398,8 +402,8 @@ test("the upload's own rooms are the board's: a case a doctor booked goes by the
 test("matching: a booking with no operation name and no HN reads as such; no bookings flags every case", () => {
   const cases = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY)).cases;
   const none = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [] });
-  // The 7 cases placed, but the 2 dressings.
-  assert.deepEqual([none.bookings, none.matched, none.unbooked.length, none.notInHosxp.length], [0, 0, 5, 0]);
+  // The 8 cases placed, but the 2 dressings.
+  assert.deepEqual([none.bookings, none.matched, none.unbooked.length, none.notInHosxp.length], [0, 0, 6, 0]);
   const old = booking({ hn: null, roomId: "or-3", subtype: null });
   const result = matchBookings({ date: THURSDAY, periods: WEEKLY, cases, bookings: [old] });
   assert.deepEqual(result.notInHosxp, [

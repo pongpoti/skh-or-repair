@@ -25,12 +25,12 @@ The old weekly export (`scripts/build_week.py`, `src/data/week-data.ts`) no long
 
 The rules for the workbook (`src/lib/workbook.ts`, `src/lib/placement.ts`):
 
-- **Only what the board needs is kept:** case ID, HN, the patient's name (ชื่อ, for the row's name line, Pong, 16 Nov 2026; optional, so an export without it still reads), operation name, surgeon (with the surgeon's team, for the SCOPE rule below), department, room, shift, status, urgency and booked time. Age, AN, diagnosis, illnesses and costs are never read into a row, stored or logged, and neither the name nor the HN is ever logged.
+- **Only what the board needs is kept:** case ID, HN, the patient's name (ชื่อ, for the row's name line, Pong, 16 Nov 2026; optional, so an export without it still reads), operation name, surgeon (with the surgeon's team, for the SCOPE rule below), department, room, shift, status, urgency, booked time and when the request was keyed in (for the on-call rule below). Age, AN, diagnosis, illnesses and costs are never read into a row, stored or logged, and neither the name nor the HN is ever logged.
 - **Every row's `สั่งผ่าตัดวันที่` must be the upload's day** (Buddhist years are converted). Otherwise the whole file is refused and the message lists the dates found.
 - **These rows are dropped,** and the upload's summary counts each reason:
   - cancelled;
   - marked Stat or Emergency;
-  - the operation name says on call, emergency, stat, ด่วน and the like;
+  - the operation name says emergency, stat, today, ด่วน and the like, or on call unless the case was booked ahead: keyed in before 16:00 on a day before its operation day (Pong, 18 Nov 2026; a case keyed from 16:00 the evening before may be a duty case operated after midnight, so "on call" still counts);
   - out of hours (SMC included);
   - booked outside 08:00–15:00;
   - Urgency with no booked time;

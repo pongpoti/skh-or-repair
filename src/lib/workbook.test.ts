@@ -8,12 +8,14 @@ import {
   filterForUpload,
   guardTargetDate,
   headerIndex,
+  isBookedAhead,
   notElectiveKeyword,
   parseDateCell,
   parseExport,
   parseTimeCell,
   prepareUpload,
   REQUIRED_HEADERS,
+  requestTimeIndex,
   splitSurgeon,
   summariseUpload,
   thaiDateSpan,
@@ -37,17 +39,20 @@ function parsed(rows: readonly (readonly XlsxCell[])[] = DAY_FILE, date1904 = fa
 
 const byId = (rows: readonly WorkbookRow[]) => new Map(rows.map((row) => [row.caseId, row]));
 
-/** Rule set B answers: the rule number of each dropped case (the answers sheet's "#N …"). */
+/**
+ * Rule set B answers: the rule number of each dropped case (the answers sheet's "#N …"). One change since the sheet:
+ * 900007 "Appendectomy (on call)" was keyed in the day before, so it is booked ahead and kept (Pong, 18 Nov 2026: "If it
+ * is booked in advance, that is elective case. Just ignore 'on call' word"); the sheet still drops it under #3.
+ */
 const DROPPED_BY_ANSWERS = {
   "900004": 6, // Urgency with no booked time
   "900005": 1, // Cancelled
   "900006": 2, // Marked Stat / Emergency
-  "900007": 3, // Text says on call / emergency ("on call")
   "900008": 4, // Out of hours
   "900009": 5, // Booked outside 08:00–15:00 (16:20)
   "900029": 3, // Text says on call / emergency ("stat")
 } as const;
-const KEPT_BY_ANSWERS = ["900001", "900002", "900003", "900010", "900011", "900012", "900013", "900014", "900015"];
+const KEPT_BY_ANSWERS = ["900001", "900002", "900003", "900007", "900010", "900011", "900012", "900013", "900014", "900015"];
 
 /** The answers sheet's department code for every case of rows 1–17. */
 const DEPT_BY_ANSWERS: Record<string, string> = {
@@ -76,7 +81,7 @@ function sheetOf(rows: Record<string, XlsxCell>[]): XlsxCell[][] {
 }
 const ROW = { ID: 1, สถานะภาพ: "รอผ่าตัด", HN: "1", ชื่อการผ่าตัด: "Septoplasty", แพทย์ผู้สั่ง: "ทดสอบ หนึ่ง (นพ.)", เวร: "ในเวลา", ชนิด: "ENT", สั่งผ่าตัดวันที่: 46331 };
 
-test("rule set B on rows 1–17 as the file for Thu 5 Nov: 17 rows, 16 cases, 9 kept, 7 dropped, 1 duplicate", () => {
+test("rule set B on rows 1–17 as the file for Thu 5 Nov: 17 rows, 16 cases, 10 kept, 6 dropped, 1 duplicate", () => {
   const rows = parsed();
   assert.equal(rows.length, 17);
   assert.deepEqual(guardTargetDate(rows, THURSDAY), { ok: true });
@@ -85,9 +90,9 @@ test("rule set B on rows 1–17 as the file for Thu 5 Nov: 17 rows, 16 cases, 9 
     rows: 17,
     unique: 16,
     duplicates: 1,
-    kept: 9,
-    dropped: 7,
-    byRule: { 0: 0, 1: 1, 2: 1, 3: 2, 4: 1, 5: 1, 6: 1 },
+    kept: 10,
+    dropped: 6,
+    byRule: { 0: 0, 1: 1, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1 },
   });
   assert.deepEqual(result.kept.map((row) => row.caseId), KEPT_BY_ANSWERS);
   assert.deepEqual(
@@ -96,7 +101,6 @@ test("rule set B on rows 1–17 as the file for Thu 5 Nov: 17 rows, 16 cases, 9 
   );
   for (const row of result.dropped) assert.equal(row.reason, DROP_REASONS[row.rule]);
   const detail = Object.fromEntries(result.dropped.map((row) => [row.caseId, row.detail]));
-  assert.equal(detail["900007"], "on call");
   assert.equal(detail["900029"], "stat");
   assert.equal(detail["900009"], "16:20");
   // Row 17 repeats 900002: counted once, the first row decides.
@@ -115,7 +119,7 @@ test("the Thai reasons for the upload summary", () => {
   });
 });
 
-test("board cuts: of the 9 kept, Tha Chalom's 900012 and Thursday's vascular 900013 go, 7 are left to place", () => {
+test("board cuts: of the 10 kept, Tha Chalom's 900012 and Thursday's vascular 900013 go, 8 are left to place", () => {
   const { kept } = filterForUpload(parsed());
   const cuts = boardCuts(kept, THURSDAY);
   assert.deepEqual(
@@ -125,7 +129,7 @@ test("board cuts: of the 9 kept, Tha Chalom's 900012 and Thursday's vascular 900
       { caseId: "900013", reason: "vascular" },
     ],
   );
-  assert.deepEqual(cuts.kept.map((row) => row.caseId), ["900001", "900002", "900003", "900010", "900011", "900014", "900015"]);
+  assert.deepEqual(cuts.kept.map((row) => row.caseId), ["900001", "900002", "900003", "900007", "900010", "900011", "900014", "900015"]);
   // Vascular surgery stays on a Monday or a Friday; Tha Chalom's cases never do.
   assert.deepEqual(boardCuts(kept, "2026-11-02").cut.map((row) => row.caseId), ["900012"]);
   assert.deepEqual(boardCuts(kept, "2026-11-06").cut.map((row) => row.caseId), ["900012"]);
@@ -194,7 +198,7 @@ test("rows keep the patient's name (Pong, 16 Nov 2026) but no age, AN, diagnosis
   const rows = parsed(SHEET);
   const keys = [
     "line", "caseId", "hn", "patientName", "operation", "surgeon", "title", "status", "urgency", "emergency", "shift",
-    "bookedDate", "bookedTime", "dept", "deptFrom", "team", "thaChalom", "smc", "dressing", "scope",
+    "requestDate", "requestTime", "bookedDate", "bookedTime", "dept", "deptFrom", "team", "thaChalom", "smc", "dressing", "scope",
   ];
   for (const row of rows) assert.deepEqual(Object.keys(row).sort(), [...keys].sort());
   assert.equal(byId(rows).get("900001")?.patientName, "ตัวอย่าง ผู้ป่วย01");
@@ -264,6 +268,9 @@ test("missing headers are listed, and the two เวลา columns are told apar
   assert.equal(headerIndex(SHEET[0], "เวลา"), 17); // R
   assert.equal(headerIndex(SHEET[0], "เวลา", 2), 31); // AF
   assert.equal(headerIndex(SHEET[0], "เวลา", 3), -1);
+  // The request time is the เวลา beside วันที่, whichever way round the columns come.
+  assert.equal(requestTimeIndex(SHEET[0]), 17);
+  assert.equal(requestTimeIndex([...SHEET[0]].reverse()), 38 - 17);
   assert.equal(headerIndex(SHEET[0], " pre.  dx. "), 27);
   // Columns are found by name, so a reordered export reads the same.
   const reordered = DAY_FILE.map((row) => Array.from({ length: 39 }, (_, index) => row[index] ?? null).reverse());
@@ -336,6 +343,51 @@ test("rule edges: 08:00 and 15:00 are inside, a second past 15:00 is not, SMC is
   assert.equal(ruleOf({ ID: null }), 0);
 });
 
+test("on call counts only for a case keyed in on its operation day or from 16:00 the evening before (Pong, 18 Nov 2026)", () => {
+  const THU = 46331; // Thu 5 Nov 2026
+  const ruleOf = (values: Record<string, XlsxCell>) => {
+    const result = filterForUpload(parsed(sheetOf([{ ...ROW, ...values }])));
+    return result.dropped[0] ? [result.dropped[0].rule, result.dropped[0].detail] : null;
+  };
+  // Booked ahead: "on call" is ignored, whatever the spelling.
+  assert.equal(ruleOf({ ชื่อการผ่าตัด: "ORIF Lt radius on call", วันที่: THU - 1, เวลา: "10:40:02" }), null);
+  assert.equal(ruleOf({ ชื่อการผ่าตัด: "ORIF Lt radius on call", วันที่: THU - 1, เวลา: 15.99 / 24 }), null);
+  assert.equal(ruleOf({ ชื่อการผ่าตัด: "Appendectomy oncall", วันที่: THU - 3, เวลา: "22:00" }), null);
+  assert.equal(ruleOf({ ชื่อการผ่าตัด: "Debridement under GA on-call", วันที่: "04/11/2569", เวลา: "09:15" }), null);
+  // Keyed in on the day, from 16:00 the evening before (perhaps a duty case after midnight), or with no readable
+  // request date or evening-before time: "on call" drops it.
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "ORIF Lt radius on call", วันที่: THU, เวลา: "07:00" }), [3, "on call"]);
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "ORIF Lt radius on call", วันที่: THU - 1, เวลา: "16:00:00" }), [3, "on call"]);
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "ORIF Lt radius on call", วันที่: THU - 1, เวลา: "23:10" }), [3, "on call"]);
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "ORIF Lt radius on call", วันที่: THU - 1 }), [3, "on call"]);
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "ORIF Lt radius on call" }), [3, "on call"]);
+  // The other words still drop a case booked ahead.
+  const ahead = { วันที่: THU - 1, เวลา: "10:00" };
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "ICD Rt chest stat", ...ahead }), [3, "stat"]);
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "on call explore lap emer", ...ahead }), [3, "emer"]);
+  // Booked ahead does not override the label, the shift or the booked time.
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "Appendectomy on call", ...ahead, ความเร่งด่วน: "Emergency" }), [2, "Emergency"]);
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "Appendectomy on call", ...ahead, เวร: "นอกเวลา" }), [4, null]);
+  assert.deepEqual(ruleOf({ ชื่อการผ่าตัด: "Appendectomy on call", ...ahead, สั่งผ่าตัดเวลา: "18:00" }), [5, "18:00"]);
+});
+
+test("booked ahead: keyed in before 16:00 on a day before the booked day", () => {
+  const at = (requestDate: string | null, requestTime: string | null, bookedDate = "2026-11-05") => isBookedAhead({ requestDate, requestTime, bookedDate });
+  assert.equal(at("2026-11-04", "15:59:59"), true);
+  assert.equal(at("2026-11-04", "16:00"), false);
+  assert.equal(at("2026-11-04", null), false);
+  assert.equal(at("2026-11-03", "23:00"), true);
+  assert.equal(at("2026-11-03", null), true);
+  assert.equal(at("2026-11-05", "07:00"), false);
+  assert.equal(at("2026-11-06", "07:00"), false);
+  assert.equal(at(null, "07:00"), false);
+  // across a month and a year
+  assert.equal(at("2026-11-30", "15:00", "2026-12-01"), true);
+  assert.equal(at("2026-12-31", "20:00", "2027-01-01"), false);
+  const rows = byId(parsed());
+  assert.deepEqual([rows.get("900007")?.requestDate, rows.get("900007")?.requestTime], ["2026-11-04", "10:40:02"]);
+});
+
 test("section 6 keywords: whole words for stat and today, emer starting a word", () => {
   assert.equal(notElectiveKeyword("Transurethral resection of prostate"), null);
   assert.equal(notElectiveKeyword("check status"), null);
@@ -343,6 +395,13 @@ test("section 6 keywords: whole words for stat and today, emer starting a word",
   assert.equal(notElectiveKeyword("ICD Rt chest STAT"), "STAT");
   assert.equal(notElectiveKeyword("Appendectomy (on call)"), "on call");
   assert.equal(notElectiveKeyword("ORIF oncall"), "oncall");
+  assert.equal(notElectiveKeyword("debridement under GA on-call"), "on-call");
+  assert.equal(notElectiveKeyword("ORIF with LCPon call under SB"), "on call");
+  assert.equal(notElectiveKeyword("revision sinus 28/01/2569On call บ่าย"), "On call");
+  assert.equal(notElectiveKeyword("revision call"), null);
+  assert.equal(notElectiveKeyword("ORIF on call", true), null);
+  assert.equal(notElectiveKeyword("on call craniectomy stat", true), "stat");
+  assert.equal(notElectiveKeyword("on call craniectomy stat"), "on call"); // the first word in the text
   assert.equal(notElectiveKeyword("Emergency laparotomy"), "Emer");
   assert.equal(notElectiveKeyword("Excision mass today"), "today");
   assert.equal(notElectiveKeyword("Cystoscopy ด่วน"), "ด่วน");
@@ -370,11 +429,11 @@ test("prepareUpload: refusals, and the summary holds counts only", () => {
     rows: 17,
     unique: 16,
     duplicates: 1,
-    kept: 9,
+    kept: 10,
     dropped: [
       { rule: 1, reason: "ยกเลิกการผ่าตัด", count: 1 },
       { rule: 2, reason: "ระบุ Stat / Emergency", count: 1 },
-      { rule: 3, reason: "ชื่อการผ่าตัดระบุ on call / ฉุกเฉิน", count: 2 },
+      { rule: 3, reason: "ชื่อการผ่าตัดระบุ on call / ฉุกเฉิน", count: 1 },
       { rule: 4, reason: "นอกเวลา", count: 1 },
       { rule: 5, reason: "เวลาผ่าตัดนอกช่วง 08:00–15:00 น.", count: 1 },
       { rule: 6, reason: "Urgency แต่ไม่ระบุเวลา", count: 1 },
@@ -383,7 +442,7 @@ test("prepareUpload: refusals, and the summary holds counts only", () => {
       { reason: "tha-chalom", label: "เคสของ รพ.นครท่าฉลอม", count: 1 },
       { reason: "vascular", label: "ศัลยกรรมหลอดเลือด วันอังคาร–พฤหัสบดี (โควตาท่าฉลอม)", count: 1 },
     ],
-    toPlace: 7,
+    toPlace: 8,
   });
   assert.equal(JSON.stringify(day.summary).includes("99000"), false); // no HN
 });
