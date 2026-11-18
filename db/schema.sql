@@ -247,6 +247,16 @@ BEGIN
   END IF;
 END $$;
 
+-- The doctor's note to the OR team (หมายเหตุ; Pong, 17 Nov 2026: "Add หมายเหตุ input on booking form"), optional: shown on
+-- the board's row of the booking to everyone who opens the board. NULL when there is none, never an empty string; at
+-- most 500 characters (lib/added-cases.ts MAX_NOTE). Applied to existing databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'note' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN note text CONSTRAINT cases_note_check CHECK (btrim(note) <> '' AND char_length(note) <= 500);
+  END IF;
+END $$;
+
 -- The ventilation repair's two halves, which an admin can move on /admin (lib/repair-store.ts; the room layout of each
 -- half is in lib/repair.ts). Seeded once with the planned dates; a saved row is never overwritten by the seed.
 -- updated_by is the LINE sub of the admin who saved it (NULL for the seed).

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { cleanNote, MAX_NOTE } from "./added-cases.ts";
 import { allocationFor } from "./allocation.ts";
 import { buildBoardRows } from "./board-rows.ts";
 import { addDays } from "./days.ts";
@@ -117,6 +118,11 @@ test("the demo looks like a real day: matched and unbooked rows, booking times, 
     assert.ok(built.rows.every((row) => (row.roomId === dressingRoom.id) === (row.doneBy !== undefined)), `${date}: only there`);
     // Only dressing-room bookings carry an answer.
     assert.ok(bookings.every((booking) => (booking.scrubDoes === null) === !booking.dressing));
+    // Some rows show a note (หมายเหตุ), as the form would have saved it; most rooms have one.
+    const noted = built.rows.filter((row) => row.note);
+    assert.ok(noted.length >= open.length, `${date}: ${noted.length} notes`);
+    assert.ok(noted.some((row) => row.note?.includes("\n")), `${date}: a note over several lines`);
+    assert.ok(bookings.every((booking) => booking.note === cleanNote(booking.note) && booking.note.length <= MAX_NOTE), `${date}: notes as saved`);
   }
 });
 

@@ -40,6 +40,12 @@ export type BoardRow = Operation & {
   /** When the booking was made, as the row says it: "15 พ.ย. 69, 23:43" (Bangkok time; booking and matched rows). */
   bookedAt?: string;
   /**
+   * The booking's note to the OR team (หมายเหตุ; Pong, 17 Nov 2026: "each case row has หมายเหตุ => click to open dialog
+   * to see details"), for every viewer: the team prepares from it. Present only when the booking has one; the HOSxP
+   * workbook has no notes, so a case nobody booked has none.
+   */
+  note?: string;
+  /**
    * A row in the dressing room: who does the dressing, the scrub nurse ("scrub", ฝาก scrub ทำ) or the doctor
    * ("surgeon", แพทย์ทำเอง), from the booking's answer to "scrub ทำให้แทนไหม ?". A case without that answer (nobody
    * booked it in the dressing room) is the doctor's, as the question asks whether the scrub does it instead. In the
@@ -249,6 +255,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
     const text = booking.bookedAt ? bookedAtText(booking.bookedAt) : "";
     return text ? { bookedAt: text } : {};
   };
+  const noteOf = (booking: AddedCase): { note?: string } => (booking.note ? { note: booking.note } : {});
 
   for (const item of cases) {
     const booking = pairs.get(item);
@@ -277,6 +284,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
           ...(seesHn(booking) && item.patientName ? { patientName: item.patientName } : {}),
           bookedBy: booking.surgeon,
           ...when(booking),
+          ...noteOf(booking),
           ...doneByIn(roomId, dressingRooms, booking),
         },
       });
@@ -319,6 +327,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       ...(seesHn(booking) && booking.hn ? { hn: booking.hn } : {}),
       bookedBy: booking.surgeon,
       ...when(booking),
+      ...noteOf(booking),
       ...doneByIn(roomId, dressingRooms, booking),
     };
     if (uploaded) unmatchedRows.push(row);

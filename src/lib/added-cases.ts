@@ -26,6 +26,8 @@ export { addDays };
 
 /** Longest operation name, in characters (the cases table checks the same). */
 export const MAX_OPERATION = 300;
+/** Longest note (หมายเหตุ), in characters (the cases table checks the same). */
+export const MAX_NOTE = 500;
 /** How far ahead a case can be added, in days from today. */
 export const BOOK_AHEAD_DAYS = 60;
 /** What a booking shows in place of the operation's name until the workbook gives it (bookings from before it was required). */
@@ -67,6 +69,11 @@ export type CaseInput = {
    * dressing), false for ไม่ แพทย์ทำเอง (the doctor does); null for a department-room booking.
    */
   scrubDoes: boolean | null;
+  /**
+   * The doctor's note to the OR team (หมายเหตุ; Pong, 17 Nov 2026), cleaned by cleanNote: "" when there is none (stored
+   * as NULL). Everyone who opens the board sees it on the booking's row (lib/board-rows.ts).
+   */
+  note: string;
 };
 
 /** A case from the cases table, as the board and the form show it. */
@@ -111,7 +118,7 @@ export function bookedAtText(iso: string): string {
 }
 
 /** The form field an error is about, for the form to mark and focus. */
-export type CaseField = "date" | "hn" | "operation" | "room" | "shift";
+export type CaseField = "date" | "hn" | "operation" | "room" | "shift" | "note";
 
 /** `earliest` is set when the day was refused for being too soon, so the form can move its calendar on. */
 export type CheckedCase =
@@ -128,6 +135,23 @@ function isIsoDate(v: unknown): v is string {
 /** One line, NFC, no invisible format characters, single spaces. */
 export function cleanOperation(v: string): string {
   return v.normalize("NFC").replace(/\p{Cf}/gu, "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A note as it is saved: NFC, no invisible format or control characters, the doctor's line breaks kept (at most one
+ * blank line in a row, none at either end), and single spaces within each line, which is trimmed.
+ */
+export function cleanNote(v: string): string {
+  return v
+    .normalize("NFC")
+    .replace(/\r\n?|[\u2028\u2029]/g, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/[\u0000-\u0009\u000B-\u001F\u007F-\u009F]|\p{Cf}/gu, "")
+    .split("\n")
+    .map((line) => line.replace(/ {2,}/g, " ").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** The first workday after `iso`, by `holidays`; should they leave none within two weeks, the next weekday. */
@@ -293,8 +317,9 @@ export type BookingContext = {
 };
 
 /**
- * Checks a new booking ({ date, hn, operation, shift, room, scrubDoes }) and works out its room. `room` is the doctor's
- * choice, "dept" (the default) or "dressing"; a dressing-room booking needs `scrubDoes`, the answer to SCRUB_QUESTION.
+ * Checks a new booking ({ date, hn, operation, shift, room, scrubDoes, note }) and works out its room. `room` is the
+ * doctor's choice, "dept" (the default) or "dressing"; a dressing-room booking needs `scrubDoes`, the answer to
+ * SCRUB_QUESTION. `note` is optional (cleanNote, at most MAX_NOTE characters).
  * The server action and the form run the same checks with the same holidays (the page passes them to the form); the
  * server's answer is the one that counts.
  */
@@ -333,7 +358,12 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   const room = bookingRoom(subtype, operation, date, periods, choice);
   // No room that day: another day may have one.
   if (!room.ok) return refuse(room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
-  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes } };
+
+  // Last, as in the form.
+  if (raw.note !== undefined && raw.note !== null && typeof raw.note !== "string") return refuse("note", "หมายเหตุไม่ถูกต้อง");
+  const note = cleanNote(typeof raw.note === "string" ? raw.note : "");
+  if (note.length > MAX_NOTE) return refuse("note", `หมายเหตุยาวเกิน ${MAX_NOTE} ตัวอักษร`);
+  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note } };
 }
 
 /**

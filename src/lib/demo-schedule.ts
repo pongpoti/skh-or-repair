@@ -19,7 +19,8 @@ import type { CaseStatus, Shift } from "./schedule.ts";
  * and the operations are common names, never a real patient's row. The cases go through the board's own rules
  * (lib/board-rows.ts buildBoardRows, lib/placement.ts), so the demo looks as a real day would: most cases match a
  * booking, booked some days before at made-up times, some rooms have one HOSxP case nobody booked (the ! marks; not in
- * the dressing room, where booking does not matter), and the statuses and the out-of-hours shift show. No booking is
+ * the dressing room, where booking does not matter), and the statuses, the out-of-hours shift and the bookings' notes
+ * (หมายเหตุ, DEMO_NOTES) show. No booking is
  * left without its HOSxP case: the board leaves those off once MX has uploaded (Pong, 15 Nov 2026). On a day outside the repair (a gap an admin left between the halves) the
  * weekly schedule's rooms get cases of their own departments the same way, and demoBoardRows makes sure of the 10
  * there too. Pure and isomorphic.
@@ -151,6 +152,19 @@ function casesFor(code: DeptCode): readonly DemoCase[] {
   return Array.from({ length: 12 }, (_, i) => ({ dept: code, operation: `Elective operation ${i + 1}` }));
 }
 
+/**
+ * Made-up notes to the OR team (หมายเหตุ) for some bookings: every third case in a room, the next one in turn, so each
+ * room shows a few. One runs over several lines and one is long, to show both in the note's dialog.
+ */
+const DEMO_NOTES = [
+  "ขอ C-arm",
+  "เตรียมเลือด PRC 2 unit",
+  "ผู้ป่วยแพ้ latex",
+  "ขอ set laparoscope\nใช้ energy device",
+  "ท่า prone ขอเตียงผ่าตัดกระดูกสันหลัง",
+  "ขอเริ่มหลัง 13.00 น. เพราะรอผลตรวจเลือดเช้านี้ ถ้าผลไม่ผ่านจะแจ้งเลื่อนก่อน 11.00 น. ขอบคุณครับ",
+] as const;
+
 /** What one of a room's rows is: a HOSxP case with its booking, or a HOSxP case nobody booked. */
 type Kind = "matched" | "hosxp";
 
@@ -225,6 +239,7 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
           dressing,
           // The dressing room's bookings answer the scrub question both ways, so both tags show.
           scrubDoes: dressing ? i % 2 === 0 : null,
+          note: i % 3 === 1 ? DEMO_NOTES[(r + Math.floor(i / 3)) % DEMO_NOTES.length] : "",
           surgeonId: surgeon.id,
           surgeon: surgeon.name,
           subtype: item.dept,
