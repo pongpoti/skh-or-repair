@@ -86,6 +86,47 @@ function Owner({ dept, part, split = false }: { dept: Department | null; part?: 
   );
 }
 
+/** A department's colour and name for a badge; a room no one is given shows as ไม่จัดสรร in warm grey. */
+function deptFace(dept: Department | null): { color: string; name: string } {
+  return dept ? { color: dept.color, name: dept.name } : { color: UNALLOCATED_FILL, name: "ไม่จัดสรร" };
+}
+
+/**
+ * A room's badge in the list of open rooms (Pong, 18 Nov 2026: "merge room number & name", style A of the samples): one
+ * capsule, "OR 9" in a darker part of the department's colour, then the department's name. A room split between two
+ * departments shows เช้า and บ่าย parts, each in its own colour. A name too long for the line ends in an ellipsis; the
+ * badge's title holds it in full.
+ */
+function RoomPill({ room, allocation }: { room: Room; allocation: ReturnType<typeof allocationFor> }) {
+  const parts = allocation?.split
+    ? [
+        { part: "เช้า", ...deptFace(allocation.am) },
+        { part: "บ่าย", ...deptFace(allocation.pm) },
+      ]
+    : [{ part: null, ...deptFace(allocation?.am ?? null) }];
+  const title = parts.map(({ part, name }) => (part ? `${part} ${name}` : name)).join(" · ");
+  return (
+    <span
+      className={`room-pill ${parts.length > 1 ? "room-pill-split" : ""}`}
+      title={`${roomLabel(room)} · ${title}`}
+      style={{ "--room": parts[0].color, "--room-pm": parts[parts.length - 1].color } as CSSProperties}
+      data-testid={`room-pill-${room.id}`}
+    >
+      <span className="room-pill-no" style={{ color: readableTextOn(parts[0].color) }} aria-hidden>
+        <span className="room-pill-or">OR</span>
+        {room.number}
+      </span>
+      <span className="sr-only">{roomLabel(room)}</span>
+      {parts.map(({ part, color, name }) => (
+        <span key={part ?? "day"} className="room-pill-dept" style={{ color: readableTextOn(color) }}>
+          {part ? <span className="room-pill-part">{part}</span> : null}
+          <span className="room-pill-name">{name}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /**
  * The side panel on a computer before a room is picked (Pong, 16 Nov 2026: the board opens on desktop): the rooms in use
  * that day in number order, each with its department and how many cases it holds, as a second way to open a room beside
@@ -121,7 +162,6 @@ function RoomOverview({
       <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1.5">
         {rooms.map((room) => {
           const allocation = allocationFor(room.id, date, periods);
-          const fill = allocation?.am?.color ?? UNALLOCATED_FILL;
           const count = counts[room.id] ?? 0;
           const mismatch = (mismatches[room.id] ?? 0) > 0;
           return (
@@ -132,32 +172,18 @@ function RoomOverview({
                 onClick={() => onOpen(room.id)}
                 data-testid={`overview-${room.id}`}
               >
-                <span
-                  aria-hidden
-                  className="flex size-10 shrink-0 items-center justify-center rounded-xl text-base font-bold tabular-nums shadow-[inset_0_1px_0_rgb(255_255_255/0.35),0_1px_2px_rgb(41_29_20/0.18)]"
-                  style={{ background: fill, color: readableTextOn(fill) }}
-                >
-                  {room.number}
+                {/* The warning sits right after the badge, as in the samples. */}
+                <span className="flex min-w-0 flex-1 items-center gap-2.5">
+                  <RoomPill room={room} allocation={allocation} />
+                  {mismatch ? (
+                    <span className="shrink-0 text-late" title="ข้อมูลไม่ตรงกับการจอง">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01" />
+                      </svg>
+                      <span className="sr-only">ข้อมูลไม่ตรงกับการจอง</span>
+                    </span>
+                  ) : null}
                 </span>
-                <span className="sr-only">{roomLabel(room)}</span>
-                <span className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-                  {allocation?.split ? (
-                    <>
-                      <Owner part="เช้า" dept={allocation.am} split />
-                      <Owner part="บ่าย" dept={allocation.pm} split />
-                    </>
-                  ) : (
-                    <Owner dept={allocation?.am ?? null} split />
-                  )}
-                </span>
-                {mismatch ? (
-                  <span className="shrink-0 text-late" title="ข้อมูลไม่ตรงกับการจอง">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01" />
-                    </svg>
-                    <span className="sr-only">ข้อมูลไม่ตรงกับการจอง</span>
-                  </span>
-                ) : null}
                 <span className={`shrink-0 text-sm tabular-nums ${count ? "font-semibold text-ink-2" : "text-muted"}`}>
                   {count ? `${count} รายการ` : "ไม่มีรายการ"}
                 </span>

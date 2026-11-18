@@ -1184,6 +1184,12 @@ async function main() {
             assert(await overview.isVisible(), "the open rooms beside the plan on a desktop");
             const first = overview.locator('button[data-testid^="overview-or-"]').first();
             const roomId = (await first.getAttribute("data-testid")).replace("overview-", "");
+            // one badge per room (Pong, 18 Nov 2026, style A): "OR n" in a darker part, then the department's name
+            const pill = first.locator(`[data-testid="room-pill-${roomId}"]`);
+            const number = roomId.replace("or-", "");
+            assert((await pill.locator(".room-pill-no").innerText()).replace(/\s+/g, " ").trim() === `OR ${number}`, `the badge starts with OR ${number}`);
+            assert((await pill.locator(".room-pill-name").count()) >= 1 && (await pill.locator(".room-pill-name").first().innerText()).trim().length > 0, "the badge names the department");
+            assert((await pill.getAttribute("title")).startsWith(`OR ${number} · `), "the badge's title holds the whole name");
             await first.click();
             await page.waitForURL((u) => new URL(u).searchParams.get("room") === roomId);
             await page.locator('[data-testid="room-close"]').click();
