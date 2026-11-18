@@ -25,10 +25,13 @@ import {
 } from "./rooms.ts";
 import { boardFor, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
 
-// The planned dates (Pong, 14 Nov 2026): first half 14 Nov 2026 to 26 Jan 2027, second half 27 Jan to 17 Mar 2027.
+// The planned dates: first half 1 Jan 2026 (Pong, 18 Nov 2026: "apply first half schedule retrospectively from Jan 1,
+// 2026") to 26 Jan 2027, second half 27 Jan to 17 Mar 2027 (Pong, 14 Nov 2026). There is no weekly schedule before,
+// between or after them ("forget normal day OR schedule").
 const REPAIR = DEFAULT_REPAIR_PERIODS;
-const BEFORE = "2026-11-13"; // Friday
-const FIRST_DAY = "2026-11-14"; // Saturday
+const BEFORE = "2025-12-31"; // Wednesday, before the first half's first day
+const FIRST_DAY = "2026-01-01"; // Thursday
+const PAST_MONDAY = "2026-03-02"; // a day the board shows looking back
 const FIRST_MONDAY = "2026-11-16";
 const FIRST_LAST = "2027-01-26"; // Tuesday
 const SECOND_DAY = "2027-01-27"; // Wednesday
@@ -38,31 +41,34 @@ const AFTER = "2027-03-18"; // Thursday
 test("the repair layout is on, with the planned dates as the default", () => {
   assert.equal(REPAIR_IN_USE, true);
   assert.deepEqual(DEFAULT_REPAIR_PERIODS, {
-    half1: { from: "2026-11-14", to: "2027-01-26" },
+    half1: { from: "2026-01-01", to: "2027-01-26" },
     half2: { from: "2027-01-27", to: "2027-03-17" },
   });
-  assert.equal(repairOn(BEFORE, REPAIR), null);
   assert.equal(repairOn(FIRST_DAY, REPAIR)?.half, 1);
+  assert.equal(repairOn(PAST_MONDAY, REPAIR)?.half, 1, "looking back: the first half's rooms");
   assert.equal(repairOn(FIRST_LAST, REPAIR)?.half, 1);
   assert.equal(repairOn(SECOND_DAY, REPAIR)?.half, 2);
   assert.equal(repairOn(SECOND_LAST, REPAIR)?.half, 2);
-  assert.equal(repairOn(AFTER, REPAIR), null);
+  // No weekly schedule: before the first day the first half's rooms, after the last day the second half's.
+  assert.equal(repairOn(BEFORE, REPAIR)?.half, 1);
+  assert.equal(repairOn(AFTER, REPAIR)?.half, 2);
   assert.equal(repairOn("2026-11-1", REPAIR), null);
   assert.equal(repairOn(null, REPAIR), null);
   assert.equal(repairOn(undefined, REPAIR), null);
   const half = repairOn(FIRST_DAY, REPAIR)!;
-  assert.deepEqual([half.from, half.to], ["2026-11-14", "2027-01-26"]);
+  assert.deepEqual([half.from, half.to], ["2026-01-01", "2027-01-26"]);
 });
 
-test("the dates an admin saved decide, not the defaults; a gap between the halves is the weekly schedule", () => {
+test("the dates an admin saved decide, not the defaults; a gap between the halves keeps the first half's rooms", () => {
   const moved: RepairPeriods = { half1: { from: "2026-12-01", to: "2026-12-31" }, half2: { from: "2027-01-05", to: "2027-02-05" } };
-  assert.equal(repairOn(FIRST_DAY, moved), null);
+  assert.equal(repairOn("2026-11-16", moved)?.half, 1);
   assert.equal(repairOn("2026-12-01", moved)?.half, 1);
-  assert.equal(repairOn("2027-01-02", moved), null, "between the halves");
+  assert.equal(repairOn("2027-01-02", moved)?.half, 1, "between the halves");
   assert.equal(repairOn("2027-01-05", moved)?.half, 2);
-  assert.equal(repairOn("2027-02-06", moved), null);
-  assert.equal(roomUse("or-2", "2027-01-04", moved), "open");
-  assert.equal(allocationFor("or-4", "2027-01-04", moved)?.am?.code, "OBGYN", "Monday's OR 4 from the weekly schedule");
+  assert.equal(repairOn("2027-02-06", moved)?.half, 2);
+  assert.equal(repairOn("2027-01-04", { ...moved, half2: { from: "2027-01-04", to: "2027-02-05" } })?.half, 2, "moving the second half moves the change");
+  assert.equal(roomUse("or-2", "2027-01-04", moved), "closed");
+  assert.equal(allocationFor("or-11", "2027-01-04", moved)?.am?.code, "MIXED", "Monday's OR 11 in the first half's rooms");
 });
 
 test("first half: OR 9 to 13 operate, OR 7 and 8 are recovery rooms, OR 1 to 6 and the recovery area are closed", () => {
@@ -86,7 +92,7 @@ test("second half: OR 1 to 5 operate, OR 6 holds the instruments, OR 7 to 13 and
     assert.equal(recoveryAreaClosed("r-2", date, REPAIR), false);
   }
   assert.equal(unusedRoomsText(SECOND_DAY, REPAIR), "OR 6 เป็นห้องเครื่องมือ · OR 7–13 ปิด");
-  assert.equal(unusedRoomsText(BEFORE, REPAIR), "", "outside the repair every OR is open");
+  assert.equal(unusedRoomsText(PAST_MONDAY, REPAIR), "OR 7–8 เป็นห้องพักฟื้น · OR 1–6 ปิด", "a past day has the first half's rooms");
   assert.deepEqual(REPAIR_LAYOUTS[2].emergencyRooms, ["or-2"], "NEURO and CVT emergencies: OR 2");
   assert.equal(INSTRUMENT_USE.label, "เครื่องมือ");
 });
@@ -94,7 +100,7 @@ test("second half: OR 1 to 5 operate, OR 6 holds the instruments, OR 7 to 13 and
 test("recovery, instrument and closed rooms cannot be opened on the plan", () => {
   assert.equal(isSelectableRoom(getRoom("or-7")!, FIRST_MONDAY, REPAIR), false);
   assert.equal(isRecoveryUse(getRoom("or-7")!, FIRST_MONDAY, REPAIR), true);
-  assert.equal(isRecoveryUse(getRoom("or-7")!, BEFORE, REPAIR), false);
+  assert.equal(isRecoveryUse(getRoom("or-7")!, PAST_MONDAY, REPAIR), true, "a past day too");
   assert.equal(isSelectableRoom(getRoom("or-6")!, SECOND_DAY, REPAIR), false);
   assert.equal(isInstrumentUse(getRoom("or-6")!, SECOND_DAY, REPAIR), true);
   assert.equal(isInstrumentUse(getRoom("or-6")!, FIRST_MONDAY, REPAIR), false);
@@ -103,7 +109,8 @@ test("recovery, instrument and closed rooms cannot be opened on the plan", () =>
   assert.equal(isSelectableRoom(getRoom("or-2")!, SECOND_DAY, REPAIR), true);
   assert.equal(roomUse("r-1", FIRST_MONDAY, REPAIR), "closed", "the recovery area is not an OR");
   assert.equal(roomUse("nope", FIRST_MONDAY, REPAIR), "closed");
-  assert.equal(recoveryAreaClosed("r-1", BEFORE, REPAIR), false);
+  assert.equal(recoveryAreaClosed("r-1", PAST_MONDAY, REPAIR), true);
+  assert.equal(recoveryAreaClosed("r-2", AFTER, REPAIR), false, "after the repair the second half's rooms stay");
   assert.equal(recoveryAreaClosed("or-1", FIRST_MONDAY, REPAIR), false, "only recovery-area rooms");
 });
 
@@ -136,9 +143,12 @@ test("rooms hold one department all day, whatever the weekly schedule says, in t
   assert.equal(DEPARTMENTS.GENSX.color, "#1E7B3C", "the department list keeps its colour");
 
   assert.equal(allocationFor("or-12", "2026-11-21", REPAIR), null, "Saturday");
-  assert.equal(allocationFor("or-4", "2026-11-09", REPAIR)?.repair, false);
-  assert.equal(allocationFor("or-4", "2026-11-09", REPAIR)?.am?.code, "OBGYN", "the weekly schedule before the repair");
-  assert.equal(allocationFor("or-4", "2027-03-22", REPAIR)?.am?.code, "OBGYN", "and after it");
+  // Never the weekly schedule (Pong, 18 Nov 2026): a past day has the first half's rooms, a day after the repair the
+  // second half's.
+  assert.equal(allocationFor("or-4", PAST_MONDAY, REPAIR), null, "OR 4 is closed in the first half");
+  assert.equal(allocationFor("or-11", PAST_MONDAY, REPAIR)?.repair, true);
+  assert.equal(code("or-11", PAST_MONDAY), "MIXED");
+  assert.equal(code("or-4", "2027-03-22"), "MIXED", "after the repair");
 });
 
 test("a mixed-department room is labelled OTHER and named คละแผนก", () => {
@@ -196,7 +206,7 @@ test("a booking's room follows the repair: own department's room, else the mixed
   assert.equal(room(null, SECOND_DAY), null);
   // Room codes that are not departments go to the mixed room: an elective booking never takes the emergency room.
   for (const code of ["EMER", "INFECT", "MINOR", "MIXED", "UNK", "ANES"]) assert.equal(room(code, FIRST_MONDAY), "or-11", code);
-  assert.equal(room("URO", "2026-11-11"), "or-7", "before the repair, the weekly schedule's room");
+  assert.equal(room("URO", PAST_MONDAY), "or-11", "a past day: the first half's mixed room, never the weekly schedule's");
   // never a recovery, instrument or closed room
   for (const date of [FIRST_MONDAY, SECOND_DAY]) {
     for (const subtype of Object.keys(DEPARTMENTS)) {
@@ -254,7 +264,7 @@ test("imported cases follow the repair's rooms", () => {
 
 test("the board is dated on its own day even when the loaded export is from another week", () => {
   const cases: Partial<WeekCase>[] = [{ day: 1, dept: "GENSX" }, { day: 1, dept: "EYE" }];
-  // An export of 2-6 Nov 2026 (before the repair) still loaded on Tuesday 17 Nov and Tuesday 2 Feb.
+  // An export of 2-6 Nov 2026 still loaded on Tuesday 17 Nov and Tuesday 2 Feb.
   const stale = weekOf(["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"], cases);
   const first = boardFor("2026-11-17", REPAIR, undefined, stale)!;
   assert.equal(first.date, "2026-11-17");
@@ -262,10 +272,10 @@ test("the board is dated on its own day even when the loaded export is from anot
   const second = boardFor("2027-02-02", REPAIR, undefined, stale)!;
   assert.equal(second.date, "2027-02-02");
   assert.deepEqual(second.operations.map((item) => item.roomId), ["or-5", "or-4"]);
-  // After the repair: back to the weekly schedule in all 13 rooms.
+  // After the repair: still the second half's rooms, never the weekly schedule (Pong, 18 Nov 2026).
   const after = boardFor("2027-03-23", REPAIR, undefined, stale)!;
-  assert.equal(repairOn(after.date, REPAIR), null);
-  assert.deepEqual(after.operations.map((item) => item.roomId), ["or-2", "or-10"], "EYE back in OR 10");
+  assert.equal(repairOn(after.date, REPAIR)?.half, 2);
+  assert.deepEqual(after.operations.map((item) => item.roomId), ["or-5", "or-4"]);
   // weekBoard alone still dates the export's own week.
   assert.equal(weekBoard(stale, REPAIR)[1].date, "2026-11-03");
 });

@@ -270,8 +270,11 @@ CREATE TABLE IF NOT EXISTS repair_periods (
   updated_by  text,
   CHECK (from_date <= to_date)
 );
-INSERT INTO repair_periods (half, from_date, to_date) VALUES (1, '2026-11-14', '2027-01-26'), (2, '2027-01-27', '2027-03-17')
+INSERT INTO repair_periods (half, from_date, to_date) VALUES (1, '2026-01-01', '2027-01-26'), (2, '2027-01-27', '2027-03-17')
 ON CONFLICT (half) DO NOTHING;
+-- The first half's rooms apply back to 1 Jan 2026 (Pong, 18 Nov 2026: "apply first half schedule retrospectively from
+-- Jan 1, 2026"). Moves the first day of a seed nobody has edited (the old 14 Nov 2026 start); an admin's own dates stay.
+UPDATE repair_periods SET from_date = '2026-01-01' WHERE half = 1 AND from_date = '2026-11-14' AND updated_by IS NULL;
 
 -- MX (ผู้จัดการตาราง): the users who upload the HOSxP workbook (lib/roles.ts), granted and revoked by an admin on /admin.
 -- Revoking deletes the row. The role holds only while the user's current claim does (an inactive user loses it).

@@ -5,8 +5,9 @@ import { boardHref, DAY_KEYS, DAY_NAMES, parseDay, thaiDate, todayIso, weekDates
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { boardFor, isDressingCase, isScopeCase, resolveSurgeon, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
 
-// These weeks are before the ventilation repair, so the weekly schedule places the cases (lib/repair.test.ts and
-// lib/placement.test.ts cover the repair).
+// These weeks (Sep and Oct 2026) fall in the first half, which runs from 1 Jan 2026, so its rooms place the cases:
+// there is no weekly schedule in this app (Pong, 18 Nov 2026: "forget normal day OR schedule"). lib/placement.test.ts
+// covers placement in both halves; the tests here are the export week's own.
 const REPAIR = DEFAULT_REPAIR_PERIODS;
 
 function fixture(cases: Partial<WeekCase>[]): WeekFile {
@@ -82,44 +83,24 @@ test("keeps no patient fields in the case data", () => {
   }
 });
 
-test("rooms follow the report's rules, with every OR open", () => {
+test("rooms follow the first half's rules, with no weekly schedule", () => {
   const data = fixture([
     { proc: "Dressing wound", dept: "GENSX" },
     { emergency: true, dept: "ORTHO" },
-    { emergency: true, dept: "OBGYN" },
     { dept: "EYE" },
     { dept: "ORTHO" },
     { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "colonoscopy" },
+    { dept: "GENSX" },
+    { dept: "OBGYN" }, // operates in the obstetric building: off the board
   ]);
-  // Monday 28 Sep (4th Monday): dressing OR 1, emergency OR 8, OBGYN stays in one of its own rooms, EYE OR 10,
-  // ORTHO OR 11 or 12 (CVT has OR 13 in weeks 2 and 4), SCOPE OR 3.
-  const rooms = roomsOf(data);
-  assert.equal(rooms[0], "or-1");
-  assert.equal(rooms[1], "or-8");
-  assert.ok(["or-4", "or-6"].includes(rooms[2]), rooms[2]);
-  assert.equal(rooms[3], "or-10");
-  assert.ok(["or-11", "or-12"].includes(rooms[4]), rooms[4]);
-  assert.equal(rooms[5], "or-3");
-});
-
-test("a department with several rooms is pooled across them", () => {
-  // GENSX holds OR 2 and OR 5 on Monday.
-  const rooms = roomsOf(fixture([{ dept: "GENSX" }, { dept: "GENSX" }, { dept: "GENSX" }, { dept: "GENSX" }]));
-  assert.equal(rooms.filter((room) => room === "or-2").length, 2);
-  assert.equal(rooms.filter((room) => room === "or-5").length, 2);
-});
-
-test("a case whose department holds no room that day is left off the board", () => {
-  // Cardiothoracic surgery has no room on Tuesday.
-  const day = weekBoard(fixture([{ day: 1, dept: "CVT" }, { day: 1, dept: "GENSX" }]), REPAIR)[1];
-  assert.equal(day.operations.length, 1);
-  assert.notEqual(day.operations[0].roomId, "");
-  assert.deepEqual(day.operations.map((item) => item.order), [1]);
+  // Monday 28 Sep 2026: dressing OR 10, emergency OR 9, EYE and the endoscopy the mixed room OR 11, ORTHO OR 13,
+  // GENSX OR 12. Before 18 Nov 2026 this was the weekly schedule's OR 1, 8, 10, 11 or 12, 3 and 2 or 5.
+  assert.deepEqual(roomsOf(data), ["or-10", "or-9", "or-11", "or-13", "or-11", "or-12"]);
 });
 
 test("orders each room's cases and tells the surgeon's department", () => {
   const day = weekBoard(fixture([{ dept: "GENSX", surgeon: GENSX_SURGEON, proc: "EGD" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "ERCP" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "hernia" }]), REPAIR)[0];
-  assert.deepEqual(day.operations.map((item) => [item.roomId, item.order]), [["or-3", 1], ["or-3", 2], ["or-2", 1]]);
+  assert.deepEqual(day.operations.map((item) => [item.roomId, item.order]), [["or-11", 1], ["or-11", 2], ["or-12", 1]]);
   assert.equal(day.operations[0].specialty, "ศัลยกรรม · GENSX");
 });
 
@@ -130,10 +111,10 @@ test("matches surgeons to the physician list, including a spelling variant", () 
   assert.deepEqual(resolveSurgeon("ไม่มี ในรายชื่อ", "พญ."), { label: "พญ. ไม่มี ในรายชื่อ", specialty: null, team: null });
 });
 
-test("ignores a room the export names and places the case by the schedule", () => {
-  // Monday OR 4 is OBGYN; the case is general surgery, so it lands in a general-surgery room whatever the file says.
+test("ignores a room the export names and places the case by the half's rooms", () => {
+  // The file says OR 4, closed in the first half; general surgery lands in OR 12 whatever the file says.
   const data = fixture([{ dept: "GENSX", room: 4 } as Partial<WeekCase>]);
-  assert.ok(["or-2", "or-5"].includes(roomsOf(data)[0]));
+  assert.deepEqual(roomsOf(data), ["or-12"]);
 });
 
 test("the SCOPE room takes only a GENSX surgeon's endoscopic cases", () => {
@@ -148,20 +129,6 @@ test("the SCOPE room takes only a GENSX surgeon's endoscopic cases", () => {
   assert.equal(isScopeCase("colonoscopy", "URO"), false);
   assert.equal(isScopeCase("colonoscopy", null), false);
   assert.equal(isScopeCase("hernia repair", "GENSX"), false);
-});
-
-test("a case in the SCOPE room is always a GENSX surgeon's endoscopic case", () => {
-  const data = fixture([
-    { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "colonoscopy" }, // qualifies
-    { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "remove FB by EGD" }, // foreign body: general-surgery room
-    { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "hernia" }, // not endoscopic
-    { dept: "GENSX", surgeon: "สมชาย กลับกลาย", proc: "colonoscopy" }, // URO surgeon
-  ]);
-  const rooms = roomsOf(data);
-  assert.equal(rooms[0], "or-3");
-  assert.ok(["or-2", "or-5"].includes(rooms[1]), rooms[1]);
-  assert.ok(["or-2", "or-5"].includes(rooms[2]), rooms[2]);
-  assert.notEqual(rooms[3], "or-3");
 });
 
 test("finds dressing cases by the rule bookings use: Pong's words, debridement in, grafts out (15 Nov 2026)", () => {
@@ -193,14 +160,14 @@ test("finds dressing cases by the rule bookings use: Pong's words, debridement i
   }
 });
 
-test("OR 1 takes dressing cases from any department and nothing else", () => {
+test("the dressing room (OR 10 in the first half) takes dressing cases from any department and nothing else", () => {
   const data = fixture([
     { dept: "ORTHO", proc: "Dressing wound" },
     { dept: "URO", proc: "change vac dressing", emergency: true }, // dressing is checked before emergency
     { dept: "GENSX", proc: "STSG and dressing" }, // a graft is not a dressing case
   ]);
   const rooms = roomsOf(data);
-  assert.equal(rooms[0], "or-1");
-  assert.equal(rooms[1], "or-1");
-  assert.notEqual(rooms[2], "or-1");
+  assert.equal(rooms[0], "or-10");
+  assert.equal(rooms[1], "or-10");
+  assert.notEqual(rooms[2], "or-10");
 });

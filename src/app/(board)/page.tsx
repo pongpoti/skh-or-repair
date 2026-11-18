@@ -112,8 +112,8 @@ export default async function BoardPage({
     // The repair's dates as an admin set them, read on every request so a change shows at once.
     currentRepairPeriods(),
   ]);
-  // The days the date picker offers (today to the repair's last day), with the holidays it closes: the address of a
-  // picked day is checked against them.
+  // The days the date picker offers (1 Jan 2026, the first half's first day, to the repair's last day), with the
+  // holidays it closes: the address of a picked day is checked against them.
   const range = pickRange(day.today, periods);
   const { holidays: closed, unlisted } = await holidaysBetween(range.min, range.max);
   // Another day picked on the board (?date=YYYY-MM-DD, Pong, 15 Nov 2026), when it is one the picker offers; else the

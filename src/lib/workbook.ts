@@ -11,7 +11,7 @@ import type { XlsxCell } from "./xlsx.ts";
  * written with Pong (sections 2 to 10): find the columns by their Thai headers, clean the values, check that every row
  * is booked for the target day (rule set B, step one), drop what is not an in-hours elective case (rule set B, step
  * two), count a repeated case ID once, and cut the rows the board never shows whatever the rooms are (rule set C:
- * Tha Chalom, vascular on Tuesday to Thursday). Choosing a room is placeCase's job (lib/placement.ts).
+ * Tha Chalom). Choosing a room is placeCase's job (lib/placement.ts), by the schedule in force.
  *
  * Privacy: the export holds patient name, age, AN, diagnosis, illnesses and costs. Only the name is read (Pong, 16 Nov
  * 2026: "Add patient name line above HN"), to show beside the HN to those who may see it; the rest are never read into a
@@ -65,6 +65,18 @@ export function headerIndex(header: readonly XlsxCell[], name: string, occurrenc
     if (headerKey(header[index]) === key && ++seen === occurrence) return index;
   }
   return -1;
+}
+
+/**
+ * The request time's column (R): the เวลา beside วันที่, on either side, so a reordered export still reads it; else
+ * the first เวลา. The other เวลา (AF, beside วันที่ผ่าตัด) is always empty.
+ */
+export function requestTimeIndex(header: readonly XlsxCell[]): number {
+  const date = headerIndex(header, "วันที่");
+  const isTime = (index: number) => index >= 0 && index < header.length && headerKey(header[index]) === headerKey("เวลา");
+  if (date >= 0 && isTime(date + 1)) return date + 1;
+  if (date >= 0 && isTime(date - 1)) return date - 1;
+  return headerIndex(header, "เวลา");
 }
 
 /** The required headers the row lacks, in the rules' order. */
@@ -294,6 +306,10 @@ export type WorkbookRow = {
   /** Marked Stat or Emergency. */
   emergency: boolean;
   shift: WorkbookShift | null;
+  /** วันที่ (Q), the day the request was keyed in, as an ISO date. Null when blank or unreadable. */
+  requestDate: string | null;
+  /** The first เวลา (R), the time the request was keyed in, "HH:MM" or "HH:MM:SS". Null when blank or unreadable. */
+  requestTime: string | null;
   /** สั่งผ่าตัดวันที่ (W), the booked operation date, as an ISO date. */
   bookedDate: string | null;
   /** สั่งผ่าตัดเวลา (X), "HH:MM" ("HH:MM:SS" when it has seconds), often blank. */
@@ -351,6 +367,8 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
     operation: col("ชื่อการผ่าตัด"),
     surgeon: col("แพทย์ผู้สั่ง"),
     urgency: col("ความเร่งด่วน"),
+    requestDate: col("วันที่"),
+    requestTime: requestTimeIndex(header),
     dept: col("แผนก"),
     type: col("ชนิด"),
     shift: col("เวร"),
@@ -385,6 +403,8 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
       urgency,
       emergency: isEmergencyUrgency(urgency),
       shift: shiftOf(text(at.shift)),
+      requestDate: parseDateCell(cells[at.requestDate], options.date1904),
+      requestTime: parseTimeCell(cells[at.requestTime]),
       bookedDate: parseDateCell(cells[at.bookedDate], options.date1904),
       bookedTime: parseTimeCell(cells[at.bookedTime]),
       dept: fromColumns?.dept ?? fromSurgeon,
@@ -482,11 +502,41 @@ export function guardTargetDate(rows: readonly WorkbookRow[], target: string): G
 // Rule set B, step two: the filter
 
 /** Section 6: words in the operation name that mark a case as not elective. `stat` and `today` whole words, `emer` starting one. */
-const NOT_ELECTIVE = /\bon\s*-?\s*call|\bemer|\bstat\b|\btoday\b|วันนี้|ด่วน|เพิ่ม/i;
+const NOT_ELECTIVE = /\bemer|\bstat\b|\btoday\b|วันนี้|ด่วน|เพิ่ม/i;
 
-/** The section 6 keyword in an operation name, or null. */
-export function notElectiveKeyword(operation: string): string | null {
-  return NOT_ELECTIVE.exec(operation)?.[0] ?? null;
+/**
+ * Section 6's "on call": on call, oncall, on-call, in any case, also stuck to the word before it ("LCPon call",
+ * "2569On call", seen in the Jan–Oct 2026 exports), but not after a small letter, so "revision call" is not one.
+ */
+const ON_CALL = /(?<![a-z])[Oo][Nn]\s*-?\s*[Cc][Aa][Ll][Ll]/;
+
+/**
+ * The section 6 keyword in an operation name (the first in the text), or null. Pong, 18 Nov 2026: "If it is booked in
+ * advance, that is elective case. Just ignore 'on call' word", so for a case booked ahead (`bookedAhead`) "on call"
+ * does not count; the other words still do.
+ */
+export function notElectiveKeyword(operation: string, bookedAhead = false): string | null {
+  const found = [NOT_ELECTIVE.exec(operation), bookedAhead ? null : ON_CALL.exec(operation)].filter((match) => match !== null);
+  found.sort((a, b) => a.index - b.index);
+  return found[0]?.[0] ?? null;
+}
+
+/** The day before an ISO date. */
+const dayBefore = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+/** MX's upload closes at 16:00 the day before; a request keyed from then on is the night's work. */
+const BOOKED_AHEAD_BY = 16 * 3600;
+
+/**
+ * Keyed in (Q + R) before 16:00 on a day before its booked date (W). A case keyed from 16:00 on the evening before may
+ * be a duty case operated after midnight, so it is not booked ahead (Pong, 18 Nov 2026: "The example no 3 and 4 may be
+ * duty cases and actually operated after midnight"); nor is one whose date, or whose time on the evening before, is
+ * blank or unreadable.
+ */
+export function isBookedAhead(row: Pick<WorkbookRow, "requestDate" | "requestTime" | "bookedDate">): boolean {
+  if (row.requestDate === null || row.bookedDate === null || row.requestDate >= row.bookedDate) return false;
+  if (row.requestDate < dayBefore(row.bookedDate)) return true;
+  return row.requestTime !== null && secondsOf(row.requestTime) < BOOKED_AHEAD_BY;
 }
 
 /** 1–6 are rule set B's rules in order; 0 is a row with no case ID, which cannot be counted or stored. */
@@ -535,7 +585,7 @@ export function dropRuleOf(row: WorkbookRow): { rule: DropRule; detail: string |
   if (!row.caseId) return { rule: 0, detail: null };
   if (row.status === "cancelled") return { rule: 1, detail: null };
   if (row.emergency) return { rule: 2, detail: row.urgency };
-  const keyword = notElectiveKeyword(row.operation);
+  const keyword = notElectiveKeyword(row.operation, isBookedAhead(row));
   if (keyword) return { rule: 3, detail: keyword };
   if (row.shift === "out" || row.smc) return { rule: 4, detail: row.shift === "out" ? null : "SMC" };
   // 08:00 and 15:00 both count as inside.
@@ -588,6 +638,12 @@ export function filterForUpload(rows: readonly WorkbookRow[]): FilterResult {
 // ---------------------------------------------------------------------------------------------------------------
 // Rule set C: the cuts that do not depend on rooms
 
+/**
+ * "vascular" is no longer applied: the utilisation report's cut of vascular surgery on Tuesday to Thursday (Tha
+ * Chalom's quota) belonged to the usual schedule, and the board follows the schedule in force instead (Pong, 18 Nov
+ * 2026: "This is temporary OR schedule: stick to the interim schedule"). It stays here so uploads stored before still
+ * read back with their counts.
+ */
 export type CutReason = "tha-chalom" | "vascular";
 
 export const CUT_REASONS: Readonly<Record<CutReason, string>> = {
@@ -598,20 +654,16 @@ export const CUT_REASONS: Readonly<Record<CutReason, string>> = {
 export type CutRow = { caseId: string; line: number; reason: CutReason; label: string };
 export type CutResult = { kept: WorkbookRow[]; cut: CutRow[] };
 
-/** 0 = Sunday … 6 = Saturday. */
-const weekdayOf = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay();
-
 /**
- * The board never shows Tha Chalom's cases, nor vascular surgery on Tuesday to Thursday (Tha Chalom's quota). Room
- * rules (OB-GYN in the obstetric building during the repair, no room for a department) are placeCase's.
+ * The board never shows Tha Chalom's cases: they operate at รพ.นครท่าฉลอม, not here. Everything else goes to the rooms
+ * of the schedule in force (placeCase, lib/placement.ts): during the repair the interim schedule, where a department
+ * with no room of its own, vascular surgery included, takes the mixed room; otherwise the weekly schedule.
  */
-export function boardCuts(kept: readonly WorkbookRow[], date: string): CutResult {
-  const vascularDay = [2, 3, 4].includes(weekdayOf(date));
+export function boardCuts(kept: readonly WorkbookRow[]): CutResult {
   const out: WorkbookRow[] = [];
   const cut: CutRow[] = [];
   for (const row of kept) {
-    const reason: CutReason | null = row.thaChalom ? "tha-chalom" : vascularDay && row.dept === "VASCULAR" ? "vascular" : null;
-    if (reason) cut.push({ caseId: row.caseId, line: row.line, reason, label: CUT_REASONS[reason] });
+    if (row.thaChalom) cut.push({ caseId: row.caseId, line: row.line, reason: "tha-chalom", label: CUT_REASONS["tha-chalom"] });
     else out.push(row);
   }
   return { kept: out, cut };
@@ -669,6 +721,6 @@ export function prepareUpload(
   const guard = guardTargetDate(parsed.rows, target);
   if (!guard.ok) return { ok: false, error: "dates", message: guard.message, dates: guard.dates, blank: guard.blank };
   const filter = filterForUpload(parsed.rows);
-  const cuts = boardCuts(filter.kept, target);
+  const cuts = boardCuts(filter.kept);
   return { ok: true, rows: parsed.rows, filter, cuts, summary: summariseUpload(filter, cuts) };
 }

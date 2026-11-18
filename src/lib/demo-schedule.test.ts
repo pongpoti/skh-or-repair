@@ -49,8 +49,9 @@ test("the demo puts 10 to 12 cases in every open room, on every weekday of both 
   }
 });
 
-test("on any weekday, in the repair or outside it (a gap between the halves, the weekly schedule), every open room has 10", () => {
-  // Dates an admin may save with a gap: the weekly schedule runs from 5 Dec 2026 to 3 Jan 2027, and before and after.
+test("on any weekday, before, between and after the halves too (no weekly schedule), every open room has 10", () => {
+  // Dates an admin may save with a gap from 5 Dec 2026 to 3 Jan 2027: the first half's rooms stay until the second
+  // starts (Pong, 18 Nov 2026: "forget normal day OR schedule"), so every day is a day of the repair.
   const GAP: RepairPeriods = { half1: { from: "2026-11-14", to: "2026-12-04" }, half2: { from: "2027-01-04", to: "2027-03-17" } };
   const nobody = { allHn: false, userId: null };
   for (const periods of [DEFAULT_REPAIR_PERIODS, MOVED, GAP]) {
@@ -78,7 +79,7 @@ test("on any weekday, in the repair or outside it (a gap between the halves, the
         assert.ok(plain.rows.every((row) => row.hn === undefined), `${date}: no HN for an ordinary viewer`);
       }
     }
-    assert.ok(outside > 20, `days outside the repair: ${outside}`);
+    assert.equal(outside, 0, "no day outside the repair");
   }
 });
 

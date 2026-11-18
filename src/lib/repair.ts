@@ -1,8 +1,10 @@
 import type { DeptCode } from "./allocation.ts";
 
 /**
- * The air-ventilation repair layout (Pong, 14 Nov 2026, confirmed). The works run in two halves; while a half runs the
- * weekly OR schedule (lib/allocation.ts) is set aside and each room in use has one fixed use every working day.
+ * The air-ventilation repair layout (Pong, 14 Nov 2026, confirmed). The works run in two halves, and each room in use has
+ * one fixed use every working day. This app is the repair's board only: the usual weekly OR schedule
+ * (lib/allocation.ts) never applies here (Pong, 18 Nov 2026: "This OR repair repo, not orskh repo. So you need to forget
+ * normal day OR schedule"), so every day has one half's rooms (repairOn).
  *
  * - First half: OR 9 emergencies, OR 10 dressing, OR 11 mixed departments, OR 12 GENSX, OR 13 ORTHO, OR 7 and 8
  *   recovery; OR 1 to 6 and the recovery area (RR 1 and 2) are closed, inside the repair zone.
@@ -72,11 +74,13 @@ export type RepairDates = { from: string; to: string };
 export type RepairPeriods = { half1: RepairDates; half2: RepairDates };
 
 /**
- * The planned dates (Pong, 14 Nov 2026): the first half starts today and the second follows it. The database is seeded
- * with these (db/schema.sql), and the board falls back to them when the database cannot be read.
+ * The planned dates (Pong, 14 Nov 2026): the second half follows the first. The first half's rooms apply back to 1 Jan
+ * 2026, and the board's calendar goes back that far (Pong, 18 Nov 2026: "apply first half schedule retrospectively from
+ * Jan 1, 2026 and allow view calendar backward"). The database is seeded with these (db/schema.sql), and the board falls
+ * back to them when the database cannot be read.
  */
 export const DEFAULT_REPAIR_PERIODS: RepairPeriods = {
-  half1: { from: "2026-11-14", to: "2027-01-26" },
+  half1: { from: "2026-01-01", to: "2027-01-26" },
   half2: { from: "2027-01-27", to: "2027-03-17" },
 };
 
@@ -95,23 +99,23 @@ export const RECOVERY_USE = { name: "ห้องพักฟื้น (RR)", la
 export const INSTRUMENT_USE = { name: "ห้องเก็บเครื่องมือ", label: "เครื่องมือ" } as const;
 
 /**
- * Whether the board uses the repair layout at all. On since 14 Nov 2026; the dates in the database decide when. Set it
- * to false to go back to the weekly schedule on every date without touching the dates.
+ * Whether the board uses the repair layout at all. On since 14 Nov 2026, and on every day since 18 Nov 2026 (repairOn).
+ * Setting it to false would bring back the weekly schedule on every date; nothing in this app needs that.
  */
 export const REPAIR_IN_USE: boolean = true;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * The half of the repair that `date` (YYYY-MM-DD) falls in under `periods`, or null outside both halves, when the
- * layout is not in use, or for a malformed date. Should the halves overlap (the admin form refuses that), the first
- * half wins.
+ * The half of the repair whose rooms `date` (YYYY-MM-DD) has under `periods`, or null for a malformed date or when the
+ * layout is not in use. There is no weekly schedule in between (Pong, 18 Nov 2026: "forget normal day OR schedule"):
+ * every day before the second half starts has the first half's rooms (back to 1 Jan 2026, the first half's first day,
+ * and through any gap an admin leaves between the halves), and every day from the second half's first day on has the
+ * second half's, after its last day too.
  */
 export function repairOn(date: string | null | undefined, periods: RepairPeriods): RepairHalf | null {
   if (!REPAIR_IN_USE || typeof date !== "string" || !ISO_DATE.test(date)) return null;
-  if (date >= periods.half1.from && date <= periods.half1.to) return { ...REPAIR_LAYOUTS[1], ...periods.half1 };
-  if (date >= periods.half2.from && date <= periods.half2.to) return { ...REPAIR_LAYOUTS[2], ...periods.half2 };
-  return null;
+  return date < periods.half2.from ? { ...REPAIR_LAYOUTS[1], ...periods.half1 } : { ...REPAIR_LAYOUTS[2], ...periods.half2 };
 }
 
 /** A date as "8 ธ.ค. 2569" (no weekday), for the repair's dates. */
@@ -134,8 +138,8 @@ function isCalendarDate(v: unknown): v is string {
 
 /**
  * Checks the dates an admin typed for the two halves: four real dates, each half's first day on or before its last, and
- * the second half starting after the first ends (they may not overlap, but a gap between them is allowed: the weekly
- * schedule applies then). Isomorphic, so the admin form shows the same message the server action gives.
+ * the second half starting after the first ends (they may not overlap; a gap between them keeps the first half's rooms
+ * until the second starts, repairOn). Isomorphic, so the admin form shows the same message the server action gives.
  */
 export function checkRepairPeriods(input: unknown): CheckedPeriods {
   const raw = (input ?? {}) as { half1?: { from?: unknown; to?: unknown } | null; half2?: { from?: unknown; to?: unknown } | null };
