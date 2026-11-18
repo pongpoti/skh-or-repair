@@ -447,7 +447,11 @@ async function noSideScroll(page, label) {
 /** Every visible button, link and field is at least 44 px tall (touch targets). */
 async function touchTargets(page, label) {
   const frames = await page.evaluate(() =>
-    [...document.querySelectorAll("main .file-picker")].map((el) => Math.round(el.getBoundingClientRect().height)).filter((h) => h < 44),
+    // A file picker in a closed /admin section is hidden: not a target until the section opens.
+    [...document.querySelectorAll("main .file-picker")]
+      .filter((el) => el.checkVisibility())
+      .map((el) => Math.round(el.getBoundingClientRect().height))
+      .filter((h) => h < 44),
   );
   assert(frames.length === 0, `${label}: file picker under 44 px: ${JSON.stringify(frames)}`);
   const small = await page.evaluate(() =>
@@ -2648,7 +2652,11 @@ async function main() {
       assert(
         JSON.stringify(sections) ===
           JSON.stringify(
-            ["ช่วงปิดซ่อมห้องผ่าตัด", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "โหมดทดสอบ"].map((title) => [title, "false", false]),
+            ["ช่วงปิดซ่อมห้องผ่าตัด", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ตารางย้อนหลังจาก HOSxP", "โหมดทดสอบ"].map((title) => [
+              title,
+              "false",
+              false,
+            ]),
           ),
         `every section closed: ${JSON.stringify(sections)}`,
       );
@@ -4011,6 +4019,63 @@ async function main() {
         const html = await r.text();
         assert(r.status === 200 && !html.includes("ตารางตัวอย่าง") && !html.includes("ตัวอย่าง หนึ่ง"), `${path} for a nurse: ${r.status}`);
       }
+    });
+
+    await t("admin: past days' HOSxP lists imported on /admin show on the board's calendar; importing again replaces them", async () => {
+      // Thu 19 Nov: the made-up sample's days (Mon 2 to Sat 7 Nov) are all past
+      setNow("2026-11-19T10:00:00+07:00");
+      const imported = async () =>
+        (await db.query("SELECT to_char(target_date, 'YYYY-MM-DD') AS day, placed FROM workbook_uploads WHERE past_import ORDER BY target_date")).rows;
+      assert((await imported()).length === 0, "no imported list to start with");
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      assert((await textOf(page, '[data-testid="past-span"]')) === "ยังไม่มีตารางย้อนหลัง", `nothing yet: ${await textOf(page, '[data-testid="past-span"]')}`);
+      await openSection(page, "past");
+      assert((await textOf(page, "#past-title")) === "ตารางย้อนหลังจาก HOSxP", "the section's title");
+
+      const importFile = async () => {
+        await page.setInputFiles('[data-testid="past-file"]', SAMPLE_WORKBOOK);
+        await page.click('[data-testid="past-submit"]');
+        await page.waitForSelector('[data-testid="past-result"]', { timeout: 30_000 });
+        return textOf(page, '[data-testid="past-result"]');
+      };
+      // Mon 2 to Fri 6 Nov are workdays; Saturday's rows are left out
+      const message = await importFile();
+      const days = await imported();
+      assert(JSON.stringify(days.map((row) => row.day)) === JSON.stringify(["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"]), `the days: ${JSON.stringify(days)}`);
+      const placed = days.reduce((sum, row) => sum + row.placed, 0);
+      assert(message === `บันทึก 5 วัน 2–6 พ.ย. 2569 ลงห้อง ${placed} เคส`, `the answer: ${message}`);
+      assert((await textOf(page, '[data-testid="past-span"]')) === "มีแล้ว 5 วัน · 2–6 พ.ย. 2569", `the line: ${await textOf(page, '[data-testid="past-span"]')}`);
+      await noSideScroll(page, "the admin page with the past lists section at 390px");
+      await page.locator('[data-testid="past-section"]').screenshot({ path: join(SCREENS, "admin-past-lists.png") });
+      shots.push("admin-past-lists.png");
+
+      // importing the same file again replaces the lists: still one per day
+      assert((await importFile()) === message, "the same answer again");
+      const again = (await db.query("SELECT count(*)::int AS n FROM workbook_uploads WHERE past_import")).rows[0].n;
+      assert(again === 5, `one list per day: ${again}`);
+
+      // the board's calendar: Thu 5 Nov now has its list, its cases in their rooms
+      await page.goto(`${APP}/?date=2026-11-05`, { waitUntil: "networkidle" });
+      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดย้อนหลัง", "a past day");
+      assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "a past day with a list has no no-list notice");
+      await page.goto(`${APP}/?date=2026-11-05&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".case-row");
+      const rows = await page.$$eval(".case-row", (items) => items.length);
+      assert(rows >= 1, `OR 12 on 5 Nov: ${rows} cases`);
+      assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+
+      // a nurse cannot import (the action checks the admin again) and has no such section
+      const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
+      assert(r.status === 404, `/admin for a nurse: ${r.status}`);
+
+      await db.query("DELETE FROM workbook_uploads WHERE past_import");
+      setNow("2026-11-16T10:00:00+07:00");
     });
 
     await t("outages (Pong, 17 Nov 2026): a database or server error goes to /unavailable, a lost connection covers the page; the session is kept", async () => {

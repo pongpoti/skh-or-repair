@@ -13,6 +13,7 @@ import { HOLIDAYS_UNAVAILABLE } from "@/lib/holidays";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { isMx } from "@/lib/roles";
 import { runUploadFlow } from "@/lib/upload-flow";
+import { cleanFileName, errorKind } from "@/lib/safe-text";
 import { saveUpload } from "@/lib/workbook-store";
 import { XLS_MESSAGE, XLSX_LIMITS } from "@/lib/xlsx";
 import { fileProblem } from "./file-check";
@@ -24,23 +25,6 @@ const NOT_ALLOWED: UploadResult = { ok: false, error: "อัปโหลดไ�
 const FAILED: UploadResult = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
 
 const RULES = { maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE };
-
-/** The file's name as stored: one line, no control or format characters, at most 120 characters. Never logged. */
-function cleanFileName(name: string): string | null {
-  const clean = name
-    .normalize("NFC")
-    .replace(/[\p{Cc}\p{Cf}]/gu, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return clean ? clean.slice(0, 120) : null;
-}
-
-/** An error's kind for the log: never its message, which for a database error can quote the HNs it was given. */
-function errorKind(error: unknown): string {
-  const code = (error as { code?: unknown })?.code;
-  if (typeof code === "string" && /^[0-9A-Z_]{1,40}$/i.test(code)) return code;
-  return error instanceof Error ? error.name : typeof error;
-}
 
 /**
  * Uploads MX's HOSxP file for the next workday. Server actions can be called by anyone who can reach the site, so the

@@ -295,8 +295,9 @@ CREATE TABLE IF NOT EXISTS users_added (
 -- HOSxP workbook uploads (lib/workbook-store.ts): MX uploads the next workday's list between 15:00 and 16:00 Bangkok
 -- time. cycle_day is the Bangkok date of the upload and target_date the workday it lists; the board shows the latest
 -- upload of its cycle (lib/board-day.ts). uploaded_by is the uploader's LINE sub. summary holds counts only (rows read,
--- dropped by reason, placed per room), never a row. Uploads older than 30 days go, with their cases, whenever a new
--- one is saved.
+-- dropped by reason, placed per room), never a row. Whenever a new one is saved, uploads older than 30 days go, with
+-- their cases, unless one is the latest of its day: every past day keeps its list for the board's calendar (Pong,
+-- 19 Nov 2026).
 CREATE TABLE IF NOT EXISTS workbook_uploads (
   id             bigserial   PRIMARY KEY,
   target_date    date        NOT NULL,
@@ -339,3 +340,7 @@ CREATE TABLE IF NOT EXISTS workbook_cases (
 CREATE INDEX IF NOT EXISTS workbook_cases_upload_idx ON workbook_cases (upload_id);
 -- Applied to existing databases too.
 ALTER TABLE workbook_cases ADD COLUMN IF NOT EXISTS patient_name text;
+-- Past days' lists an admin imported from a HOSxP export of many days (/admin, lib/past-lists.ts; Pong, 19 Nov 2026).
+-- past_import marks them, so an import replaces only its own lists, never a list MX uploaded.
+ALTER TABLE workbook_uploads ADD COLUMN IF NOT EXISTS past_import boolean NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS workbook_uploads_target_idx ON workbook_uploads (target_date, uploaded_at DESC);

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { AdminBar } from "@/components/admin-bar";
 import { AdminSection } from "@/components/admin-section";
 import { MxMembers } from "@/components/mx-members";
+import { PastListsSection } from "@/components/past-lists-section";
 import { RepairPeriodsForm } from "@/components/repair-periods-form";
 import { StaffList } from "@/components/staff-list";
 import { TestModeSection } from "@/components/test-mode-section";
@@ -16,8 +17,9 @@ import { now } from "@/lib/clock";
 import { DEMO_MIN_CASES, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { shortThaiDate } from "@/lib/repair";
-import { addStaff, grantMx, revokeMx, saveRepair } from "./actions";
-import { loadPeople, loadRepairView } from "./data";
+import { XLS_MESSAGE, XLSX_LIMITS } from "@/lib/xlsx";
+import { addStaff, grantMx, importPastLists, revokeMx, saveRepair } from "./actions";
+import { loadPastListView, loadPeople, loadRepairView } from "./data";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +29,7 @@ const HALF_NAME = { 1: "ครึ่งแรก", 2: "ครึ่งหลั�
 
 /**
  * The admin page: the repair's dates, the MX members (who upload the HOSxP workbook), everyone on the staff list, the
- * demo schedule and the test notices. Every section starts closed, its buttons greyed out until it is opened (Pong,
+ * demo schedule, the import of past days' HOSxP lists and the test notices. Every section starts closed, its buttons greyed out until it is opened (Pong,
  * 16 Nov 2026; components/admin-section.tsx). Each section shows a notice when its data cannot be read, so the others
  * still open.
  */
@@ -36,7 +38,13 @@ export default async function AdminPage() {
   // Admins are listed by LINE user id (the session's sub). Anyone else gets the same page as a mistyped address.
   if (!isAdmin(user.sub)) notFound();
 
-  const [name, repair, people, day] = await Promise.all([displayNameFor(user, user.name), loadRepairView(), loadPeople(), loadBoardDay(now())]);
+  const [name, repair, people, day, past] = await Promise.all([
+    displayNameFor(user, user.name),
+    loadRepairView(),
+    loadPeople(),
+    loadBoardDay(now()),
+    loadPastListView(),
+  ]);
   // The day the demo schedule would open on for each half, by the board's own rule (lib/demo-schedule.ts demoDay), so a
   // half with no day left is shown as such here rather than sending the admin to a day of the other half.
   const range = pickRange(day.today, repair.periods);
@@ -88,6 +96,8 @@ export default async function AdminPage() {
               })}
             </div>
           </AdminSection>
+          {/* Past days' HOSxP lists for the board's calendar (Pong, 19 Nov 2026: "No case shown on Jan, why ?"). */}
+          <PastListsSection initial={past} rules={{ maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE }} onImport={importPastLists} />
           <TestModeSection href="/?notices=all" />
         </div>
       </main>
