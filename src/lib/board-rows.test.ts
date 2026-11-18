@@ -41,6 +41,7 @@ function booking(more: Partial<AddedCase>): AddedCase {
     shift: "in",
     dressing: false,
     scrubDoes: null,
+    note: "",
     surgeonId: "7",
     surgeon: "สมชาย ใจดี",
     subtype: "GENSX",
@@ -398,6 +399,26 @@ test("the patient's name follows the HN: MX and admins on every row, the doctor 
   const sent = [...anyone.rows, ...anyone.unmatched];
   assert.ok(sent.every((row) => !("patientName" in row)), "no patientName key at all");
   assert.doesNotMatch(JSON.stringify(sent), /ผู้ป่วย/, "no name anywhere in what the client gets");
+});
+
+test("a booking's note reaches every viewer on its row, matched or not; rows without one have no note key", () => {
+  const matched = booking({ hn: "301", surgeonId: "7", note: "ขอ C-arm\nเตรียมเลือด 2 unit" });
+  const alone = booking({ hn: "302", surgeonId: "8", note: "ผู้ป่วยแพ้ latex" });
+  const plain = booking({ hn: "303", surgeonId: "8" });
+  const workbook = [wb({ hn: "301" }), wb({ hn: "309" })];
+  const notes = (rows: readonly { id: string; note?: string }[]) => Object.fromEntries(rows.map((row) => [row.id, row.note ?? null]));
+  for (const viewer of [MX, NOBODY, { allHn: false, userId: "7" }]) {
+    // before the upload every booking shows, with its note
+    assert.deepEqual(notes(build(null, [matched, alone, plain], viewer).rows), {
+      [`bk-${matched.id}`]: "ขอ C-arm\nเตรียมเลือด 2 unit",
+      [`bk-${alone.id}`]: "ผู้ป่วยแพ้ latex",
+      [`bk-${plain.id}`]: null,
+    });
+    // after it, the matched case carries its booking's note; HOSxP's own cases have none
+    const after = build(workbook, [matched, alone, plain], viewer);
+    assert.deepEqual(notes(after.rows), { [`mt-${matched.id}`]: "ขอ C-arm\nเตรียมเลือด 2 unit", [`hx-${workbook[1].caseId}`]: null });
+    assert.ok(after.rows.filter((row) => row.id.startsWith("hx-")).every((row) => !("note" in row)), "no note key on a HOSxP row");
+  }
 });
 
 test("HOSxP's surgeon loses the title on the board; a name without one is kept as it is", () => {

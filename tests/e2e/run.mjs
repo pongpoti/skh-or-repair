@@ -2955,10 +2955,11 @@ async function main() {
       const scrubDialog = '[data-testid="scrub-dialog"]';
       const alertText = () => textOf(page, '[data-testid="case-save-status"]');
       const choiceOf = (page) => page.getAttribute('[data-testid="case-room"]', "data-choice");
-      const fillCase = async (page, { date, hn, operation }) => {
+      const fillCase = async (page, { date, hn, operation, note = null }) => {
         if ((await dateValue(page, "case-date")) !== date) await pickDate(page, "case-date", date);
         await page.fill(`${dialog} input[data-testid="case-hn"]`, hn);
         await page.fill('[data-testid="case-operation"]', operation);
+        if (note !== null) await page.fill('[data-testid="case-note"]', note);
         // OR X, the department's room, is picked to start with, whatever the name (Pong, 15 Nov 2026: the surgeon decides)
         assert((await choiceOf(page)) === "dept", `${operation}: OR X picked to start with`);
       };
@@ -3089,7 +3090,32 @@ async function main() {
       assert((await page.getAttribute('[data-testid="case-operation"]', "aria-invalid")) === "true", "the operation box is marked");
       await ownerShot(page, "booking-error-operation.png");
 
-      await book(page, { date: "2026-11-16", hn: HN_TODAY, operation: "Perm cath insertion", room: "or-11" });
+      // the note (หมายเหตุ; Pong, 17 Nov 2026): optional, last, saying everyone sees it; saved cleaned, line breaks kept
+      assert((await page.inputValue('[data-testid="case-note"]')) === "", "no note to start with");
+      assert((await textOf(page, 'label[for="case-note"]')) === "หมายเหตุ (ถ้ามี)", "the note's label");
+      assert((await textOf(page, '[data-testid="case-note-hint"]')) === "ทุกคนที่เปิดตารางเห็นข้อความนี้ ไม่ต้องใส่ชื่อหรือ HN ผู้ป่วย", "the note's hint");
+      assert((await page.getAttribute('[data-testid="case-note"]', "maxlength")) === "500", "at most 500 characters");
+      assert((await page.getAttribute('[data-testid="case-note"]', "aria-describedby")) === "case-note-hint", "the hint describes the box");
+      const NOTE_TYPED = "ขอ C-arm  \n\n\n\n  เตรียมเลือด   PRC 2 unit ";
+      const NOTE_SAVED = "ขอ C-arm\n\nเตรียมเลือด PRC 2 unit";
+      await book(page, {
+        date: "2026-11-16",
+        hn: HN_TODAY,
+        operation: "Perm cath insertion",
+        note: NOTE_TYPED,
+        room: "or-11",
+        shot: async () => {
+          await page.locator('[data-testid="case-note"]').scrollIntoViewIfNeeded();
+          await ownerShot(page, "booking-note.png");
+        },
+      });
+      assert((await page.inputValue('[data-testid="case-note"]')) === "", "the note is cleared for the next patient");
+      assert((await db.query("SELECT note FROM cases WHERE hn = $1", [HN_TODAY])).rows[0]?.note === NOTE_SAVED, "the note as saved");
+      // the doctor's own list shows it under the operation, line breaks kept
+      assert(
+        JSON.stringify(await page.$$eval('[data-testid="my-case-note"]', (els) => els.map((e) => e.textContent))) === JSON.stringify([`หมายเหตุ: ${NOTE_SAVED}`]),
+        `the note in the doctor's list: ${JSON.stringify(await page.$$eval('[data-testid="my-case-note"]', (els) => els.map((e) => e.textContent)))}`,
+      );
       // the doctor picks the dressing room: the scrub question opens over the form (Pong, 15 Nov 2026)
       const dressingCase = { date: "2026-11-17", hn: HN_X_MISSING, operation: "Dresing wound back" };
       await fillCase(page, dressingCase);
@@ -3290,6 +3316,47 @@ async function main() {
       // when it was booked, smaller, under the surgeon: Bangkok time in Thai (the database's clock, not the app's)
       const bookedAt = await textOf(board, '.case-row [data-testid="row-booked-at"]');
       assert(/^วันเวลาที่จองคิว : \d{1,2} [ก-๙]+\.(?:[ก-๙]+\.)? \d{2}, \d{2}:\d{2}$/.test(bookedAt), `the booking's time: ${bookedAt}`);
+      // the booking's note (Pong, 17 Nov 2026: "each case row has หมายเหตุ => click to open dialog to see details"): a
+      // หมายเหตุ button under the time, for the nurse too, that opens the note with its case in a dialog
+      const noteButton = board.locator('.case-row [data-testid="row-note"]');
+      assert((await noteButton.count()) === 1 && (await noteButton.textContent()).trim() === "หมายเหตุ", "the row's หมายเหตุ button");
+      assert((await noteButton.getAttribute("aria-haspopup")) === "dialog", "it says it opens a dialog");
+      const noteBox = await noteButton.boundingBox();
+      assert(noteBox && noteBox.height >= 24, `the button is tall enough to tap: ${JSON.stringify(noteBox)}`);
+      await ownerShot(board, "room-note-button.png");
+      const noteDialog = board.locator('[data-testid="case-note-dialog"]');
+      await noteButton.click();
+      await board.waitForSelector('[data-testid="case-note-dialog"][open]');
+      assert((await board.locator('[data-testid="case-note-text"]').textContent()) === NOTE_SAVED, "the note with its line breaks");
+      assert((await textOf(board, "#case-note-title")) === "หมายเหตุ" && (await textOf(board, '[data-testid="case-note-room"]')) === "OR 11 · ลำดับ 1", "the title and the case's room");
+      const details = await board.$$eval('[data-testid="case-note-details"] > *', (els) => els.map((e) => e.textContent.trim()));
+      assert(details.slice(0, 2).join("|") === "การผ่าตัด|Perm cath insertion" && details.includes("ศัลยแพทย์") && details.includes("จองคิว"), `the case: ${JSON.stringify(details)}`);
+      assert(!details.includes("HN") && !details.join(" ").includes(HN_TODAY), "no HN for the nurse");
+      const lines = await board.locator('[data-testid="case-note-text"]').evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
+      assert(lines >= 3, `the note keeps its lines: about ${lines}`);
+      await ownerShot(board, "room-note-dialog.png");
+      // Escape closes the note, not the room, and the button gets the focus back
+      await board.keyboard.press("Escape");
+      await board.waitForSelector('[data-testid="case-note-dialog"]:not([open])', { state: "attached" });
+      assert((await board.locator(".case-row").count()) === 1, "Escape closed the note, not the room");
+      assert(await board.evaluate(() => document.activeElement?.dataset.testid === "row-note"), "the button has the focus again");
+      // a tap outside the card closes it too, and only it; so does ปิด. A selection dragged from the note out past the
+      // card does not.
+      await noteButton.click();
+      await board.waitForSelector('[data-testid="case-note-dialog"][open]');
+      const noteText = await board.locator('[data-testid="case-note-text"]').boundingBox();
+      await board.mouse.move(noteText.x + 12, noteText.y + noteText.height / 2);
+      await board.mouse.down();
+      await board.mouse.move(6, 6, { steps: 4 });
+      await board.mouse.up();
+      assert(await noteDialog.evaluate((el) => el.open), "a selection dragged out of the card keeps the note open");
+      await board.mouse.click(6, 6);
+      await board.waitForSelector('[data-testid="case-note-dialog"]:not([open])', { state: "attached" });
+      assert((await board.locator(".case-row").count()) === 1, "a tap outside closed the note, not the room");
+      await noteButton.click();
+      await board.click('[data-testid="case-note-close"]');
+      await board.waitForSelector('[data-testid="case-note-dialog"]:not([open])', { state: "attached" });
+      assert(!(await noteDialog.evaluate((el) => el.open)), "ปิด closes it");
       // the dressing room shows who does the dressing instead (Pong, 15 Nov 2026): doctor X said the scrub does, for
       // Tuesday, before Tuesday's upload
       await board.goto(`${APP}/?date=2026-11-17&room=or-10`, { waitUntil: "networkidle" });
@@ -3302,6 +3369,7 @@ async function main() {
       await board.click(".room-sheet h2");
       await scrubTip.waitFor({ state: "detached" });
       assert((await board.locator('.case-row [data-testid="row-icon"][data-source]').count()) === 0, "no source icon in the dressing room");
+      assert((await board.locator('.case-row [data-testid="row-note"]').count()) === 0, "a booking without a note has no หมายเหตุ button");
       await ownerShot(board, "room-sheet-dressing-booked.png");
       await nurse.close();
 

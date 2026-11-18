@@ -216,6 +216,7 @@ test("an added case in a room not operating that day stays off the board", () =>
     shift: "in",
     dressing: null,
     scrubDoes: null,
+    note: "",
     surgeonId: "1",
     surgeon: "ก ข",
     subtype: "GENSX",

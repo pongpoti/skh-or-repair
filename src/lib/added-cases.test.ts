@@ -8,12 +8,14 @@ import {
   bookedRoom,
   bookingRoom,
   checkCase,
+  cleanNote,
   cleanOperation,
   closedDayNote,
   earliestBookingDay,
   earliestText,
   bookableFrom,
   BOOKING_CUTOFF_RULE,
+  MAX_NOTE,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
@@ -130,7 +132,7 @@ test("a good booking passes, cleaned, in the room of the doctor's choice; a room
   const checked = check({ ...ok, operation: "  Lap \u200bchole\n  ", roomId: "or-2" });
   assert.deepEqual(checked, {
     ok: true,
-    value: { date: "2026-11-16", roomId: "or-12", hn: "12345", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null },
+    value: { date: "2026-11-16", roomId: "or-12", hn: "12345", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null, note: "" },
   });
   assert.equal(cleanOperation("a\t b"), "a b");
   // the department's room unless the doctor picks the dressing room, whatever the name
@@ -146,6 +148,30 @@ test("a good booking passes, cleaned, in the room of the doctor's choice; a room
     assert.ok(dressing.ok);
     assert.deepEqual([dressing.value.roomId, dressing.value.dressing, dressing.value.scrubDoes], ["or-10", true, scrubDoes]);
   }
+});
+
+test("the note (หมายเหตุ) is optional, kept with its line breaks, cleaned, and at most MAX_NOTE characters", () => {
+  const note = (value: unknown) => {
+    const checked = check({ ...ok, note: value });
+    return checked.ok ? checked.value.note : [checked.field, checked.error];
+  };
+  assert.equal(MAX_NOTE, 500);
+  for (const value of [undefined, null, "", "   ", "\n \n\t", "\u200b"]) assert.equal(note(value), "", JSON.stringify(value));
+  assert.equal(note("ขอ C-arm"), "ขอ C-arm");
+  // the doctor's lines stay; spaces within a line are single, each line trimmed, one blank line at most
+  assert.equal(note("  ขอ   C-arm \r\n\r\n\r\n\n เตรียมเลือด\t2 unit  \n"), "ขอ C-arm\n\nเตรียมเลือด 2 unit");
+  assert.equal(cleanNote("a\u2028b\u2029c\rd"), "a\nb\nc\nd", "other line breaks become \\n");
+  // invisible format and control characters go; Thai is composed (NFC)
+  assert.equal(cleanNote("a\u0000b\u0007c\u200bd\u00ade\u0085f"), "abcdef");
+  assert.equal(cleanNote("e\u0301"), "\u00e9");
+  // the limit counts the cleaned note, so spaces around it do not count
+  assert.equal(note(` ${"ก".repeat(MAX_NOTE)}\n `), "ก".repeat(MAX_NOTE));
+  assert.deepEqual(note("ก".repeat(MAX_NOTE + 1)), ["note", "หมายเหตุยาวเกิน 500 ตัวอักษร"]);
+  for (const value of [1, true, ["x"], { text: "x" }]) assert.deepEqual(note(value), ["note", "หมายเหตุไม่ถูกต้อง"], JSON.stringify(value));
+  // checked last, as the form has it last: a bad day is said first
+  const both = check({ ...ok, date: "2026-11-21", note: 1 });
+  assert.ok(!both.ok);
+  assert.equal(both.field, "date");
 });
 
 test("the room choice is checked: only OR X or ห้องทำแผล, and ห้องทำแผล needs the scrub answer", () => {
@@ -176,6 +202,7 @@ test("a saved booking: the doctor's choice, or for one saved before the form ask
     shift: "in",
     dressing: null,
     scrubDoes: null,
+    note: "",
     surgeonId: "7",
     surgeon: "x",
     subtype: "GENSX",
@@ -276,7 +303,7 @@ test("added cases join the board after its own, numbered per room", () => {
       { id: "a", roomId: "or-2", order: 1, procedure: "EGD", surgeon: "x", specialty: null, status: "scheduled", shift: "in" },
     ],
   };
-  const base = { operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
+  const base = { operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, note: "", hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
   const added: AddedCase[] = [
     { ...base, id: "1", date: TODAY, roomId: "or-2" },
     { ...base, id: "2", date: TODAY, roomId: "or-3", shift: "out" },
