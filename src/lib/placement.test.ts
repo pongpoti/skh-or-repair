@@ -6,8 +6,8 @@ import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import * as week from "./week.ts";
 
 const REPAIR = DEFAULT_REPAIR_PERIODS;
-const WEEKLY_MONDAY = "2026-11-09"; // 2nd Monday, before the repair: CVT in OR 13, ORTHO in OR 11
-const WEEKLY_TUESDAY = "2026-11-10";
+const PAST_MONDAY = "2026-11-09"; // a day the board shows looking back: the first half's rooms, as on every day since 1 Jan 2026
+const AFTER_MONDAY = "2027-03-22"; // after the repair's last day: the second half's rooms stay
 const FIRST_MONDAY = "2026-11-16"; // first half
 const SECOND_MONDAY = "2027-02-01"; // second half
 
@@ -28,27 +28,18 @@ test("the keyword rules are the same functions lib/week.ts has always exported",
   assert.equal(week.isScopeCase, isScopeCase);
 });
 
-test("outside the repair, placement is the weekly schedule's (the week export's rules)", () => {
-  assert.equal(room(input("ORTHO", { procedure: "Dressing wound" }), WEEKLY_MONDAY), "or-1", "dressing: OR 1");
-  assert.equal(room(input("URO", { procedure: "change vac dressing", emergency: true }), WEEKLY_MONDAY), "or-1", "dressing before emergency");
-  assert.equal(room(input("ORTHO", { emergency: true }), WEEKLY_MONDAY), "or-8", "emergency: OR 8");
-  assert.ok(["or-4", "or-6"].includes(room(input("OBGYN", { emergency: true }), WEEKLY_MONDAY)), "obstetrics stays in its rooms");
-  assert.equal(room(input("GENSX", { procedure: "colonoscopy", team: "GENSX" }), WEEKLY_MONDAY), "or-3", "SCOPE room");
-  assert.equal(room(input("GENSX", { procedure: "colonoscopy", team: "URO" }), WEEKLY_MONDAY), "or-2", "not a GENSX surgeon's");
-  assert.equal(room(input("SCOPE", { procedure: "hernia" }), WEEKLY_MONDAY), "or-2", "a SCOPE-labelled case that is no endoscopy");
-  assert.equal(room(input("CVT"), WEEKLY_MONDAY), "or-13");
-  assert.equal(room(input("CVT"), WEEKLY_TUESDAY), "no-room", "CVT holds no room on Tuesday");
-  assert.equal(room(input(null), WEEKLY_MONDAY), "no-department");
-  assert.equal(room(input(null, { emergency: true }), WEEKLY_MONDAY), "or-8", "an emergency needs no department");
+test("no weekly schedule (Pong, 18 Nov 2026): a past day has the first half's rooms, a day after the repair the second's", () => {
+  // Before 18 Nov 2026 these went by the weekly schedule: dressing OR 1, emergencies OR 8, SCOPE OR 3, GENSX OR 2 or 5.
+  assert.equal(room(input("ORTHO", { procedure: "Dressing wound" }), PAST_MONDAY), "or-10", "dressing");
+  assert.equal(room(input("ORTHO", { emergency: true }), PAST_MONDAY), "or-9", "emergency");
+  assert.equal(room(input("GENSX", { procedure: "colonoscopy", team: "GENSX" }), PAST_MONDAY), "or-11", "SCOPE: the mixed room");
+  assert.deepEqual(roomsHeldBy("GENSX", PAST_MONDAY, REPAIR), ["or-12"]);
+  assert.equal(room(input("GENSX"), PAST_MONDAY), "or-12");
+  assert.equal(room(input("CVT"), PAST_MONDAY), "or-11", "no CVT room: the mixed room");
+  assert.equal(room(input("OBGYN"), PAST_MONDAY), "obgyn-building");
+  assert.equal(room(input("GENSX"), AFTER_MONDAY), "or-5");
+  assert.equal(room(input("EYE"), AFTER_MONDAY), "or-4");
   assert.equal(room(input("GENSX"), "2026-11-07"), "no-room", "Saturday");
-});
-
-test("a department with several rooms gets the one with the fewest cases, the first on a tie", () => {
-  // GENSX holds OR 2 and OR 5 on Monday.
-  assert.deepEqual(roomsHeldBy("GENSX", WEEKLY_MONDAY, REPAIR), ["or-2", "or-5"]);
-  assert.equal(room(input("GENSX"), WEEKLY_MONDAY), "or-2");
-  assert.equal(room(input("GENSX"), WEEKLY_MONDAY, { "or-2": 1 }), "or-5");
-  assert.equal(room(input("GENSX"), WEEKLY_MONDAY, { "or-2": 2, "or-5": 2 }), "or-2");
 });
 
 test("first half: the half's rooms, NEURO and CVT emergencies in OR 12 or 13, obstetrics off the board", () => {

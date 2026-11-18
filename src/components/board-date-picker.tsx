@@ -33,8 +33,9 @@ const CARD =
  * The board's date as a button that picks another day (Pong, 15 Nov 2026: "Allow user to select date on main page :
  * display floating card with taint bg", then "Display simply as calendar"). A tap on the date, or the line above it,
  * opens a floating card with the month calendar of the booking form (ThaiCalendar: Thai months, the Buddhist year,
- * weekends and holidays closed and named), from today to the repair's last day (lib/board-day.ts pickRange; Pong, 15
- * Nov 2026: "It should be current and future day only", "Calendar confine Within time range"). Picking a day shows the
+ * weekends and holidays closed and named), from the first half's first day, 1 Jan 2026, to the repair's last day
+ * (lib/board-day.ts pickRange; Pong, 18 Nov 2026: "allow view calendar backward", and 15 Nov 2026: "Calendar confine
+ * Within time range"). Picking a day shows the
  * board for it, with the plan of the repair's half that day falls in, at
  * /?date=YYYY-MM-DD, keeping the room that is open; กลับไปตารางปัจจุบัน, or picking the board's own day, goes back to
  * the address without a date. Escape, the close button or a tap outside the card closes it, and the focus goes back to

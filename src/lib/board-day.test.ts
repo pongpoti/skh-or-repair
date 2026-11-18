@@ -163,12 +163,17 @@ test("loading the board's day: BOT holidays when they come, weekdays and EXTRA_H
   assert.deepEqual((await loadUploadSlot(at("2026-12-04T15:30:00"))).target, { ok: false, reason: "no-token" });
 });
 
-test("a day picked on the board: today to the repair's last day, never a past day", () => {
-  assert.deepEqual(pickRange("2026-11-17", REPAIR), { min: "2026-11-17", max: "2027-03-17" }, "the second half included");
-  assert.deepEqual(pickRange("2027-03-17", REPAIR), { min: "2027-03-17", max: "2027-03-17" }, "the repair's last day");
+test("a day picked on the board: from the first half's first day, 1 Jan 2026, to the repair's last day", () => {
+  // Pong, 18 Nov 2026: "apply first half schedule retrospectively from Jan 1, 2026 and allow view calendar backward"
+  assert.deepEqual(pickRange("2026-11-17", REPAIR), { min: "2026-01-01", max: "2027-03-17" }, "the second half included");
+  assert.deepEqual(pickRange("2027-03-17", REPAIR), { min: "2026-01-01", max: "2027-03-17" }, "the repair's last day");
   // once the repair is over, as far ahead as doctors book
   assert.equal(PICK_AHEAD_DAYS, BOOK_AHEAD_DAYS);
-  assert.deepEqual(pickRange("2027-03-18", REPAIR), { min: "2027-03-18", max: "2027-05-17" });
+  assert.deepEqual(pickRange("2027-03-18", REPAIR), { min: "2026-01-01", max: "2027-05-17" });
+  // an admin's later first day starts the calendar there, but never after today
+  const later = { ...REPAIR, half1: { ...REPAIR.half1, from: "2026-12-08" } };
+  assert.deepEqual(pickRange("2026-11-17", later), { min: "2026-11-17", max: "2027-03-17" });
+  assert.deepEqual(pickRange("2026-12-20", later), { min: "2026-12-08", max: "2027-03-17" });
 });
 
 test("the address's picked day: a real workday in range, else none", () => {
@@ -176,7 +181,9 @@ test("the address's picked day: a real workday in range, else none", () => {
   const today = "2026-11-17";
   assert.equal(pickedDay("2026-11-18", today, REPAIR, holidays), "2026-11-18");
   assert.equal(pickedDay("2026-11-17", today, REPAIR, holidays), "2026-11-17", "today");
-  assert.equal(pickedDay("2026-11-16", today, REPAIR, holidays), null, "yesterday: no past day");
+  assert.equal(pickedDay("2026-11-16", today, REPAIR, holidays), "2026-11-16", "yesterday: a past day");
+  assert.equal(pickedDay("2026-01-02", today, REPAIR, holidays), "2026-01-02", "back to the first workday of 2026");
+  assert.equal(pickedDay("2025-12-31", today, REPAIR, holidays), null, "before 1 Jan 2026");
   assert.equal(pickedDay("2027-02-01", today, REPAIR, holidays), "2027-02-01", "a day in the second half");
   assert.equal(pickedDay("2027-03-17", today, REPAIR, holidays), "2027-03-17", "the repair's last day");
   assert.equal(pickedDay("2027-03-18", today, REPAIR, holidays), null, "after the repair");
@@ -189,6 +196,8 @@ test("the address's picked day: a real workday in range, else none", () => {
 });
 
 test("how a picked day stands to today, and its eyebrow", () => {
+  assert.equal(relationTo("2026-11-16", "2026-11-17"), "past");
+  assert.equal(boardEyebrow("past"), "ตารางผ่าตัดย้อนหลัง");
   assert.equal(relationTo("2026-11-17", "2026-11-17"), "today");
   assert.equal(relationTo("2026-11-18", "2026-11-17"), "tomorrow");
   assert.equal(relationTo("2026-11-20", "2026-11-17"), "later");

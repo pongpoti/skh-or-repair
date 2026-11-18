@@ -82,7 +82,8 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   assert.deepEqual(room("GENSX", "EGD", FIRST), { ok: true, roomId: "or-11", dressing: false }, "an endoscopy shares the mixed room during the repair");
   assert.deepEqual(room("GENSX", "Lap chole", SECOND), { ok: true, roomId: "or-5", dressing: false });
   assert.deepEqual(room("EYE", "Phaco", SECOND), { ok: true, roomId: "or-4", dressing: false });
-  assert.deepEqual(room("URO", "TURP", "2026-11-11"), { ok: true, roomId: "or-7", dressing: false }, "before the repair, the weekly schedule's room");
+  // No weekly schedule (Pong, 18 Nov 2026): a day before 16 Nov has the first half's rooms too.
+  assert.deepEqual(room("URO", "TURP", "2026-11-11"), { ok: true, roomId: "or-11", dressing: false }, "the first half's mixed room");
   // an empty name still shows the department's room in the form
   assert.deepEqual(room("ORTHO", "", FIRST), { ok: true, roomId: "or-13", dressing: false });
   // the surgeon decides (Pong, 15 Nov 2026): a name that reads like a dressing stays in the department's room
@@ -97,7 +98,7 @@ test("ห้องทำแผล: the dressing room that day, whatever the depa
   assert.deepEqual(room("ORTHO", "ORIF radius", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "the name does not gate it");
   assert.deepEqual(room("URO", "", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true });
   assert.deepEqual(room("GENSX", "D/S", "2027-01-27"), { ok: true, roomId: "or-1", dressing: true }, "the second half");
-  assert.deepEqual(room("GENSX", "dressing", "2026-11-11"), { ok: true, roomId: "or-1", dressing: true }, "before the repair, OR 1");
+  assert.deepEqual(room("GENSX", "dressing", "2026-11-11"), { ok: true, roomId: "or-10", dressing: true }, "the first half's dressing room, never the weekly schedule's OR 1");
   assert.deepEqual(room(null, "Dressing", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "no department needed");
   assert.deepEqual(room("GENSX", "D/S", "2026-11-21"), { ok: false, reason: "no-dressing-room", error: "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น" }, "a Saturday");
 });
@@ -121,7 +122,7 @@ test("no room: obstetrics-gynaecology during the repair, an unknown department, 
     "no-room": "ไม่มีในวันที่เลือก",
     "no-dressing-room": "ไม่มีในวันที่เลือก",
   });
-  assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "or-6", "after the repair, its own room again");
+  assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้", "after the repair too: no weekly schedule");
   assert.equal(refused(null, "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
   assert.equal(refused("", "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
   assert.equal(refused("ANES", "Lap chole", "2026-11-16"), "or-11", "a subtype the suite has no department for: the mixed room");
@@ -300,26 +301,26 @@ test("added cases join the board after its own, numbered per room", () => {
     name: "Friday",
     date: TODAY,
     operations: [
-      { id: "a", roomId: "or-2", order: 1, procedure: "EGD", surgeon: "x", specialty: null, status: "scheduled", shift: "in" },
+      { id: "a", roomId: "or-12", order: 1, procedure: "EGD", surgeon: "x", specialty: null, status: "scheduled", shift: "in" },
     ],
   };
   const base = { operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, note: "", hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
   const added: AddedCase[] = [
-    { ...base, id: "1", date: TODAY, roomId: "or-2" },
-    { ...base, id: "2", date: TODAY, roomId: "or-3", shift: "out" },
-    { ...base, id: "3", date: "2026-11-05", roomId: "or-2" }, // another day
+    { ...base, id: "1", date: TODAY, roomId: "or-12" },
+    { ...base, id: "2", date: TODAY, roomId: "or-11", shift: "out" },
+    { ...base, id: "3", date: "2026-11-05", roomId: "or-12" }, // another day
     { ...base, id: "4", date: TODAY, roomId: "or-9" },
-    { ...base, id: "5", date: TODAY, roomId: "or-2", operation: "" }, // a booking without a name yet
+    { ...base, id: "5", date: TODAY, roomId: "or-12", operation: "" }, // a booking without a name yet
   ];
   const ops = withAddedCases(board, added, REPAIR).operations;
   assert.deepEqual(
     ops.map((item) => [item.id, item.roomId, item.order, item.shift]),
     [
-      ["a", "or-2", 1, "in"],
-      ["case-1", "or-2", 2, "in"],
-      ["case-2", "or-3", 1, "out"],
+      ["a", "or-12", 1, "in"],
+      ["case-1", "or-12", 2, "in"],
+      ["case-2", "or-11", 1, "out"],
       ["case-4", "or-9", 1, "in"],
-      ["case-5", "or-2", 3, "in"],
+      ["case-5", "or-12", 3, "in"],
     ],
   );
   assert.equal(ops[1].specialty, "ออร์โธปิดิกส์");

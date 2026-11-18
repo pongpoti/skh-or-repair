@@ -285,11 +285,11 @@ test("workbook cases are placed under the repair's dates in force when the board
   const after = buildBoardRows({ date, periods: moved, workbook: stored, bookings: [mine], viewer: MX });
   assert.equal(after.mismatchCount, 1);
   assert.deepEqual(after.mismatchByRoom, { "or-12": 1 });
-  // And outside the repair altogether (both halves moved away) the weekly schedule places them.
-  const none = { half1: { from: "2026-11-14", to: "2026-12-31" }, half2: { from: "2027-03-01", to: "2027-03-17" } };
-  const weekly = buildBoardRows({ date, periods: none, workbook: stored, bookings: [], viewer: MX });
-  assert.equal(weekly.rows.length, 3, "OB-GYN has its own room outside the repair");
-  assert.ok(weekly.rows.every((row) => row.flag === "unbooked"));
+  // And in a gap an admin leaves between the halves, the first half's rooms: there is no weekly schedule (Pong, 18 Nov
+  // 2026: "forget normal day OR schedule"), so OB-GYN stays off the board.
+  const gap = { half1: { from: "2026-11-14", to: "2026-12-31" }, half2: { from: "2027-03-01", to: "2027-03-17" } };
+  const between = buildBoardRows({ date, periods: gap, workbook: stored, bookings: [], viewer: MX });
+  assert.deepEqual(between.rows.map((row) => [row.roomId, row.flag]), [["or-12", "unbooked"], ["or-13", "unbooked"]]);
 });
 
 test("a booking moves with the repair's dates, like the workbook's cases", () => {

@@ -41,7 +41,7 @@ export function boardDateOf(cycleDay: string, holidays: readonly Holiday[]): str
 }
 
 /** How the board's date stands to today, for the top bar's eyebrow. */
-export type BoardDayRelation = "today" | "tomorrow" | "later";
+export type BoardDayRelation = "past" | "today" | "tomorrow" | "later";
 
 export type BoardDay = {
   /** The Bangkok date of the moment. */
@@ -62,15 +62,18 @@ export function boardDayAt(at: Date, holidays: readonly Holiday[]): BoardDay {
   return { today, minutes, cycleDay, boardDate, relation };
 }
 
-/** How `date`, today or a day after it, stands to `today`. */
+/** How `date` stands to `today`. */
 export function relationTo(date: string, today: string): BoardDayRelation {
-  if (date <= today) return "today";
+  if (date < today) return "past";
+  if (date === today) return "today";
   return date === addDays(today, 1) ? "tomorrow" : "later";
 }
 
 /** The top bar's line above the date. */
 export function boardEyebrow(relation: BoardDayRelation): string {
-  // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026).
+  // Any day after today is the incoming list, whether it is tomorrow or after a weekend (Pong, 15 Nov 2026); a day
+  // before today, picked on the calendar, is a past list (Pong, 18 Nov 2026: "allow view calendar backward").
+  if (relation === "past") return "ตารางผ่าตัดย้อนหลัง";
   return relation === "today" ? "ตารางผ่าตัดวันนี้" : "ตารางผ่าตัดถัดไป";
 }
 
@@ -81,14 +84,17 @@ export function boardEyebrow(relation: BoardDayRelation): string {
 export const PICK_AHEAD_DAYS = 60;
 
 /**
- * The days the board's date can be picked from, YYYY-MM-DD. Only today and the days after it (Pong, 15 Nov 2026: "It
- * should be current and future day only"); today stays pickable after 16:00, when the board itself has moved on to the
- * next workday. The last day is the repair's last day, so the calendar stays within it, second half included ("Calendar
- * confine Within time range"); once the repair is over, PICK_AHEAD_DAYS ahead.
+ * The days the board's date can be picked from, YYYY-MM-DD. The first day is the first half's first day, 1 Jan 2026 as
+ * planned (Pong, 18 Nov 2026: "apply first half schedule retrospectively from Jan 1, 2026 and allow view calendar
+ * backward"; until then it was today, "current and future day only", 15 Nov 2026), or today should an admin move that
+ * day later. Today stays pickable after 16:00, when the board itself has moved on to the next workday. The last day is
+ * the repair's last day, so the calendar stays within it, second half included ("Calendar confine Within time range");
+ * once the repair is over, PICK_AHEAD_DAYS ahead.
  */
 export function pickRange(today: string, periods: RepairPeriods): { min: string; max: string } {
   const end = periods.half2.to > periods.half1.to ? periods.half2.to : periods.half1.to;
-  return { min: today, max: REPAIR_IN_USE && end >= today ? end : addDays(today, PICK_AHEAD_DAYS) };
+  const first = REPAIR_IN_USE && periods.half1.from < today ? periods.half1.from : today;
+  return { min: first, max: REPAIR_IN_USE && end >= today ? end : addDays(today, PICK_AHEAD_DAYS) };
 }
 
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
