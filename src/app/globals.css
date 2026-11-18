@@ -261,6 +261,75 @@ body {
     white-space: nowrap;
   }
 
+  /* A room's badge in the list of open rooms (Pong, 18 Nov 2026, style A of room-badges/room-badge-samples.png): one
+     capsule, the room number in a darker part of the department's colour (--room), then the department's name. A room
+     split between two departments carries a second name part in the afternoon's colour (--room-pm). */
+  .room-pill {
+    display: inline-flex;
+    align-items: stretch;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 36px;
+    border-radius: 999px;
+    overflow: hidden;
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9375rem;
+    line-height: 1.25;
+    box-shadow: 0 1px 2px rgb(41 29 20 / 0.18), 0 4px 10px -4px var(--room);
+  }
+  .room-pill-no {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0 0.6875rem 0 0.875rem;
+    background: color-mix(in oklab, var(--room) 72%, black);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+  .room-pill-or {
+    font-size: 0.65625rem;
+    letter-spacing: 0.06em;
+    opacity: 0.75;
+  }
+  .room-pill-dept {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    padding: 0 0.9375rem 0 0.6875rem;
+    background: var(--room);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22);
+  }
+  .room-pill-dept + .room-pill-dept {
+    padding-left: 0.625rem;
+    background: var(--room-pm);
+  }
+  .room-pill-part {
+    flex-shrink: 0;
+    margin-right: 0.3125rem;
+    font-size: 0.71875rem;
+    font-weight: 600;
+    opacity: 0.85;
+  }
+  .room-pill-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Two names share a split room's line, so they are a little smaller there. */
+  .room-pill-split .room-pill-no {
+    padding: 0 0.5625rem 0 0.75rem;
+  }
+  .room-pill-split .room-pill-dept {
+    padding: 0 0.6875rem 0 0.5rem;
+    font-size: 0.8125rem;
+  }
+  .room-pill-split .room-pill-dept + .room-pill-dept {
+    padding-left: 0.5rem;
+  }
+
   .btn {
     display: inline-flex;
     min-height: 2.75rem;
