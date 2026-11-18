@@ -107,11 +107,11 @@ test("no room: obstetrics-gynaecology during the repair, an unknown department, 
     const room = bookingRoom(subtype, operation, date, REPAIR, "dept");
     return room.ok ? room.roomId : room.error;
   };
-  assert.equal(refused("OBGYN", "TAH", "2026-11-16"), "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้");
+  assert.equal(refused("OBGYN", "TAH", "2026-11-16"), "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้");
   const obgynDressing = bookingRoom("OBGYN", "Dressing", "2026-11-16", REPAIR, "dressing");
   assert.deepEqual(
     obgynDressing,
-    { ok: false, reason: "obgyn-building", error: "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้" },
+    { ok: false, reason: "obgyn-building", error: "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้" },
     "the dressing room too",
   );
   // The card the doctor cannot pick says the reason in short: only a missing room is about the day.
@@ -122,10 +122,10 @@ test("no room: obstetrics-gynaecology during the repair, an unknown department, 
     "no-dressing-room": "ไม่มีในวันที่เลือก",
   });
   assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "or-6", "after the repair, its own room again");
-  assert.equal(refused(null, "Lap chole", "2026-11-16"), "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ");
-  assert.equal(refused("", "Lap chole", "2026-11-16"), "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ");
+  assert.equal(refused(null, "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
+  assert.equal(refused("", "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
   assert.equal(refused("ANES", "Lap chole", "2026-11-16"), "or-11", "a subtype the suite has no department for: the mixed room");
-  assert.equal(refused("GENSX", "Lap chole", "2026-11-21"), "สาขาของคุณไม่มีห้องผ่าตัดในวันที่เลือก เลือกวันอื่น", "a Saturday");
+  assert.equal(refused("GENSX", "Lap chole", "2026-11-21"), "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น", "a Saturday");
 });
 
 test("a good booking passes, cleaned, in the room of the doctor's choice; a room the form sends is ignored", () => {
@@ -186,7 +186,7 @@ test("the room choice is checked: only OR X or ห้องทำแผล, and 
   // a day without the room: another day may have one
   assert.deepEqual(
     check({ ...ok, room: "dept" }, { subtype: "OBGYN" }),
-    { ok: false, field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้" },
+    { ok: false, field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้" },
   );
   assert.deepEqual(error({ room: "dressing", scrubDoes: true, operation: "x" }), "ok", "no department needed for the dressing room");
   assert.equal(check({ ...ok, room: "dept" }, { subtype: null }).ok, false, "but needed for OR X");
@@ -254,9 +254,9 @@ test("dates: from the earliest day up to 60 days ahead, weekdays only, not a hol
   }
   assert.equal(error(addDays(TODAY, 60)), "ok");
   assert.match((error(addDays(TODAY, 61)) as { error: string }).error, /ไม่เกิน 60 วัน/);
-  assert.match((error("2026-11-21") as { error: string }).error, /เสาร์และอาทิตย์/);
+  assert.match((error("2026-11-21") as { error: string }).error, /เสาร์-อาทิตย์/);
   const holiday = error("2026-12-10", { holidays: DECEMBER });
-  assert.deepEqual(holiday, { ok: false, field: "date", error: "วันที่เลือกเป็นวันหยุด (วันรัฐธรรมนูญ) ไม่มีตารางผ่าตัด" });
+  assert.deepEqual(holiday, { ok: false, field: "date", error: "วันหยุด (วันรัฐธรรมนูญ) เลือกวันอื่น" });
 });
 
 test("the HN is required, 7 digits, stored normalised", () => {
@@ -290,8 +290,8 @@ test("the shift defaults to in hours and must be in or out; nothing at all is re
 });
 
 test("a department without a room that day is said, about no field the doctor can fix, or about the day", () => {
-  assert.deepEqual(check(ok, { subtype: null }), { ok: false, field: undefined, error: "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ" });
-  assert.deepEqual(check(ok, { subtype: "OBGYN" }), { ok: false, field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้" });
+  assert.deepEqual(check(ok, { subtype: null }), { ok: false, field: undefined, error: "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล" });
+  assert.deepEqual(check(ok, { subtype: "OBGYN" }), { ok: false, field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้" });
 });
 
 test("added cases join the board after its own, numbered per room", () => {

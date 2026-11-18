@@ -72,7 +72,7 @@ export default async function UploadPage() {
   const at = now();
   const [slot, name, periods] = await Promise.all([loadUploadSlot(at), displayNameFor(user, user.name), getRepairPeriods(pool)]);
   const target = slot.target.ok ? slot.target.date : null;
-  const blocked = slot.target.ok ? null : slot.target.reason === "none" ? "ไม่พบวันทำการใน 14 วันข้างหน้า" : HOLIDAYS_UNAVAILABLE;
+  const blocked = slot.target.ok ? null : slot.target.reason === "none" ? "ไม่มีวันทำการใน 14 วันข้างหน้า" : HOLIDAYS_UNAVAILABLE;
   // The upload the board will show for that day: the latest made today (lib/board-day.ts).
   const latest = target ? await latestUpload(pool, slot.cycleDay, target) : null;
   const shown = latest ? await latestOf(pool, latest, periods) : null;

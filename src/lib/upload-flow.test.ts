@@ -324,10 +324,10 @@ test("a file that is not an .xlsx is refused with the reader's Thai message", ()
   assert.ok(!text.ok && text.error === "file");
 });
 
-test("a file whose headers are not the export's is refused, naming what is missing", () => {
+test("a file whose headers are not the export's is refused: a few missing are named, a file missing many is not the export", () => {
   const result = processWorkbook(xlsxOf([["ID", "HN"], [1, "2"]]), THURSDAY, WEEKLY);
   assert.ok(!result.ok && result.error === "headers");
-  assert.match(!result.ok ? result.message : "", /ชื่อการผ่าตัด/);
+  assert.equal(!result.ok ? result.message : "", "ไฟล์นี้ไม่ใช่ตารางผ่าตัดจาก HOSxP");
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -456,11 +456,11 @@ test("the file checks the form and the action share: .xlsx only, not empty, at m
   assert.equal(fileProblem({ name: "or-5-nov.xlsx", size: 20_000 }, rules), null);
   assert.equal(fileProblem({ name: " OR.XLSX ", size: rules.maxBytes }, rules), null);
   assert.equal(fileProblem({ name: "or.xls", size: 20_000 }, rules), XLS_MESSAGE);
-  assert.equal(fileProblem({ name: "or.csv", size: 20_000 }, rules), "รับเฉพาะไฟล์ .xlsx ที่ส่งออกจาก HOSxP");
-  assert.equal(fileProblem({ name: "or.xlsx", size: 0 }, rules), "ไฟล์นี้ว่างเปล่า เลือกไฟล์ใหม่");
+  assert.equal(fileProblem({ name: "or.csv", size: 20_000 }, rules), "ใช้ไฟล์ .xlsx จาก HOSxP เท่านั้น");
+  assert.equal(fileProblem({ name: "or.xlsx", size: 0 }, rules), "ไฟล์นี้ว่าง เลือกไฟล์ใหม่");
   assert.equal(fileProblem({ name: "or.xlsx", size: rules.maxBytes + 1 }, rules), "ไฟล์ใหญ่เกิน 4 MB");
-  assert.equal(fileProblem(null, rules), "เลือกไฟล์ตารางผ่าตัดก่อน");
-  assert.equal(fileProblem({ name: "", size: 10 }, rules), "เลือกไฟล์ตารางผ่าตัดก่อน");
+  assert.equal(fileProblem(null, rules), "เลือกไฟล์ก่อน");
+  assert.equal(fileProblem({ name: "", size: 10 }, rules), "เลือกไฟล์ก่อน");
 });
 
 test("a file the page accepts always reaches the action: under Next's body limit, and that under Vercel's 4.5 MB", () => {

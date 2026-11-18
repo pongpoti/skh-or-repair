@@ -3,7 +3,7 @@
 // (Chromium). The main app runs in provider mode (SMS_PROVIDER=deesmsx against tests/mock-deesmsx.mjs through
 // DEESMSX_API_URL); a second app on the same build runs in local file mode (SMS_PROVIDER=file) near the end.
 // Configurable so several copies can run in parallel:
-//   E2E_APP_PORT (3100)  E2E_FILE_APP_PORT (3101)  E2E_LINE_PORT (4010)  E2E_SMS_PORT (4011)
+//   E2E_APP_PORT (3100)  E2E_FILE_APP_PORT (3101)  E2E_GATE_APP_PORT (3103)  E2E_LINE_PORT (4010)  E2E_SMS_PORT (4011)
 //   E2E_DATABASE_URL (postgres://postgres:postgres@localhost:5432/orskh_e2e)
 //   E2E_OUTBOX_DIR (tmp)  E2E_SCREENS_DIR (tmp)  E2E_SKIP_BUILD=1 (reuse .next)
 //   ALLOW_REMOTE_TEST_DB=1 (allow a non-local E2E_DATABASE_URL; see tests/db-guard.mjs)
@@ -39,6 +39,7 @@ const pg = require("pg");
 const APP_PORT = Number(process.env.E2E_APP_PORT ?? 3100);
 const FILE_APP_PORT = Number(process.env.E2E_FILE_APP_PORT ?? 3101);
 const DOWN_APP_PORT = Number(process.env.E2E_DOWN_APP_PORT ?? 3102);
+const GATE_APP_PORT = Number(process.env.E2E_GATE_APP_PORT ?? 3103);
 const LINE_PORT = Number(process.env.E2E_LINE_PORT ?? 4010);
 const SMS_PORT = Number(process.env.E2E_SMS_PORT ?? 4011);
 const DB_URL = process.env.E2E_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/orskh_e2e";
@@ -50,6 +51,7 @@ const LOG_DIR = join(tmpdir(), `orskh-e2e-logs-${APP_PORT}`);
 const APP = `http://localhost:${APP_PORT}`;
 const FILE_APP = `http://localhost:${FILE_APP_PORT}`;
 const DOWN_APP = `http://localhost:${DOWN_APP_PORT}`;
+const GATE_APP = `http://localhost:${GATE_APP_PORT}`;
 const LINE = `http://127.0.0.1:${LINE_PORT}`;
 const SMS = `http://127.0.0.1:${SMS_PORT}`;
 
@@ -84,9 +86,9 @@ const PHONE_DOC = NO_EMAIL_DOC;
 const PHONE_DOC_PHONE = "0900000010";
 const RACE_DOC = "ณัฐพล วงศ์ใหญ่";
 // MSG texts (src/lib/http.ts) of a name someone else holds: the way on is the administrator, never a typed name
-const CLAIM_TAKEN = "ชื่อนี้มีผู้เลือกแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล";
-const EMAIL_TAKEN = "ชื่อนี้มีผู้ยืนยันตัวตนแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล";
-const ASK_ADMIN = "ไม่พบชื่อ หรือชื่อมีผู้เลือกแล้ว? กรุณาติดต่อผู้ดูแล";
+const CLAIM_TAKEN = "ชื่อนี้มีคนเลือกแล้ว ถ้าเป็นชื่อคุณ ติดต่อผู้ดูแล";
+const EMAIL_TAKEN = "ชื่อนี้มีคนใช้แล้ว ถ้าเป็นชื่อคุณ ติดต่อผู้ดูแล";
+const ASK_ADMIN = "ไม่พบชื่อ หรือมีคนเลือกไปแล้ว? ติดต่อผู้ดูแล";
 const LOCKED = "0900000008"; // locks its code with 5 wrong guesses
 const USERS_CSV = [
   "\uFEFFfirst_name,last_name,type,subtype",
@@ -169,6 +171,8 @@ const PNG_1PX = Buffer.from(
 
 // User-Agents for the checks that depend on the device (the e2e app runs with the device gate off)
 const UA_DESKTOP = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+const UA_IPHONE_SAFARI =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 const UA_IPHONE_LIFF =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari Line/14.10.0 LIFF";
 
@@ -442,9 +446,14 @@ async function noSideScroll(page, label) {
 
 /** Every visible button, link and field is at least 44 px tall (touch targets). */
 async function touchTargets(page, label) {
+  const frames = await page.evaluate(() =>
+    [...document.querySelectorAll("main .file-picker")].map((el) => Math.round(el.getBoundingClientRect().height)).filter((h) => h < 44),
+  );
+  assert(frames.length === 0, `${label}: file picker under 44 px: ${JSON.stringify(frames)}`);
   const small = await page.evaluate(() =>
     [...document.querySelectorAll("main a, main button, main input, main select")]
-      .filter((el) => el.checkVisibility())
+      // A visually hidden input (the upload's file input) is tapped through its label, whose frame is measured instead.
+      .filter((el) => el.checkVisibility() && !el.classList.contains("sr-only"))
       .map((el) => [el.textContent?.trim() || el.id || el.tagName, Math.round(el.getBoundingClientRect().height)])
       .filter(([, h]) => h < 44),
   );
@@ -595,6 +604,7 @@ async function main() {
     await assertPortFree(APP_PORT, undefined, "E2E_APP_PORT");
     await assertPortFree(FILE_APP_PORT, undefined, "E2E_FILE_APP_PORT");
     await assertPortFree(DOWN_APP_PORT, undefined, "E2E_DOWN_APP_PORT");
+    await assertPortFree(GATE_APP_PORT, undefined, "E2E_GATE_APP_PORT");
     await assertPortFree(LINE_PORT, "127.0.0.1", "E2E_LINE_PORT");
     await assertPortFree(SMS_PORT, "127.0.0.1", "E2E_SMS_PORT");
   };
@@ -672,6 +682,7 @@ async function main() {
   const app = startProcess("app", ["node_modules/next/dist/bin/next", "start", "-p", String(APP_PORT)], appEnv);
   let fileApp = null; // the local file mode app, started by its test
   let downApp = null; // the app with its database down, started by its test
+  let gateApp = null; // the app with the device gate on (as on Vercel), started by its test
   try {
     await waitFor(`${LINE}/__control/health`, line);
     await waitFor(`${SMS}/__control/health`, sms);
@@ -1380,7 +1391,7 @@ async function main() {
       await page.fill("#phone", "02-123-4567");
       await page.click('button[type="submit"]');
       await page.waitForSelector("#phone-error");
-      assert((await page.textContent("#phone-error")).includes("เบอร์มือถือไม่ถูกต้อง"), "invalid number message");
+      assert((await page.textContent("#phone-error")).includes("ใส่เบอร์มือถือ 10"), "invalid number message");
       assert((await page.getAttribute("#phone", "aria-invalid")) === "true", "the number is marked invalid");
       await page.waitForFunction(() => document.activeElement?.id === "phone", null, { timeout: 2000 });
       await page.keyboard.press("End");
@@ -1391,7 +1402,7 @@ async function main() {
       const wrong = sms.pin === "000000" ? "111111" : "000000";
       for (let i = 1; i <= 5; i++) {
         await page.fill("#code", wrong);
-        const expected = i < 5 ? `เหลือโอกาสอีก ${5 - i} ครั้ง` : "ใส่รหัสผิดเกินจำนวนครั้งที่กำหนด";
+        const expected = i < 5 ? `เหลืออีก ${5 - i} ครั้ง` : "ใส่รหัสผิดหลายครั้ง";
         // the server keeps the count with its unit by U+00A0
         await page.waitForFunction(
           (txt) => document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/ /g, " ").includes(txt),
@@ -1444,7 +1455,7 @@ async function main() {
       // a wrong code gets exactly the same answer as for a listed number
       await page.fill("#code", sms.pin === "000000" ? "111111" : "000000");
       await page.waitForFunction(() =>
-        document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/\u00a0/g, " ").includes("เหลือโอกาสอีก 4 ครั้ง"),
+        document.querySelector('[data-testid="otp-error"]')?.textContent?.replace(/\u00a0/g, " ").includes("เหลืออีก 4 ครั้ง"),
       );
       await page.fill("#code", sms.pin);
       await page.waitForURL(`${APP}/login/claim?type=PN`);
@@ -1683,11 +1694,11 @@ async function main() {
         assert(await page.isVisible("#phone"), `still on the number step after ${mode}`);
       };
       const invalidMark = () => page.getAttribute("#phone", "aria-invalid");
-      await sendAndExpect("102", "ขณะนี้ระบบส่ง SMS ไม่ได้ กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล");
+      await sendAndExpect("102", "ส่ง SMS ไม่ได้ตอนนี้ ลองใหม่ภายหลัง");
       assert((await invalidMark()) === null, "no credit: the number is not marked invalid");
-      await sendAndExpect("9", "ระบบยังไม่พร้อม กรุณาติดต่อผู้ดูแล");
+      await sendAndExpect("9", "ระบบยังไม่พร้อม ติดต่อผู้ดูแล");
       assert((await invalidMark()) === null, "settings: the number is not marked invalid");
-      await sendAndExpect("99", "ส่ง SMS ไปที่เบอร์นี้ไม่ได้ กรุณาตรวจสอบเบอร์มือถือ");
+      await sendAndExpect("99", "ส่ง SMS ไปเบอร์นี้ไม่ได้ ตรวจเบอร์อีกครั้ง");
       assert((await invalidMark()) === "true", "deeSMSX refused the number: marked invalid");
       const rows = await db.query("SELECT count(*)::int AS n FROM otp_codes WHERE line_sub = $1", [SUB_I]);
       assert(rows.rows[0].n === 0, `refused sends leave no row (no quota, no cooldown): ${rows.rows[0].n}`);
@@ -1695,7 +1706,7 @@ async function main() {
       assert(failedEv.rows[0].n === 3, `otp_send_failed logged: ${failedEv.rows[0].n}`);
       // A gateway's HTML page: deeSMSX may have sent the SMS. The send counts (the row stays, unusable), the user
       // waits out the cooldown on the number step.
-      await sendAndExpect("html", "ส่งรหัสไม่สำเร็จ หากได้รับ SMS ภายหลัง รหัสนั้นใช้ไม่ได้");
+      await sendAndExpect("html", "ส่งรหัสไม่สำเร็จ รอ 1");
       assert((await invalidMark()) === null, "maybe sent: the number is not marked invalid");
       const kept = await db.query("SELECT code_hash, provider_token, expires_at <= created_at AS dead FROM otp_codes WHERE line_sub = $1", [SUB_I]);
       assert(kept.rows.length === 1 && kept.rows[0].dead && !kept.rows[0].code_hash && !kept.rows[0].provider_token, `maybe-sent row kept, unusable: ${JSON.stringify(kept.rows)}`);
@@ -1773,7 +1784,7 @@ async function main() {
       await page.goto(callback.toString());
       assert(page.url().includes("/login/error?code=state"), `at ${page.url()}`);
       const text = await page.textContent('[data-testid="login-error"]');
-      assert(text.includes("หมดอายุหรือไม่ถูกต้อง") && !/error|stack|exception/i.test(text), "friendly Thai message");
+      assert(text.includes("ลิงก์นี้ใช้ไม่ได้แล้ว") && !/error|stack|exception/i.test(text), "friendly Thai message");
       assert(!(await cookie(ctx, "session")), "no session");
       await touchTargets(page, "/login/error");
       await shoot(page, "login-error");
@@ -2029,7 +2040,7 @@ async function main() {
       await page.click('button[type="submit"]');
       await page.waitForSelector("#phone-error");
       const err = (await page.textContent("#phone-error")).trim();
-      assert(err === "ระบบส่ง SMS ครบจำนวนของวันนี้แล้ว กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล", `cap message: ${err}`);
+      assert(err === "วันนี้ส่ง SMS ครบจำนวนแล้ว ติดต่อผู้ดูแล", `cap message: ${err}`);
       assert((await page.getAttribute("#phone", "aria-invalid")) === null, "the cap does not mark a valid number invalid");
       await sleep(500);
       assert(outboxFiles().length === files, "nothing sent over the cap");
@@ -2104,7 +2115,7 @@ async function main() {
       // the undone claim was this LINE account's: another number would end here too, so none is offered
       const blocked = await plainText(page, '[data-testid="claim-blocked"] p');
       assert(
-        blocked === "ผู้ดูแลยกเลิกการยืนยันชื่อของบัญชี LINE นี้แล้ว จึงเลือกชื่อใหม่ได้หลังจาก 24 ชั่วโมง หากต้องการใช้งานตอนนี้ กรุณาติดต่อผู้ดูแล",
+        blocked === "ผู้ดูแลยกเลิกชื่อของ LINE นี้แล้ว เลือกใหม่ได้หลัง 24 ชั่วโมง หรือติดต่อผู้ดูแล",
         `blocked text: ${blocked}`,
       );
       assert((await page.locator('[data-testid="claim-types"], [data-testid="claim-names-step"]').count()) === 0, "no names offered");
@@ -2139,7 +2150,7 @@ async function main() {
       await page.waitForSelector('[data-testid="claim-blocked"]');
       const byNumber = await plainText(page, '[data-testid="claim-blocked"] p');
       assert(
-        byNumber === "ผู้ดูแลยกเลิกการยืนยันชื่อของเบอร์นี้แล้ว จึงเลือกชื่อใหม่ได้หลังจาก 24 ชั่วโมง หากต้องการใช้งานตอนนี้ กรุณาติดต่อผู้ดูแล",
+        byNumber === "ผู้ดูแลยกเลิกชื่อของเบอร์นี้แล้ว เลือกใหม่ได้หลัง 24 ชั่วโมง หรือติดต่อผู้ดูแล",
         `blocked text (number): ${byNumber}`,
       );
       const otherPhone = page.locator('[data-testid="claim-blocked"] [data-testid="other-phone"]');
@@ -2220,7 +2231,7 @@ async function main() {
       // a wrong code first, then the one from the email (Thai digits too)
       await page.fill("#email-code", mail.code === "000000" ? "111111" : "000000");
       await page.waitForSelector('[data-testid="doctor-error"]');
-      assert((await page.textContent('[data-testid="doctor-error"]')).includes("เหลือโอกาสอีก 4"), "attempts left");
+      assert((await page.textContent('[data-testid="doctor-error"]')).replace(/\u00a0/g, " ").includes("เหลืออีก 4"), "attempts left");
       await page.fill("#email-code", mail.code.replace(/\d/g, (d) => String.fromCharCode(0x0e50 + Number(d))));
       await page.waitForURL(`${APP}/`);
       assert((await boardName(page)) === EMAIL_DOC, `the doctor's name: ${await boardName(page)}`);
@@ -2667,7 +2678,7 @@ async function main() {
       assert((await dateValue(page, "repair-half-2-from")) === "2027-01-20", "the draft is kept while closed");
       await page.click('[data-testid="repair-save"]');
       await page.waitForSelector('[aria-labelledby="repair-periods-title"] [role="alert"]');
-      assert((await textOf(page, '[aria-labelledby="repair-periods-title"] [role="alert"]')) === "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1", "order message");
+      assert((await textOf(page, '[aria-labelledby="repair-periods-title"] [role="alert"]')) === "ช่วงที่ 2 ต้องเริ่มหลังช่วงที่ 1 จบ", "order message");
       // the refusal is said quietly beside บันทึก, inside the card (Pong, 15 Nov 2026)
       await ownerShot(page, "admin-repair-error.png", { tall: true, upTo: 'section[aria-labelledby="repair-periods-title"]' });
       const stored = async () =>
@@ -2868,7 +2879,7 @@ async function main() {
       assert(JSON.stringify((await rows()).map(([name]) => name)) === JSON.stringify([RP.admin.name]), `search: ${JSON.stringify(await rows())}`);
       await page.fill('[data-testid="staff-search"]', "xyz");
       assert((await page.locator('[data-testid="staff-list"]').count()) === 0, "no rows");
-      assert((await textOf(page, "#staff-body")).includes("ไม่พบชื่อที่ตรงกับคำค้นหรือตำแหน่งที่เลือก"), "nothing found");
+      assert((await textOf(page, "#staff-body")).includes("ไม่พบชื่อนี้ ลองคำอื่นหรือตำแหน่งอื่น"), "nothing found");
       await page.fill('[data-testid="staff-search"]', "");
 
       // read only: no button on any row; fits a small phone; 44px targets
@@ -3407,21 +3418,27 @@ async function main() {
         );
         return result();
       };
+      // the picker speaks Thai (Pong, 17 Nov 2026: "translate upload input to Thai"), the file's name once one is chosen
+      assert((await textOf(page, '[data-testid="upload-picker"]')).includes("เลือกไฟล์"), "a Thai เลือกไฟล์ button");
+      assert((await textOf(page, '[data-testid="upload-file-name"]')) === "ยังไม่ได้เลือกไฟล์", "no file yet");
       // an .xls is refused by its name before it is sent
       await page.setInputFiles('[data-testid="upload-file"]', { name: "or-export.xls", mimeType: "application/vnd.ms-excel", buffer: OLE });
+      assert((await textOf(page, '[data-testid="upload-file-name"]')) === "or-export.xls", "the chosen file's name");
       await page.waitForSelector("#upload-file-problem");
       assert((await textOf(page, "#upload-file-problem")).includes("บันทึกเป็น .xlsx"), `xls by name: ${await textOf(page, "#upload-file-problem")}`);
       // an .xls renamed .xlsx is refused by the server, which reads the file itself
       assert((await send({ name: "or-export.xlsx", mimeType: XLSX_TYPE, buffer: OLE })).includes("บันทึกเป็น .xlsx"), "renamed xls refused");
       // the whole sample holds several days: refused, and the message names the day it must be
       const several = await send(SAMPLE_WORKBOOK);
-      assert(several.includes("ต้องเป็นวันที่ 17 พ.ย. 2569 ทุกแถว"), `a file of other days: ${several}`);
+      assert(several.includes("ต้องเป็นตารางวันที่ 17 พ.ย. 2569 เท่านั้น"), `a file of other days: ${several}`);
+      // one short line however many days the file holds (Pong, 17 Nov 2026: "concise alert message")
+      assert(!several.includes(",") && several.length < 120, `a span of days, not a list: ${several}`);
       // the right file, but 16:00 has struck by the time it is sent: the server's clock decides
       await page.setInputFiles('[data-testid="upload-file"]', E2E_WORKBOOK);
       setNow("2026-11-16T16:00:00+07:00");
       await page.click('[data-testid="upload-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"]')?.textContent?.includes("15:00–16:00"));
-      assert((await result()) === "อัปโหลดได้เฉพาะเวลา 15:00–16:00 น.", `after 16:00: ${await result()}`);
+      assert((await result()) === "อัปโหลดได้เฉพาะ 15:00–16:00 น.", `after 16:00: ${await result()}`);
       assert((await db.query("SELECT count(*)::int AS n FROM workbook_uploads")).rows[0].n === 0, "nothing saved so far");
 
       // inside the window: saved, and the page shows the upload with its summary and the matching
@@ -3846,7 +3863,7 @@ async function main() {
       await page.click('#board-date-calendar [data-nav="next"]');
       assert((await textOf(page, "#board-date-calendar-title")) === "มกราคม 2571", "January 2571");
       assert(
-        (await textOf(page, '[data-testid="board-date-calendar-unlisted"]')) === "ยังไม่มีวันหยุดปี 2571 จากธนาคารแห่งประเทศไทย",
+        (await textOf(page, '[data-testid="board-date-calendar-unlisted"]')) === "ปฏิทินยังไม่มีวันหยุดปี 2571",
         `the note: ${await textOf(page, "#board-date-calendar ul")}`,
       );
       await ownerShot(page, "board-date-unlisted-year.png");
@@ -4019,9 +4036,60 @@ async function main() {
       await ctx.close();
     });
 
+    await t("computers (Pong, 17 Nov 2026): with the device gate on, only MX and admins open the board on a computer, signed out otherwise; phones open it in LIFF", async () => {
+      // the same build with the gate on, as on Vercel (CLIENT_GATE=liff; the mocks stay allowed since VERCEL is unset)
+      const gateEnv = { ...appEnv, APP_URL: GATE_APP, CLIENT_GATE: "liff", LIFF_ID: "2001234567-AbCdEfGh" };
+      gateApp = startProcess("app-gate", ["node_modules/next/dist/bin/next", "start", "-p", String(GATE_APP_PORT)], gateEnv);
+      await waitFor(`${GATE_APP}/login`, gateApp);
+      const get = async (path, ua, person) => {
+        const r = await fetch(`${GATE_APP}${path}`, {
+          headers: { "user-agent": ua, ...(person ? { cookie: `session=${await sessionOf(person)}` } : {}) },
+          redirect: "manual",
+        });
+        return { status: r.status, location: r.headers.get("location"), cookie: r.headers.get("set-cookie") ?? "", body: await r.text() };
+      };
+      // the floor plan's own label (the site's description says แปลนห้องผ่าตัด on every page)
+      const PLAN = 'aria-label="แปลนห้องผ่าตัด"';
+      const isBoard = (r) => r.status === 200 && r.body.includes(PLAN) && !r.body.includes('data-testid="desktop-only"');
+      assert(JSON.stringify((await db.query("SELECT u.first_name || ' ' || u.last_name AS name FROM mx_members m JOIN users u ON u.id = m.user_id")).rows.map((r) => r.name)) === JSON.stringify([RP.mx.name]), "MX is the one member left by the admin test");
+
+      // a nurse (not MX) on a computer: the desktop-only page, signed out on this browser, 403 from the API
+      const nurseDesk = await get("/?room=or-3", UA_DESKTOP, RP.nurse);
+      assert(nurseDesk.status === 200 && nurseDesk.body.includes('data-testid="desktop-only"'), `nurse on a computer: ${nurseDesk.status}`);
+      assert(nurseDesk.body.includes("เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ") && !nurseDesk.body.includes(PLAN), "the page says who may, and no board");
+      assert(/(^|,\s*)session=;/.test(nurseDesk.cookie) && /Max-Age=0/i.test(nurseDesk.cookie), `signed out: ${nurseDesk.cookie}`);
+      const nurseApi = await get("/api/board", UA_DESKTOP, RP.nurse);
+      assert(nurseApi.status === 403 && JSON.parse(nurseApi.body).error === "desktop-mx-only", `nurse's API call from a computer: ${nurseApi.status}`);
+      // the same nurse in the LIFF app on a phone: the board, still signed in
+      const nursePhone = await get("/", UA_IPHONE_LIFF, RP.nurse);
+      assert(isBoard(nursePhone) && !/session=;/.test(nursePhone.cookie), `nurse in LIFF: ${nursePhone.status}`);
+      // MX and the admin on a computer: the board (and the admin page for the admin)
+      assert(isBoard(await get("/", UA_DESKTOP, RP.mx)), "MX on a computer");
+      assert((await get("/api/board", UA_DESKTOP, RP.mx)).status !== 403, "MX's API calls from a computer");
+      assert(isBoard(await get("/", UA_DESKTOP, RP.admin)), "the admin on a computer");
+      assert((await get("/admin", UA_DESKTOP, RP.admin)).status === 200, "/admin on a computer");
+      // a phone browser outside LINE: the open-in-LINE page, which says who a computer is for
+      const safari = await get("/", UA_IPHONE_SAFARI, RP.mx);
+      assert(safari.status === 200 && safari.body.includes('data-testid="open-in-line"') && safari.body.includes("เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ"), `phone Safari: ${safari.status}`);
+      // nobody signed in on a computer: LINE Login's QR code, as before
+      const login = await get("/login", UA_DESKTOP);
+      assert(login.status === 307 && login.location === "/api/auth/line/start", `computer /login: ${login.status} ${login.location}`);
+
+      // the page as a computer shows it
+      const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, locale: "th-TH", userAgent: UA_DESKTOP });
+      await ctx.addCookies([{ name: "session", value: await sessionOf(RP.nurse), url: GATE_APP, httpOnly: true, sameSite: "Lax" }]);
+      const page = await ctx.newPage();
+      await page.goto(`${GATE_APP}/`);
+      await page.waitForSelector('[data-testid="desktop-only"]');
+      await noLineLogin(page, "/desktop-only");
+      assert(!(await ctx.cookies(GATE_APP)).some((c) => c.name === "session" && c.value), "no session left in the browser");
+      await shoot(page, "desktop-only", { full: false });
+      await ctx.close();
+    });
+
     await t("no OTP code, deeSMSX token, key, HN or workbook row appears in server logs", async () => {
       assert(issuedCodes.length >= 20, `codes and tokens collected: ${issuedCodes.length}`);
-      for (const proc of [app, fileApp, downApp].filter(Boolean)) {
+      for (const proc of [app, fileApp, downApp, gateApp].filter(Boolean)) {
         const log = proc.log();
         for (const code of issuedCodes) assert(!log.includes(code), `code or token found in the ${proc.name} log`);
         assert(!log.includes(SESSION_SECRET) && !log.includes(OTP_PEPPER) && !log.includes(TG_TOKEN), `secret in the ${proc.name} log`);

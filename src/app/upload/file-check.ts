@@ -24,10 +24,10 @@ export function megabytes(bytes: number): string {
 /** Why this file cannot be uploaded, in Thai, or null when it may be sent. The reader checks the content itself. */
 export function fileProblem(file: { name: string; size: number } | null | undefined, rules: FileRules): string | null {
   const name = file?.name.trim().toLowerCase() ?? "";
-  if (!file || !name) return "เลือกไฟล์ตารางผ่าตัดก่อน";
+  if (!file || !name) return "เลือกไฟล์ก่อน";
   if (name.endsWith(".xls")) return rules.xlsMessage;
-  if (!name.endsWith(".xlsx")) return "รับเฉพาะไฟล์ .xlsx ที่ส่งออกจาก HOSxP";
-  if (file.size <= 0) return "ไฟล์นี้ว่างเปล่า เลือกไฟล์ใหม่";
+  if (!name.endsWith(".xlsx")) return "ใช้ไฟล์ .xlsx จาก HOSxP เท่านั้น";
+  if (file.size <= 0) return "ไฟล์นี้ว่าง เลือกไฟล์ใหม่";
   if (file.size > rules.maxBytes) return `ไฟล์ใหญ่เกิน ${megabytes(rules.maxBytes)}`;
   return null;
 }

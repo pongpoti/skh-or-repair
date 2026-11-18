@@ -122,7 +122,7 @@ export function UploadSummary({
             />
           </>
         ) : (
-          <Notice tone="info">อ่านสรุปของไฟล์นี้ไม่ได้</Notice>
+          <Notice tone="info">ไม่มีสรุปของไฟล์นี้</Notice>
         )}
 
         <div className="space-y-3">
@@ -155,7 +155,7 @@ export function UploadSummary({
               )}
             </>
           ) : (
-            <Notice tone="warning">อ่านการจองไม่ได้ ลองโหลดหน้านี้ใหม่</Notice>
+            <Notice tone="warning">โหลดการจองไม่ได้ ลองโหลดหน้าใหม่</Notice>
           )}
         </div>
       </div>

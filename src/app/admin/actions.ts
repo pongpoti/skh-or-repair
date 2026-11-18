@@ -21,7 +21,7 @@ export type MxResult = { ok: true; members: MxView[]; message: string } | (Refus
 /** An added name answers with the whole list as it now stands, so the new name shows in its place. */
 export type StaffResult = { ok: true; staff: StaffView[]; message: string; id: string } | Refused;
 
-const NOT_ADMIN: Refused = { ok: false, error: "เฉพาะผู้ดูแลระบบเท่านั้น ลองออกจากระบบแล้วเข้าใหม่" };
+const NOT_ADMIN: Refused = { ok: false, error: "ทำได้เฉพาะผู้ดูแลระบบ ลองออกจากระบบแล้วเข้าใหม่" };
 const FAILED: Refused = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
 
 /** Server actions can be called by anyone who can reach the site, so each one checks the admin again. */
@@ -70,8 +70,8 @@ export async function grantMx(userId: string): Promise<MxResult> {
     const pool = await db();
     const result = await addMx(pool, id, user.sub);
     const members = await mxMembersFrom(pool);
-    if (result === "missing") return { ok: false, error: "ไม่พบชื่อนี้ในผู้ใช้ที่ใช้งานอยู่ อาจถูกปิดใช้งานไปแล้ว", members };
-    if (result === "ineligible") return { ok: false, error: "ผู้จัดการตารางต้องเป็นพยาบาลห้องผ่าตัด (RN-OR) เท่านั้น", members };
+    if (result === "missing") return { ok: false, error: "ไม่พบชื่อนี้ อาจถูกปิดใช้งานแล้ว", members };
+    if (result === "ineligible") return { ok: false, error: "ผู้จัดการตารางต้องเป็น RN-OR เท่านั้น", members };
     if (result === "added") refreshPages();
     const name = members.find((member) => member.userId === id)?.name ?? "ชื่อนี้";
     return { ok: true, members, message: result === "added" ? `เพิ่ม ${name} เป็นผู้จัดการตารางแล้ว` : `${name} เป็นผู้จัดการตารางอยู่แล้ว` };

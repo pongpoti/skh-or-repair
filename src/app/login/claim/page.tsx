@@ -33,7 +33,7 @@ export default async function ClaimPage({ searchParams }: { searchParams: Promis
         <div className="mt-6 text-center" data-testid="claim-signin">
           <StateIcon icon="check" tone="ok" />
           <h2 className={H2}>เบอร์นี้มีชื่อในระบบแล้ว</h2>
-          <p className={HELP}>กรุณาเข้าสู่ระบบอีกครั้ง</p>
+          <p className={HELP}>เข้าสู่ระบบอีกครั้ง</p>
           <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
             เข้าสู่ระบบ
           </a>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { UploadResult } from "@/app/upload/actions";
 import { fileProblem, megabytes, XLSX_ACCEPT, type FileRules } from "@/app/upload/file-check";
 import { Notice } from "@/components/auth-shell";
@@ -8,7 +8,7 @@ import { useTimedRefresh } from "@/components/board-refresh";
 import { InlineStatus } from "@/components/inline-status";
 import type { WindowState } from "@/lib/upload-flow";
 
-const UNSENT = "อัปโหลดไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
+const UNSENT = "อัปโหลดไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
 
 const WINDOW_BADGE: Record<WindowState, { text: string; tone: string }> = {
   before: { text: "ยังไม่เปิดรับ", tone: "badge-muted" },
@@ -54,6 +54,8 @@ export function UploadForm({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [problem, setProblem] = useState("");
+  // The chosen file's name, shown in the Thai picker (the browser's own file input speaks the browser's language).
+  const [fileName, setFileName] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -67,8 +69,23 @@ export function UploadForm({
   const canSend = target !== null && !blocked && (admin || open);
   const badge = WINDOW_BADGE[windowState];
 
+  // A browser can put a file back into the input on reload or Back without telling React (no change event). The
+  // input is hidden, so the name shown beside เลือกไฟล์ is read from it then, or the page would say no file is chosen
+  // while one would be sent.
+  useEffect(() => {
+    function sync() {
+      const file = input.current?.files?.[0] ?? null;
+      setFileName(file?.name ?? "");
+      if (file) setProblem(fileProblem(file, rules) ?? "");
+    }
+    sync();
+    window.addEventListener("pageshow", sync);
+    return () => window.removeEventListener("pageshow", sync);
+  }, [rules]);
+
   function choose(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0] ?? null;
+    setFileName(file?.name ?? "");
     setResult(null);
     setProblem(file ? (fileProblem(file, rules) ?? "") : "");
   }
@@ -90,7 +107,10 @@ export function UploadForm({
         const answer = await onUpload(form);
         setResult(answer);
         // A saved file is done with; a refused one stays chosen so MX can see which it was.
-        if (answer.ok && input.current) input.current.value = "";
+        if (answer.ok && input.current) {
+          input.current.value = "";
+          setFileName("");
+        }
       } catch {
         setResult({ ok: false, error: UNSENT });
       }
@@ -124,18 +144,32 @@ export function UploadForm({
             <span id="upload-file-hint" className="block text-xs text-muted">
               ไฟล์ .xlsx ไม่เกิน {megabytes(rules.maxBytes)}
             </span>
-            <input
-              ref={input}
-              type="file"
-              name="file"
-              accept={XLSX_ACCEPT}
-              onChange={choose}
-              disabled={pending || target === null}
-              aria-invalid={problem ? true : undefined}
-              aria-describedby={problem ? "upload-file-hint upload-file-problem" : "upload-file-hint"}
-              className="field field-text mt-1.5 cursor-pointer py-1.5 text-sm file:mr-3 file:min-h-8 file:cursor-pointer file:rounded-lg file:border file:border-[rgb(124_96_66/0.28)] file:bg-[var(--tan-fill)] file:px-3 file:text-sm file:font-semibold file:text-brand"
-              data-testid="upload-file"
-            />
+            {/* Pong, 17 Nov 2026: "translate upload input to Thai". The real input is hidden but still takes the focus
+                and the file; the label around it opens the picker wherever it is tapped. */}
+            <span className={`file-picker mt-1.5 ${pending || target === null ? "file-picker-disabled" : ""}`} data-testid="upload-picker">
+              <input
+                ref={input}
+                type="file"
+                name="file"
+                accept={XLSX_ACCEPT}
+                onChange={choose}
+                disabled={pending || target === null}
+                aria-invalid={problem ? true : undefined}
+                aria-describedby={problem ? "upload-file-hint upload-file-problem" : "upload-file-hint"}
+                className="sr-only"
+                data-testid="upload-file"
+              />
+              <span className="file-picker-button" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+                  <path d="M14 3v5h5" />
+                </svg>
+                เลือกไฟล์
+              </span>
+              <span className={`min-w-0 truncate text-sm ${fileName ? "text-ink" : "text-muted"}`} aria-hidden="true" data-testid="upload-file-name">
+                {fileName || "ยังไม่ได้เลือกไฟล์"}
+              </span>
+            </span>
           </label>
           {/* What is wrong with the chosen file, said on the line under the file input. */}
           {problem ? (

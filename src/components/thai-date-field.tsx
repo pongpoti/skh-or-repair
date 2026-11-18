@@ -492,7 +492,7 @@ export function ThaiCalendar({
                 <circle cx="12" cy="12" r="10" />
                 <path d="M12 16v-4M12 8h.01" />
               </svg>
-              <span className="min-w-0">ยังไม่มีวันหยุดปี {year + 543} จากธนาคารแห่งประเทศไทย</span>
+              <span className="min-w-0">ปฏิทินยังไม่มีวันหยุดปี {year + 543}</span>
             </li>
           ) : null}
         </ul>

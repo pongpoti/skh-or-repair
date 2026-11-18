@@ -47,13 +47,13 @@ export function StateIcon({ icon, tone }: { icon: keyof typeof ICONS; tone: keyo
 export const H2 = "text-base leading-snug font-semibold text-ink";
 export const HELP = "mt-1 text-sm leading-6 text-muted";
 export const LABEL = "mb-1.5 block text-sm font-semibold text-ink-2";
-export const EXPIRED_MESSAGE = "หมดเวลายืนยันตัวตน กรุณาเริ่มใหม่";
+export const EXPIRED_MESSAGE = "หมดเวลา เริ่มเข้าสู่ระบบใหม่";
 
 /**
  * Said wherever a name cannot be picked (not on the list, or taken): names come only from the staff list, so the way
  * on is the administrator, who adds a missing name to `users` or frees a taken one.
  */
-export const ASK_ADMIN = "ไม่พบชื่อ หรือชื่อมีผู้เลือกแล้ว? กรุณาติดต่อผู้ดูแล";
+export const ASK_ADMIN = "ไม่พบชื่อ หรือมีคนเลือกไปแล้ว? ติดต่อผู้ดูแล";
 
 export function AskAdmin({ className = "", testId = "ask-admin" }: { className?: string; testId?: string }) {
   return (

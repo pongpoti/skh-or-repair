@@ -18,7 +18,7 @@ export type CaseResult =
   /** `earliest` is set when the day had become too soon (15:00 passed while the form was open), for the calendar. */
   | { ok: false; error: string; mine?: AddedCase[]; earliest?: string };
 
-const NOT_DOCTOR: CaseResult = { ok: false, error: "เฉพาะแพทย์ที่ยืนยันชื่อแล้วเท่านั้น ลองออกจากระบบแล้วเข้าใหม่" };
+const NOT_DOCTOR: CaseResult = { ok: false, error: "จองได้เฉพาะแพทย์ ลองออกแล้วเข้าระบบใหม่" };
 const FAILED: CaseResult = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
 
 /** Server actions can be called by anyone who can reach the site, so each one checks the doctor again. */

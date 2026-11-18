@@ -16,6 +16,7 @@ import {
   REQUIRED_HEADERS,
   splitSurgeon,
   summariseUpload,
+  thaiDateSpan,
   type WorkbookRow,
 } from "./workbook.ts";
 import { readXlsx, type XlsxCell } from "./xlsx.ts";
@@ -219,24 +220,31 @@ test("HN stays text as written, leading zeros kept", () => {
   assert.equal(byId(parsed()).get("900001")?.hn, "99000001");
 });
 
-test("the date guard refuses the full sample (several dates) and lists them", () => {
+test("date spans read as short as is clear", () => {
+  assert.equal(thaiDateSpan("2026-10-01", "2026-10-31"), "1–31 ต.ค. 2569");
+  assert.equal(thaiDateSpan("2026-10-28", "2026-11-03"), "28 ต.ค. – 3 พ.ย. 2569");
+  assert.equal(thaiDateSpan("2026-12-30", "2027-01-04"), "30 ธ.ค. 2569 – 4 ม.ค. 2570");
+  assert.equal(thaiDateSpan("2026-11-18", "2026-11-18"), "18 พ.ย. 2569");
+});
+
+test("the date guard refuses the full sample (several dates) and says their span in one short line", () => {
   const rows = parsed(SHEET);
   assert.equal(rows.length, 28);
   const guard = guardTargetDate(rows, THURSDAY);
   assert.ok(!guard.ok);
   assert.deepEqual(guard.dates, ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-07"]);
   assert.equal(guard.blank, 0);
-  assert.match(guard.message, /2 พ\.ย\. 2569, 3 พ\.ย\. 2569, 4 พ\.ย\. 2569, 5 พ\.ย\. 2569, 6 พ\.ย\. 2569, 7 พ\.ย\. 2569/);
-  assert.match(guard.message, /ต้องเป็นวันที่ 5 พ\.ย\. 2569/);
+  assert.equal(guard.message, "ไฟล์นี้มีตาราง 6 วัน (2–7 พ.ย. 2569) ต้องเป็นตารางวันที่ 5 พ.ย. 2569 เท่านั้น");
 
   // A blank booked date refuses the file too, and so does a file of the wrong day alone.
   const blank = guardTargetDate(parsed(sheetOf([ROW, { ...ROW, ID: 2, สั่งผ่าตัดวันที่: null }])), THURSDAY);
   assert.ok(!blank.ok);
   assert.deepEqual([blank.dates, blank.blank], [[THURSDAY], 1]);
-  assert.match(blank.message, /ไม่มีวันที่ 1 แถว/);
+  assert.equal(blank.message, "ไฟล์นี้มี 1 แถวที่ไม่มีวันที่ ทุกแถวต้องเป็นวันที่ 5 พ.ย. 2569 ส่งออกจาก HOSxP ใหม่");
   const wrongDay = guardTargetDate(parsed(), "2026-11-06");
   assert.ok(!wrongDay.ok);
   assert.deepEqual(wrongDay.dates, [THURSDAY]);
+  assert.equal(wrongDay.message, "ไฟล์นี้เป็นตารางวันที่ 5 พ.ย. 2569 ต้องเป็นตารางวันที่ 6 พ.ย. 2569 เท่านั้น");
   // No case rows: nothing to refuse.
   assert.deepEqual(guardTargetDate([], THURSDAY), { ok: true });
 });
@@ -246,10 +254,12 @@ test("missing headers are listed, and the two เวลา columns are told apar
   const result = parseExport([header, ...SHEET.slice(1, 3)]);
   assert.ok(!result.ok);
   assert.deepEqual(result.missingHeaders, ["HN", "เวร"]);
-  assert.match(result.message, /HN, เวร/);
+  assert.equal(result.message, "ไฟล์ไม่มีคอลัมน์ HN, เวร ใช้ไฟล์จาก HOSxP ที่ไม่ได้แก้ไข");
   const empty = parseExport([]);
   assert.ok(!empty.ok);
   assert.deepEqual(empty.missingHeaders, [...REQUIRED_HEADERS]);
+  // More than three missing: not the HOSxP export at all, said without the list.
+  assert.equal(empty.message, "ไฟล์นี้ไม่ใช่ตารางผ่าตัดจาก HOSxP");
 
   assert.equal(headerIndex(SHEET[0], "เวลา"), 17); // R
   assert.equal(headerIndex(SHEET[0], "เวลา", 2), 31); // AF

@@ -282,11 +282,11 @@ test("an admin's dates are checked: four real dates, each half in order, the sec
   assert.equal(error({ half1: good.half1, half2: { from: "", to: "2027-03-17" } }), "ใส่วันที่ให้ครบทั้ง 4 ช่อง");
   assert.equal(error({ half1: good.half1, half2: { from: 5, to: "2027-03-17" } }), "ใส่วันที่ให้ครบทั้ง 4 ช่อง");
   for (const bad of ["2027-02-30", "27-01-27", "2570-01-27", "1999-12-31", "2027-1-27"]) {
-    assert.equal(error({ half1: good.half1, half2: { from: bad, to: "2027-03-17" } }), "วันที่ไม่ถูกต้อง เลือกจากปฏิทินอีกครั้ง", bad);
+    assert.equal(error({ half1: good.half1, half2: { from: bad, to: "2027-03-17" } }), "วันที่ไม่ถูกต้อง เลือกจากปฏิทิน", bad);
   }
-  assert.equal(error({ half1: { from: "2027-01-27", to: "2027-01-26" }, half2: good.half2 }), "ช่วงที่ 1: วันเริ่มต้องไม่หลังวันสิ้นสุด");
-  assert.equal(error({ half1: good.half1, half2: { from: "2027-03-18", to: "2027-03-17" } }), "ช่วงที่ 2: วันเริ่มต้องไม่หลังวันสิ้นสุด");
-  assert.equal(error({ half1: good.half1, half2: { from: "2027-01-26", to: "2027-03-17" } }), "ช่วงที่ 2 ต้องเริ่มหลังวันสุดท้ายของช่วงที่ 1");
+  assert.equal(error({ half1: { from: "2027-01-27", to: "2027-01-26" }, half2: good.half2 }), "ช่วงที่ 1: วันเริ่มอยู่หลังวันสุดท้าย");
+  assert.equal(error({ half1: good.half1, half2: { from: "2027-03-18", to: "2027-03-17" } }), "ช่วงที่ 2: วันเริ่มอยู่หลังวันสุดท้าย");
+  assert.equal(error({ half1: good.half1, half2: { from: "2027-01-26", to: "2027-03-17" } }), "ช่วงที่ 2 ต้องเริ่มหลังช่วงที่ 1 จบ");
   assert.equal(error({ half1: { from: "2026-11-14", to: "2026-11-14" }, half2: { from: "2026-12-01", to: "2026-12-01" } }), "ok", "one-day halves and a gap");
 });
 

@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/admin";
 import { checkSession } from "@/lib/auth/user";
+import { db } from "@/lib/db";
 import { cookieName, cookieOptions } from "@/lib/cookies";
 import { appUrl } from "@/lib/env";
-import { GATE_PATH, clientAllowed, gateMode } from "@/lib/gate";
+import { DESK_ONLY_PATH, GATE_PATH, clientAllowed, gateMode, needsDeskRole } from "@/lib/gate";
+import { isMx } from "@/lib/roles";
 import { isSameOrigin, safeNextPath } from "@/lib/security";
 import { TELEGRAM_WEBHOOK_PATH } from "@/lib/telegram";
 import { UNAVAILABLE_PATH, unavailablePath } from "@/lib/unavailable";
@@ -21,7 +23,10 @@ import { UNAVAILABLE_PATH, unavailablePath } from "@/lib/unavailable";
  *    answer 404 unless NODE_ENV is development. When the database cannot check a valid session (an outage), a page goes
  *    to the outage page /unavailable (lib/unavailable.ts) and an API call gets 503; the cookie is kept, so the user is
  *    still signed in once the database is back.
- * 6. admin gate: /admin* answers the mistyped-address 404 to a session whose sub is not in AUTH_ADMIN_LINE_IDS, before
+ * 6. computer gate: on a computer or tablet (lib/gate.ts needsDeskRole) only MX and admins get the board (Pong, 17 Nov
+ *    2026). Anyone else gets the /desktop-only page (signed out there, so the next person at a shared computer can
+ *    sign in) and 403 for every API call. A phone in the LIFF app is not checked.
+ * 7. admin gate: /admin* answers the mistyped-address 404 to a session whose sub is not in AUTH_ADMIN_LINE_IDS, before
  *    anything renders (the page's own check runs behind its loading screen, whose response is already a 200).
  * The Telegram webhook is server-to-server (no Origin, no session): its route checks Telegram's secret header.
  */
@@ -33,6 +38,7 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/api/auth/") ||
     pathname === TELEGRAM_WEBHOOK_PATH ||
     pathname === GATE_PATH ||
+    pathname === DESK_ONLY_PATH ||
     pathname === UNAVAILABLE_PATH ||
     pathname === "/preview" ||
     pathname.startsWith("/preview/")
@@ -86,7 +92,7 @@ export async function proxy(req: NextRequest) {
   const method = req.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && pathname !== TELEGRAM_WEBHOOK_PATH) {
     if (!app || !isSameOrigin(req.headers, app.origin)) {
-      return NextResponse.json({ error: "คำขอไม่ถูกต้อง" }, { status: 403, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ error: app ? "ทำรายการไม่สำเร็จ โหลดหน้าใหม่แล้วลองอีกครั้ง" : "ระบบยังไม่พร้อม ติดต่อผู้ดูแล" }, { status: 403, headers: { "Cache-Control": "no-store" } });
     }
   }
 
@@ -155,7 +161,39 @@ export async function proxy(req: NextRequest) {
       return withCsp(res, csp);
     }
 
-    // 6. Admin gate: a path no route matches, so Next answers its own 404 page with status 404.
+    // 6. Computer gate: MX and admins only. The role is read from the database on every request from a computer (few
+    //    people, and a removed MX loses it at once); a database that cannot answer is an outage, as above.
+    if (needsDeskRole(req.headers.get("user-agent"), gateMode()) && !isAdmin(user.sub)) {
+      let mx: boolean | null;
+      try {
+        mx = await isMx(await db(), user);
+      } catch (e) {
+        console.error("[gate] MX check failed:", (e as Error).message);
+        mx = null;
+      }
+      if (mx === null) {
+        if (pathname.startsWith("/api/")) {
+          return withCsp(
+            NextResponse.json({ error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } }),
+            csp,
+          );
+        }
+        const res = NextResponse.redirect(new URL(unavailablePath("server", safeNextPath(`${pathname}${search}`)), req.nextUrl.origin), 307);
+        res.headers.set("Cache-Control", "no-store");
+        return withCsp(res, csp);
+      }
+      if (!mx) {
+        const headers = { "Cache-Control": "no-store", Vary: "User-Agent" };
+        const res = pathname.startsWith("/api/")
+          ? NextResponse.json({ error: "desktop-mx-only" }, { status: 403, headers })
+          : NextResponse.rewrite(new URL(DESK_ONLY_PATH, req.nextUrl.origin), { request: { headers: requestHeaders } });
+        for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+        if (sessionCookie) res.cookies.set(sessionCookie, "", { ...cookieOptions("session"), maxAge: 0 });
+        return withCsp(res, csp);
+      }
+    }
+
+    // 7. Admin gate: a path no route matches, so Next answers its own 404 page with status 404.
     if ((pathname === "/admin" || pathname.startsWith("/admin/")) && !isAdmin(user.sub)) {
       return withCsp(NextResponse.rewrite(new URL("/_admin-not-found", req.nextUrl), { request: { headers: requestHeaders } }), csp);
     }

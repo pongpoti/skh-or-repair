@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "เปิดผ่าน LINE" };
 /**
  * Shown (through the proxy's rewrite) to every browser the device gate turns away: a phone browser outside LINE, or a
  * LINE chat on a phone outside the LIFF app. It names the way in on the phone, the LIFF link (once LIFF_ID is set), and
- * that a computer opens the board too. Computers and tablets get in, so they see this page only by its own address.
+ * that a computer opens the board for MX and admins. Computers and tablets get in, so they see this page only by its own address.
  */
 export default async function OpenInLinePage() {
   const ua = (await headers()).get("user-agent") ?? "";
@@ -28,7 +28,7 @@ export default async function OpenInLinePage() {
   }
 
   return (
-    <AuthShell title="เปิดผ่าน LINE" description="บนโทรศัพท์มือถือ ตารางห้องผ่าตัดเปิดได้ในแอป LINE">
+    <AuthShell title="เปิดผ่าน LINE" description="บนมือถือ เปิดได้ใน LINE เท่านั้น">
       <div data-testid="open-in-line" data-phone={phone ? "1" : "0"}>
         {link ? (
           <>
@@ -36,13 +36,13 @@ export default async function OpenInLinePage() {
               เปิดใน LINE
             </a>
             <p className="mt-4 text-center text-sm leading-6 text-muted">
-              ถ้าปุ่มไม่เปิดแอป ให้เปิดลิงก์ของระบบจากแชทหรือเมนูใน LINE
+              ปุ่มไม่ทำงาน? เปิดจากแชทหรือเมนูใน LINE
             </p>
           </>
         ) : (
-          <Notice tone="info">เปิดลิงก์ของระบบจากแชทหรือเมนูในแอป LINE บนมือถือ</Notice>
+          <Notice tone="info">เปิดจากแชทหรือเมนูใน LINE บนมือถือ</Notice>
         )}
-        <p className="mt-4 text-center text-sm leading-6 text-muted">บนคอมพิวเตอร์เปิดได้จากเบราว์เซอร์ทั่วไป</p>
+        <p className="mt-4 text-center text-sm leading-6 text-muted">คอมพิวเตอร์ใช้ได้เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ</p>
       </div>
     </AuthShell>
   );

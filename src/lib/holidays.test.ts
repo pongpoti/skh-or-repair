@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   HOSPITAL_HOLIDAYS,
   botHolidayFeed,
+  forgetHolidayFeeds,
   holidayIn,
   holidayOn,
   holidaysBetween,
@@ -126,6 +127,7 @@ test("16 Dec 2026 is the hospital's special holiday, without the BOT or EXTRA_HO
 
   // The BOT names the same day (a special holiday announced later): one entry, the hospital's name.
   process.env.BOT_API_TOKEN = "token";
+  forgetHolidayFeeds();
   t.mock.method(globalThis, "fetch", async () =>
     new Response(JSON.stringify({ result: { data: [{ Date: "2026-12-16", HolidayDescriptionThai: "วันหยุดพิเศษ" }, { Date: "2026-12-10", HolidayDescriptionThai: "วันรัฐธรรมนูญ" }] } })),
   );
@@ -170,6 +172,7 @@ test("the holidays between two days, and the next workday after one, say why whe
   delete process.env.VERCEL;
   delete process.env.BOT_HOLIDAYS_URL;
   process.env.EXTRA_HOLIDAYS = "2026-12-30=ปิดปรับปรุง";
+  forgetHolidayFeeds();
 
   process.env.BOT_API_TOKEN = "";
   assert.deepEqual(await nextWorkdayAfter("2026-12-29"), { ok: false, reason: "no-token" });
@@ -204,8 +207,10 @@ test("the holidays between two days, and the next workday after one, say why whe
   assert.deepEqual(partial.unlisted, [2028], "only the year that failed");
   assert.deepEqual(await nextWorkdayAfter("2027-12-25"), { ok: false, reason: "failed" });
 
-  // A year the BOT answers with an empty list (not announced yet) is still ok, but unlisted.
+  // A failure is kept for half a minute only; forget it here rather than wait.
   down = new Set();
+  forgetHolidayFeeds();
+  // A year the BOT answers with an empty list (not announced yet) is still ok, but unlisted.
   empty = new Set(["2029"]);
   const unannounced = await holidaysBetween("2028-12-20", "2029-01-20");
   assert.deepEqual(unannounced, {
@@ -225,4 +230,82 @@ test("the holidays between two days, and the next workday after one, say why whe
   process.env.VERCEL = "1";
   await botHolidayFeed(2032, { token: "token" });
   assert.equal(urls.at(-1), "https://gateway.api.bot.or.th/financial-institutions-holidays/?year=2032");
+});
+
+test("the pages keep each year's answer: a list for six hours, a year not announced yet for an hour, a failure for half a minute; calls at once share one", async (t) => {
+  const saved = process.env.BOT_API_TOKEN;
+  t.after(() => {
+    if (saved === undefined) delete process.env.BOT_API_TOKEN;
+    else process.env.BOT_API_TOKEN = saved;
+  });
+  t.mock.method(console, "warn", () => {});
+  let clock = 1_000_000;
+  t.mock.method(Date, "now", () => clock);
+  const asked: string[] = [];
+  let answer = (year: string) => new Response(JSON.stringify({ result: { data: year === "2026" ? [{ Date: "2026-12-10", HolidayDescriptionThai: "วันรัฐธรรมนูญ" }] : [] } }));
+  t.mock.method(globalThis, "fetch", async (url: string) => {
+    const year = new URL(url).searchParams.get("year") ?? "";
+    asked.push(year);
+    return answer(year);
+  });
+  process.env.BOT_API_TOKEN = "token";
+  forgetHolidayFeeds();
+
+  // Two pages at once ask once; then the answer is kept.
+  await Promise.all([holidaysBetween("2026-12-01", "2027-01-31"), holidaysBetween("2026-12-01", "2027-01-31")]);
+  assert.deepEqual(asked.sort(), ["2026", "2027"]);
+  await holidaysBetween("2026-12-01", "2027-01-31");
+  assert.equal(asked.length, 2, "kept");
+
+  // 2027 (an empty list: not announced yet) is asked again after an hour, 2026's list after six hours.
+  clock += 60 * 60 * 1000 + 1;
+  await holidaysBetween("2026-12-01", "2027-01-31");
+  assert.deepEqual(asked.slice(2), ["2027"]);
+  clock += 5 * 60 * 60 * 1000;
+  await holidaysBetween("2026-12-01", "2027-01-31");
+  assert.deepEqual(asked.slice(3).sort(), ["2026", "2027"]);
+
+  // A failure is asked about again after half a minute, and a new token is a new question.
+  answer = () => new Response("down", { status: 503 });
+  forgetHolidayFeeds();
+  assert.equal((await holidaysBetween("2026-12-01", "2026-12-31")).ok, false);
+  assert.equal((await holidaysBetween("2026-12-01", "2026-12-31")).ok, false);
+  assert.equal(asked.filter((year) => year === "2026").length, 3, "the failure is kept a moment");
+  answer = (year) => new Response(JSON.stringify({ result: { data: year === "2026" ? [{ Date: "2026-12-10", HolidayDescriptionThai: "วันรัฐธรรมนูญ" }] : [] } }));
+  process.env.BOT_API_TOKEN = "new-token";
+  assert.equal((await holidaysBetween("2026-12-01", "2026-12-31")).ok, true, "a fixed token is asked at once");
+  process.env.BOT_API_TOKEN = "token";
+  clock += 30 * 1000 + 1;
+  assert.equal((await holidaysBetween("2026-12-01", "2026-12-31")).ok, true, "and the old one after half a minute");
+});
+
+test("a call to the BOT gives up after a few seconds, and a malformed BOT_HOLIDAYS_URL is a failed answer, not a crash", async (t) => {
+  const saved = { token: process.env.BOT_API_TOKEN, url: process.env.BOT_HOLIDAYS_URL, vercel: process.env.VERCEL };
+  t.after(() => {
+    for (const [name, value] of Object.entries({ BOT_API_TOKEN: saved.token, BOT_HOLIDAYS_URL: saved.url, VERCEL: saved.vercel })) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    forgetHolidayFeeds();
+  });
+  t.mock.method(console, "warn", () => {});
+  process.env.BOT_API_TOKEN = "token";
+  delete process.env.VERCEL;
+  delete process.env.BOT_HOLIDAYS_URL;
+  forgetHolidayFeeds();
+
+  // Every page shares one call per year, so the call carries a time limit.
+  let signal: AbortSignal | undefined;
+  t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+    signal = init.signal ?? undefined;
+    return new Response(JSON.stringify({ result: { data: [] } }));
+  });
+  await holidaysBetween("2026-12-01", "2026-12-31");
+  assert.ok(signal instanceof AbortSignal, "the call has a time limit");
+
+  // A relative address cannot be fetched: the pages hear "failed" and carry on.
+  process.env.BOT_HOLIDAYS_URL = "/financial-institutions-holidays/";
+  forgetHolidayFeeds();
+  const between = await holidaysBetween("2026-12-01", "2026-12-31");
+  assert.equal(between.ok, false);
 });

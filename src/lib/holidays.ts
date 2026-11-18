@@ -82,9 +82,8 @@ export type HolidayFeed =
   | { state: "failed"; status: number | null };
 
 /**
- * One year's holidays from the BOT API, kept for six hours. Only 200 answers are cached, so a refused token is asked
- * about again on the next request; a 200 without a list (a year not announced yet) is kept too, so the year's list can
- * take up to six hours to show once the BOT has it.
+ * One year's holidays from the BOT API, asked every time. The board and the admin page are rendered per request
+ * (force-dynamic), which makes Next skip its fetch cache, so the pages use keptHolidayFeed below instead.
  */
 export async function botHolidayFeed(year: number, options: { token?: string } = {}): Promise<HolidayFeed> {
   // A token pasted into Vercel can pick up a stray space or line break.
@@ -93,6 +92,8 @@ export async function botHolidayFeed(year: number, options: { token?: string } =
   try {
     const response = await fetch(endpoint(year), {
       headers: { Authorization: token, Accept: "application/json" },
+      // Pages share one call per year (keptHolidayFeed), so a call that hangs must not hold them all.
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       next: { revalidate: REVALIDATE_SECONDS },
     } as RequestInit);
     const body = await response.text();
@@ -137,11 +138,69 @@ function blank(text: string, token: string): string {
   return text.split(token).join("***");
 }
 
+/**
+ * How long an answer of the BOT is kept in the server's memory. The board and the admin page were asking the BOT about
+ * every year they show on every load, one year after another (Pong, 17 Nov 2026: switching to and from จัดการระบบ "lags
+ * a lot"). A list is kept six hours as before (special holidays are announced at short notice); a year not announced yet
+ * (an empty list, or an empty 200/204) an hour; any other failure half a minute, so a token fixed on Vercel works soon.
+ */
+/** How long one call to the BOT may take before it counts as failed (and is asked again after KEEP_MS.failed). */
+const FETCH_TIMEOUT_MS = 8000;
+
+const KEEP_MS = { listed: REVALIDATE_SECONDS * 1000, unannounced: 60 * 60 * 1000, failed: 30 * 1000 } as const;
+
+type KeptFeed = { until: number; feed: Promise<HolidayFeed> };
+
+/** One store per server process, on globalThis: Next bundles pages and route handlers separately (as lib/authz.ts). */
+const KEPT_KEY = Symbol.for("orskh.holiday-feeds");
+const keptStore = globalThis as typeof globalThis & { [KEPT_KEY]?: Map<string, KeptFeed> };
+const kept: Map<string, KeptFeed> = (keptStore[KEPT_KEY] ??= new Map());
+
+function keepFor(feed: HolidayFeed): number {
+  if (feed.state === "ok") return feed.holidays.length > 0 ? KEEP_MS.listed : KEEP_MS.unannounced;
+  if (feed.state === "failed" && feed.status !== null && feed.status >= 200 && feed.status < 300) return KEEP_MS.unannounced;
+  return KEEP_MS.failed;
+}
+
+/**
+ * botHolidayFeed with BOT_API_TOKEN, kept in memory (KEEP_MS). Pages asking about the same year at once share one call.
+ * Without a token nothing is asked or kept.
+ */
+export function keptHolidayFeed(year: number): Promise<HolidayFeed> {
+  const token = process.env.BOT_API_TOKEN?.trim();
+  if (!token) return Promise.resolve({ state: "no-token" });
+  let url: string;
+  try {
+    url = endpoint(year);
+  } catch (error) {
+    // A malformed BOT_HOLIDAYS_URL (local runs only) is a failed answer, as it was inside botHolidayFeed.
+    console.warn(`BOT holidays API could not be reached: ${blank(String(error), token)}`);
+    return Promise.resolve({ state: "failed", status: null });
+  }
+  const key = `${url}\n${token}`;
+  const now = Date.now();
+  const hit = kept.get(key);
+  if (hit && hit.until > now) return hit.feed;
+  // Held while the call is out, then for as long as its answer says.
+  const feed = botHolidayFeed(year, { token });
+  const entry: KeptFeed = { until: now + KEEP_MS.listed, feed };
+  kept.set(key, entry);
+  void feed.then((answer) => {
+    if (kept.get(key) === entry) entry.until = Date.now() + keepFor(answer);
+  });
+  return feed;
+}
+
+/** Drops every kept answer (for the tests). */
+export function forgetHolidayFeeds(): void {
+  kept.clear();
+}
+
 /** The holiday on a YYYY-MM-DD date in Thailand, from HOSPITAL_HOLIDAYS and EXTRA_HOLIDAYS first, then the BOT API. */
 export async function holidayOn(iso: string): Promise<Holiday | null> {
   const extra = holidayIn(ownHolidays(), iso);
   if (extra) return extra;
-  const feed = await botHolidayFeed(Number(iso.slice(0, 4)));
+  const feed = await keptHolidayFeed(Number(iso.slice(0, 4)));
   return feed.state === "ok" ? holidayIn(feed.holidays, iso) : null;
 }
 
@@ -181,8 +240,11 @@ export async function holidaysBetween(from: string, to: string): Promise<Holiday
   const last = Number(to.slice(0, 4));
   let reason: "no-token" | "failed" | null = null;
   const unlisted: number[] = [];
-  for (let year = first; year <= last; year += 1) {
-    const feed = await botHolidayFeed(year);
+  // The years are asked together (each answer is usually kept, so this is rarely more than one wait).
+  const years = Array.from({ length: Math.max(0, last - first + 1) }, (_, index) => first + index);
+  const feeds = await Promise.all(years.map((year) => keptHolidayFeed(year)));
+  for (const [index, year] of years.entries()) {
+    const feed = feeds[index];
     // A date the hospital already closes keeps its own name, so it is listed once.
     if (feed.state === "ok") holidays.push(...feed.holidays.filter((holiday) => holidayIn(holidays, holiday.date) === null));
     else reason ??= feed.state;
@@ -207,4 +269,4 @@ export async function nextWorkdayAfter(iso: string): Promise<NextWorkday> {
 }
 
 /** What the upload page says when the next workday cannot be known. */
-export const HOLIDAYS_UNAVAILABLE = "ตรวจวันหยุดจากธนาคารแห่งประเทศไทยไม่ได้ ลองใหม่อีกครั้ง";
+export const HOLIDAYS_UNAVAILABLE = "โหลดวันหยุดไม่ได้ ลองใหม่อีกครั้ง";

@@ -206,9 +206,9 @@ export type NoRoomReason = keyof typeof NO_ROOM_TEXT;
 export type BookingRoom = { ok: true; roomId: string; dressing: boolean } | { ok: false; reason: NoRoomReason; error: string };
 
 const NO_ROOM_TEXT = {
-  "obgyn-building": "ช่วงปิดซ่อม สูติ-นรีเวชกรรมผ่าตัดที่อาคารแม่ จองห้องที่นี่ไม่ได้",
-  "no-department": "ยังไม่ทราบสาขาของคุณ จึงจัดห้องให้ไม่ได้ ติดต่อผู้ดูแลระบบ",
-  "no-room": "สาขาของคุณไม่มีห้องผ่าตัดในวันที่เลือก เลือกวันอื่น",
+  "obgyn-building": "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้",
+  "no-department": "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล",
+  "no-room": "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น",
   "no-dressing-room": "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น",
 } as const;
 
@@ -331,9 +331,9 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   if (!isIsoDate(date)) return refuse("date", "เลือกวันที่ผ่าตัด");
   if (date < earliest) return refuse("date", earliestText(today, earliest, holidays), { earliest });
   if (date > addDays(today, BOOK_AHEAD_DAYS)) return refuse("date", `จองล่วงหน้าได้ไม่เกิน ${BOOK_AHEAD_DAYS} วัน`);
-  if (workdayIndex(date) === null) return refuse("date", "วันเสาร์และอาทิตย์ไม่มีตารางผ่าตัด");
+  if (workdayIndex(date) === null) return refuse("date", "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
   const holiday = holidayIn(holidays, date);
-  if (holiday) return refuse("date", `วันที่เลือกเป็นวันหยุด (${holiday.name}) ไม่มีตารางผ่าตัด`);
+  if (holiday) return refuse("date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
 
   const hn = checkHn(raw.hn);
   if (!hn.ok) return refuse("hn", hn.error);

@@ -251,13 +251,9 @@ export function ClaimPanel({
 
   if (restart) {
     return (
-      <div role="alert">
-        <h2 className={H2} ref={headingRef} tabIndex={-1}>
-          หมดเวลา
-        </h2>
-        <div className="mt-3">
-          <Notice tone="warning">{restart}</Notice>
-        </div>
+      // Said once (Pong, 17 Nov 2026: short alerts); the message takes the focus a heading would.
+      <div role="alert" ref={headingRef} tabIndex={-1} className="outline-none">
+        <Notice tone="warning">{restart}</Notice>
         <a className="btn btn-primary mt-4 min-h-12 w-full" href="/login">
           เริ่มใหม่
         </a>
@@ -270,7 +266,7 @@ export function ClaimPanel({
       <div className="text-center" role="alert">
         <StateIcon icon="alert" tone="bad" />
         <h2 className={H2}>ระบบยังไม่พร้อม</h2>
-        <p className={HELP}>กรุณาลองใหม่อีกครั้ง หรือติดต่อผู้ดูแล</p>
+        <p className={HELP}>ลองใหม่อีกครั้ง หรือติดต่อผู้ดูแล</p>
         <a className="btn btn-secondary mt-4 w-full" href="/login/claim">
           ลองอีกครั้ง
         </a>
@@ -442,7 +438,7 @@ export function ClaimPanel({
           <p>
             ไม่พบ “<span className="font-semibold break-words text-ink">{q}</span>” ในรายชื่อ{TYPE_LABELS[type]}
           </p>
-          <p className="mt-1 text-[0.8125rem] leading-5 text-muted">ลองพิมพ์เฉพาะชื่อหรือเฉพาะนามสกุล หรือเลือกตำแหน่งอื่น</p>
+          <p className="mt-1 text-[0.8125rem] leading-5 text-muted">ลองพิมพ์แค่ชื่อ หรือแค่นามสกุล หรือเลือกตำแหน่งอื่น</p>
           <button type="button" className="text-btn mt-1 -ml-1 px-1" onClick={backToTypes} data-testid="claim-other-type">
             ลองตำแหน่งอื่น
           </button>

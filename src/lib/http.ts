@@ -5,44 +5,44 @@ import { CLAIM_BLOCKED, CLAIM_BLOCKED_LINE } from "./claim-text";
 import { isJsonRequest, isSameOrigin } from "./security";
 
 export const MSG = {
-  notReady: "ระบบยังไม่พร้อม กรุณาติดต่อผู้ดูแล",
-  badRequest: "คำขอไม่ถูกต้อง",
-  sessionExpired: "หมดเวลายืนยันตัวตน กรุณาเริ่มใหม่",
+  notReady: "ระบบยังไม่พร้อม ติดต่อผู้ดูแล",
+  badRequest: "ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง",
+  sessionExpired: "หมดเวลา เริ่มเข้าสู่ระบบใหม่",
   // U+00A0 keeps a number with its unit ("10 หลัก") on one line (Thai line breaking)
-  invalidPhone: "เบอร์มือถือไม่ถูกต้อง กรุณากรอก 10\u00A0หลัก ขึ้นต้นด้วย 06, 08 หรือ 09",
+  invalidPhone: "ใส่เบอร์มือถือ 10\u00A0หลัก ขึ้นต้นด้วย 06, 08 หรือ 09",
   // deeSMSX refused the number (reference code 99)
-  smsRejected: "ส่ง SMS ไปที่เบอร์นี้ไม่ได้ กรุณาตรวจสอบเบอร์มือถือ",
+  smsRejected: "ส่ง SMS ไปเบอร์นี้ไม่ได้ ตรวจเบอร์อีกครั้ง",
   // deeSMSX has no credit left (102)
-  smsUnavailable: "ขณะนี้ระบบส่ง SMS ไม่ได้ กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล",
+  smsUnavailable: "ส่ง SMS ไม่ได้ตอนนี้ ลองใหม่ภายหลัง",
   // deeSMSX may or may not have sent the SMS (timeout, unreadable answer); the wait is LIMITS.cooldownS
-  smsUncertain: "ส่งรหัสไม่สำเร็จ หากได้รับ SMS ภายหลัง รหัสนั้นใช้ไม่ได้ กรุณารอ 1\u00A0นาทีแล้วขอรหัสใหม่",
+  smsUncertain: "ส่งรหัสไม่สำเร็จ รอ 1\u00A0นาทีแล้วขอรหัสใหม่",
   // SMS_DAILY_CAP reached
-  dailyCap: "ระบบส่ง SMS ครบจำนวนของวันนี้แล้ว กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล",
-  tooMany: "ขอรหัสบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่",
-  tooManyToday: "ขอรหัสครบจำนวนต่อวันแล้ว",
+  dailyCap: "วันนี้ส่ง SMS ครบจำนวนแล้ว ติดต่อผู้ดูแล",
+  tooMany: "ขอรหัสบ่อยเกินไป รอสักครู่แล้วลองใหม่",
+  tooManyToday: "วันนี้ขอรหัสครบแล้ว",
   wrongCode: "รหัสไม่ถูกต้อง",
-  locked: "ใส่รหัสผิดเกินจำนวนครั้งที่กำหนด กรุณาขอรหัสใหม่",
-  expired: "รหัสหมดอายุหรือใช้ไปแล้ว กรุณาขอรหัสใหม่",
-  failed: "เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง",
+  locked: "ใส่รหัสผิดหลายครั้ง ขอรหัสใหม่",
+  expired: "รหัสหมดอายุแล้ว ขอรหัสใหม่",
+  failed: "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง",
   // name claims (/login/claim)
-  claimPick: "กรุณาเลือกชื่อของคุณ",
-  claimType: "กรุณาเลือกตำแหน่ง",
-  claimTaken: "ชื่อนี้มีผู้เลือกแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล",
-  claimUnavailable: "ไม่พบชื่อนี้ในรายชื่อแล้ว กรุณาเลือกใหม่",
-  claimHasName: "เบอร์นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล",
-  claimLineHasName: "บัญชี LINE นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล",
+  claimPick: "เลือกชื่อของคุณก่อน",
+  claimType: "เลือกตำแหน่งก่อน",
+  claimTaken: "ชื่อนี้มีคนเลือกแล้ว ถ้าเป็นชื่อคุณ ติดต่อผู้ดูแล",
+  claimUnavailable: "ไม่มีชื่อนี้ในรายชื่อแล้ว เลือกใหม่",
+  claimHasName: "เบอร์นี้ใช้กับชื่ออื่นแล้ว ติดต่อผู้ดูแล",
+  claimLineHasName: "LINE นี้ใช้กับชื่ออื่นแล้ว ติดต่อผู้ดูแล",
   claimBlocked: CLAIM_BLOCKED,
   claimBlockedLine: CLAIM_BLOCKED_LINE,
-  claimTooMany: "เลือกชื่อบ่อยเกินไป กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล",
+  claimTooMany: "เลือกชื่อบ่อยเกินไป ลองใหม่ภายหลัง",
   // doctors' email codes (/login/doctor)
-  emailPick: "กรุณาเลือกชื่อของคุณ",
-  emailNotDoctor: "ไม่พบชื่อนี้ในรายชื่อแพทย์ กรุณาเลือกใหม่",
-  emailNone: "ยังไม่มีอีเมลของชื่อนี้ในระบบ กรุณาติดต่อผู้ดูแล",
-  emailDailyCap: "ระบบส่งอีเมลครบจำนวนของวันนี้แล้ว กรุณาลองใหม่ภายหลัง หรือติดต่อผู้ดูแล",
-  emailFailed: "ส่งอีเมลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
-  emailLineHasName: "บัญชี LINE นี้ผูกกับชื่ออื่นในรายชื่ออยู่แล้ว กรุณาติดต่อผู้ดูแล",
+  emailPick: "เลือกชื่อของคุณก่อน",
+  emailNotDoctor: "ไม่มีชื่อนี้ในรายชื่อแพทย์ เลือกใหม่",
+  emailNone: "ยังไม่มีอีเมลของชื่อนี้ ติดต่อผู้ดูแล",
+  emailDailyCap: "วันนี้ส่งอีเมลครบจำนวนแล้ว ติดต่อผู้ดูแล",
+  emailFailed: "ส่งอีเมลไม่สำเร็จ ลองใหม่อีกครั้ง",
+  emailLineHasName: "LINE นี้ใช้กับชื่ออื่นแล้ว ติดต่อผู้ดูแล",
   // the doctor's name is held by another LINE account: only an administrator can free it
-  emailTaken: "ชื่อนี้มีผู้ยืนยันตัวตนแล้ว หากเป็นชื่อของคุณ กรุณาติดต่อผู้ดูแล",
+  emailTaken: "ชื่อนี้มีคนใช้แล้ว ถ้าเป็นชื่อคุณ ติดต่อผู้ดูแล",
 } as const;
 
 export function json(body: unknown, status = 200, init?: { headers?: Record<string, string> }): NextResponse {

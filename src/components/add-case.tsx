@@ -44,7 +44,7 @@ const DIALOG = `${DIALOG_LOOK} w-[min(32rem,calc(100%-1.5rem))]`;
 /** The scrub question, a smaller dialog over the booking form. */
 const QUESTION_DIALOG = `${DIALOG_LOOK} w-[min(24rem,calc(100%-2.5rem))]`;
 
-const UNSAVED = "บันทึกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง";
+const UNSAVED = "บันทึกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
 
 /** A picked radio: brown edge and tint. The input itself is visually hidden but still takes focus and arrow keys. */
 const OPTION =
@@ -328,7 +328,7 @@ export function AddCase({
         apply(await onRemove(id), "remove");
       } catch {
         setAbout("remove");
-        setError("ยกเลิกไม่สำเร็จ ตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง");
+        setError("ยกเลิกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่");
         setDone("");
       } finally {
         setConfirming(null);
