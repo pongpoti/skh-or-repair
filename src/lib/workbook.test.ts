@@ -119,21 +119,17 @@ test("the Thai reasons for the upload summary", () => {
   });
 });
 
-test("board cuts: of the 10 kept, Tha Chalom's 900012 and Thursday's vascular 900013 go, 8 are left to place", () => {
+test("board cuts: of the 10 kept, only Tha Chalom's 900012 goes, 9 are left to place", () => {
   const { kept } = filterForUpload(parsed());
-  const cuts = boardCuts(kept, THURSDAY);
+  const cuts = boardCuts(kept);
   assert.deepEqual(
     cuts.cut.map(({ caseId, reason }) => ({ caseId, reason })),
-    [
-      { caseId: "900012", reason: "tha-chalom" },
-      { caseId: "900013", reason: "vascular" },
-    ],
+    [{ caseId: "900012", reason: "tha-chalom" }],
   );
-  assert.deepEqual(cuts.kept.map((row) => row.caseId), ["900001", "900002", "900003", "900007", "900010", "900011", "900014", "900015"]);
-  // Vascular surgery stays on a Monday or a Friday; Tha Chalom's cases never do.
-  assert.deepEqual(boardCuts(kept, "2026-11-02").cut.map((row) => row.caseId), ["900012"]);
-  assert.deepEqual(boardCuts(kept, "2026-11-06").cut.map((row) => row.caseId), ["900012"]);
-  assert.deepEqual(boardCuts(kept, "2026-11-03").cut.map((row) => row.caseId), ["900012", "900013"]);
+  // 900013 is vascular surgery on a Thursday. The utilisation report cut it as Tha Chalom's quota; the board now
+  // follows the schedule in force instead and leaves the room to placeCase (Pong, 18 Nov 2026: "stick to the interim
+  // schedule").
+  assert.deepEqual(cuts.kept.map((row) => row.caseId), ["900001", "900002", "900003", "900007", "900010", "900011", "900013", "900014", "900015"]);
 });
 
 test("departments from แผนก, then ชนิด, then the surgeon's usual department in the file", () => {
@@ -440,9 +436,8 @@ test("prepareUpload: refusals, and the summary holds counts only", () => {
     ],
     cut: [
       { reason: "tha-chalom", label: "เคสของ รพ.นครท่าฉลอม", count: 1 },
-      { reason: "vascular", label: "ศัลยกรรมหลอดเลือด วันอังคาร–พฤหัสบดี (โควตาท่าฉลอม)", count: 1 },
     ],
-    toPlace: 8,
+    toPlace: 9,
   });
   assert.equal(JSON.stringify(day.summary).includes("99000"), false); // no HN
 });

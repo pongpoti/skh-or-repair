@@ -3452,18 +3452,20 @@ async function main() {
       await page.click('[data-testid="upload-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"] [role="status"]'));
       assert(
-        (await result()) === "บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว ลงห้อง 7 จาก 7 เคส · ขึ้นกระดานเวลา 16:00 น.",
+        (await result()) === "บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว ลงห้อง 8 จาก 8 เคส · ขึ้นกระดานเวลา 16:00 น.",
         `saved: ${await result()}`,
       );
       await page.waitForSelector('[data-testid="upload-matching"]');
       assert((await textOf(page, '[data-testid="upload-latest"] h2 + p')) === `15:20 น. · ${RP.mx.name}`, "when and by whom");
       const stats = await page.$$eval('[data-testid="upload-latest"] dd', (els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
-      // 3 HOSxP cases nobody booked (not the 2 dressings: nobody need book the dressing room) and 1 booking HOSxP lacks
-      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "7 เคส", "4 รายการ"]), `counts: ${JSON.stringify(stats)}`);
+      // 4 HOSxP cases nobody booked (not the 2 dressings: nobody need book the dressing room) and 1 booking HOSxP lacks.
+      // Of the 9 kept only Tha Chalom's case is cut: the vascular case goes to the mixed room OR 11 (Pong, 18 Nov 2026:
+      // "Vas stay on others room if not emer").
+      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "8 เคส", "5 รายการ"]), `counts: ${JSON.stringify(stats)}`);
       const latest = await textOf(page, '[data-testid="upload-latest"]');
       for (const line of ["ยกเลิกการผ่าตัด", "เคสของ รพ.นครท่าฉลอม", "OR 12 · GENSX", "ID ซ้ำ นับครั้งเดียว"]) assert(latest.includes(line), `summary shows ${line}`);
       assert((await textOf(page, '[data-testid="upload-matching"]')) === "แพทย์จองไว้ 3 รายการ · ตรงกัน 2 รายการ", `matching: ${await textOf(page, '[data-testid="upload-matching"]')}`);
-      assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 3, "three HOSxP cases nobody booked, outside the dressing room");
+      assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 4, "four HOSxP cases nobody booked, outside the dressing room");
       const missing = await textOf(page, '[data-testid="upload-not-in-hosxp"]');
       assert(missing.includes(`HN ${HN_X_MISSING}`) && missing.includes(RP.drX.name) && missing.includes("OR 10"), `the booking HOSxP does not list: ${missing}`);
 
@@ -3471,13 +3473,13 @@ async function main() {
       const up = (await db.query("SELECT id, cycle_day::text AS c, target_date::text AS t, uploaded_by, uploader_name, file_name, total_rows, kept, placed FROM workbook_uploads")).rows;
       assert(
         up.length === 1 && up[0].c === "2026-11-16" && up[0].t === "2026-11-17" && up[0].uploaded_by === RP.mx.sub && up[0].uploader_name === RP.mx.name &&
-          up[0].file_name === "e2e-or-export.xlsx" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 7,
+          up[0].file_name === "e2e-or-export.xlsx" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 8,
         `upload row: ${JSON.stringify(up)}`,
       );
       const cases = (
         await db.query("SELECT (to_jsonb(w) - 'patient_name')::text AS j, patient_name, hn, room_id FROM workbook_cases w WHERE upload_id = $1 ORDER BY position", [up[0].id])
       ).rows;
-      assert(cases.length === 7 && cases.some((c) => c.hn === "7000015" && c.room_id === "or-12"), `stored cases: ${cases.length}`);
+      assert(cases.length === 8 && cases.some((c) => c.hn === "7000015" && c.room_id === "or-12"), `stored cases: ${cases.length}`);
       // The name (Pong, 16 Nov 2026: "Add patient name line above HN") in its own column, the made-up one from the file.
       assert(cases.every((c) => /^ตัวอย่าง ผู้ป่วย\d+$/.test(c.patient_name ?? "")), "each case keeps the patient's name");
       assert(cases.every((c) => !/ผู้ป่วย|ประกัน|690000|ปี \d/.test(c.j)), "no other patient field (age, AN, cover) stored");
@@ -3672,7 +3674,7 @@ async function main() {
       // the HN in each viewer's page: everything for MX, a doctor's own bookings only, none for a nurse
       const html = {};
       for (const key of ["mx", "nurse", "drX", "drY"]) html[key] = (await htmlAs(RP[key])).html;
-      const placed = ["7000001", "7000002", "7000003", "7000010", "7000011", "7000014", "7000015"];
+      const placed = ["7000001", "7000002", "7000003", "7000010", "7000011", "7000013", "7000014", "7000015"];
       for (const hn of placed) assert(html.mx.includes(hn), `MX sees ${hn}`);
       assert(!html.mx.includes(HN_X_MISSING), "the booking HOSxP does not list is off the board, even for MX");
       for (const hn of [...WORKBOOK_HNS, HN_TODAY, HN_X_MISSING]) assert(!html.nurse.includes(hn), "no HN in the nurse's page");

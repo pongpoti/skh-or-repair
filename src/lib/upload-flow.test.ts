@@ -144,13 +144,15 @@ test("the whole sample file is refused: it holds several booked days, so nothing
   assert.match(!result.ok ? result.message : "", /5 พ\.ย\. 2569/);
 });
 
-test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 10 kept, 2 cut, 8 placed by the weekly schedule", () => {
+test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 10 kept, 1 cut, 8 placed by the weekly schedule", () => {
   const result = processed(runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: WEEKLY, bookings: [] }));
   // The answers sheet's placement: GENSX rooms, the ORTHO room, dressing to OR 1, the endoscopy to SCOPE (OR 3), the
   // ENT room. On Thursdays GENSX holds OR 2 and OR 5 (fewest cases first), ORTHO OR 11 and ENT OR 4. One change since
   // the sheet was made: 900003, "I&D abscess Rt thigh", is a dressing case now that I&D counts (Pong, 15 Nov 2026), so
   // it goes to OR 1 rather than a GENSX room. Two since: 900007, "Appendectomy (on call)", was keyed in the day before,
   // so it is booked ahead and kept (Pong, 18 Nov 2026: "Just ignore 'on call' word"); it takes OR 5 and 900015 OR 2.
+  // And 900013, vascular surgery, is no longer cut as Tha Chalom's quota (Pong, 18 Nov 2026: "stick to the interim
+  // schedule"); the weekly schedule has no vascular room on a Thursday, so it waits unplaced.
   assert.deepEqual(roomOf(result), {
     "900001": "or-2",
     "900002": "or-11",
@@ -158,6 +160,7 @@ test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 10 kept, 2 cut,
     "900007": "or-5",
     "900010": "or-1",
     "900011": "or-3",
+    "900013": null,
     "900014": "or-4",
     "900015": "or-2",
   });
@@ -179,14 +182,11 @@ test("rows 1–17 as the file for Thu 5 Nov, outside the repair: 10 kept, 2 cut,
   );
   assert.deepEqual(
     summary.cut.map((item) => [item.reason, item.count]),
-    [
-      ["tha-chalom", 1],
-      ["vascular", 1],
-    ],
+    [["tha-chalom", 1]],
   );
-  assert.equal(summary.toPlace, 8);
+  assert.equal(summary.toPlace, 9);
   assert.equal(summary.placed, 8);
-  assert.deepEqual(summary.unplaced, []);
+  assert.deepEqual(summary.unplaced, [{ reason: "no-room", label: "แผนกนี้ไม่มีห้องผ่าตัดในวันนั้น", count: 1 }]);
   assert.equal(summary.repairHalf, null);
   assert.deepEqual(
     summary.rooms.map((room) => [room.room, room.dept, room.count]),
@@ -205,7 +205,7 @@ test("the stored cases hold what the board needs, in file order, and of the pati
   const result = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, WEEKLY));
   assert.deepEqual(
     result.cases.map((item) => item.position),
-    [1, 2, 3, 4, 5, 6, 7, 8],
+    [1, 2, 3, 4, 5, 6, 7, 8, 9],
   );
   assert.deepEqual(result.cases[0], {
     caseId: "900001",
@@ -231,8 +231,10 @@ test("the stored cases hold what the board needs, in file order, and of the pati
   }
 });
 
-test("the same file during the first half of the repair: the half's rooms, endoscopy and ENT in the mixed room", () => {
+test("the same file during the first half of the repair: the half's rooms, endoscopy, vascular and ENT in the mixed room", () => {
   const result = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, FIRST_HALF));
+  // Vascular surgery has no room of its own in the interim schedule, so its elective cases go to the mixed room
+  // (Pong, 18 Nov 2026: "Vas stay on others room if not emer").
   assert.deepEqual(roomOf(result), {
     "900001": "or-12",
     "900002": "or-13",
@@ -240,16 +242,17 @@ test("the same file during the first half of the repair: the half's rooms, endos
     "900007": "or-12",
     "900010": "or-10",
     "900011": "or-11",
+    "900013": "or-11",
     "900014": "or-11",
     "900015": "or-12",
   });
   assert.equal(result.summary.repairHalf, 1);
-  assert.equal(result.summary.placed, 8);
+  assert.equal(result.summary.placed, 9);
   assert.deepEqual(
     result.summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
       ["OR 10", DEPARTMENTS.INFECT.label, 2],
-      ["OR 11", DEPARTMENTS.MIXED.label, 2],
+      ["OR 11", DEPARTMENTS.MIXED.label, 3],
       ["OR 12", "GENSX", 3],
       ["OR 13", "ORTHO", 1],
     ],
@@ -266,6 +269,7 @@ test("the second half of the repair uses OR 1 to 5", () => {
     "900007": "or-5",
     "900010": "or-1",
     "900011": "or-4",
+    "900013": "or-4",
     "900014": "or-4",
     "900015": "or-5",
   });

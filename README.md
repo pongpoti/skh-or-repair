@@ -36,7 +36,7 @@ The rules for the workbook (`src/lib/workbook.ts`, `src/lib/placement.ts`):
   - Urgency with no booked time;
   - no case ID.
 - **A repeated case ID** counts once.
-- **Cuts, following the utilisation report:** Tha Chalom hospital cases, and vascular surgery on Tuesday to Thursday (Tha Chalom's quota).
+- **Cut:** Tha Chalom hospital cases. Every other department goes by the schedule in force: during the repair the interim schedule, where a department with no room of its own (vascular surgery included) takes the mixed room; otherwise the weekly schedule. The utilisation report's cut of vascular surgery on Tuesday to Thursday is no longer applied (Pong, 18 Nov 2026: "stick to the interim schedule").
 - **The department** comes from แผนก, then ชนิด, then the surgeon lists (`src/lib/physicians.ts`), then the department that surgeon has most often in the same file. A case with none is left off the board.
 - **The export's room column is not trusted** and is not even stored. Every case is placed by the report's rules:
   - **During the repair**, rooms come from the repair's layout (below):

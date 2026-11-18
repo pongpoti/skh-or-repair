@@ -11,7 +11,7 @@ import type { XlsxCell } from "./xlsx.ts";
  * written with Pong (sections 2 to 10): find the columns by their Thai headers, clean the values, check that every row
  * is booked for the target day (rule set B, step one), drop what is not an in-hours elective case (rule set B, step
  * two), count a repeated case ID once, and cut the rows the board never shows whatever the rooms are (rule set C:
- * Tha Chalom, vascular on Tuesday to Thursday). Choosing a room is placeCase's job (lib/placement.ts).
+ * Tha Chalom). Choosing a room is placeCase's job (lib/placement.ts), by the schedule in force.
  *
  * Privacy: the export holds patient name, age, AN, diagnosis, illnesses and costs. Only the name is read (Pong, 16 Nov
  * 2026: "Add patient name line above HN"), to show beside the HN to those who may see it; the rest are never read into a
@@ -638,6 +638,12 @@ export function filterForUpload(rows: readonly WorkbookRow[]): FilterResult {
 // ---------------------------------------------------------------------------------------------------------------
 // Rule set C: the cuts that do not depend on rooms
 
+/**
+ * "vascular" is no longer applied: the utilisation report's cut of vascular surgery on Tuesday to Thursday (Tha
+ * Chalom's quota) belonged to the usual schedule, and the board follows the schedule in force instead (Pong, 18 Nov
+ * 2026: "This is temporary OR schedule: stick to the interim schedule"). It stays here so uploads stored before still
+ * read back with their counts.
+ */
 export type CutReason = "tha-chalom" | "vascular";
 
 export const CUT_REASONS: Readonly<Record<CutReason, string>> = {
@@ -648,20 +654,16 @@ export const CUT_REASONS: Readonly<Record<CutReason, string>> = {
 export type CutRow = { caseId: string; line: number; reason: CutReason; label: string };
 export type CutResult = { kept: WorkbookRow[]; cut: CutRow[] };
 
-/** 0 = Sunday … 6 = Saturday. */
-const weekdayOf = (iso: string) => new Date(`${iso}T00:00:00Z`).getUTCDay();
-
 /**
- * The board never shows Tha Chalom's cases, nor vascular surgery on Tuesday to Thursday (Tha Chalom's quota). Room
- * rules (OB-GYN in the obstetric building during the repair, no room for a department) are placeCase's.
+ * The board never shows Tha Chalom's cases: they operate at รพ.นครท่าฉลอม, not here. Everything else goes to the rooms
+ * of the schedule in force (placeCase, lib/placement.ts): during the repair the interim schedule, where a department
+ * with no room of its own, vascular surgery included, takes the mixed room; otherwise the weekly schedule.
  */
-export function boardCuts(kept: readonly WorkbookRow[], date: string): CutResult {
-  const vascularDay = [2, 3, 4].includes(weekdayOf(date));
+export function boardCuts(kept: readonly WorkbookRow[]): CutResult {
   const out: WorkbookRow[] = [];
   const cut: CutRow[] = [];
   for (const row of kept) {
-    const reason: CutReason | null = row.thaChalom ? "tha-chalom" : vascularDay && row.dept === "VASCULAR" ? "vascular" : null;
-    if (reason) cut.push({ caseId: row.caseId, line: row.line, reason, label: CUT_REASONS[reason] });
+    if (row.thaChalom) cut.push({ caseId: row.caseId, line: row.line, reason: "tha-chalom", label: CUT_REASONS["tha-chalom"] });
     else out.push(row);
   }
   return { kept: out, cut };
@@ -719,6 +721,6 @@ export function prepareUpload(
   const guard = guardTargetDate(parsed.rows, target);
   if (!guard.ok) return { ok: false, error: "dates", message: guard.message, dates: guard.dates, blank: guard.blank };
   const filter = filterForUpload(parsed.rows);
-  const cuts = boardCuts(filter.kept, target);
+  const cuts = boardCuts(filter.kept);
   return { ok: true, rows: parsed.rows, filter, cuts, summary: summariseUpload(filter, cuts) };
 }
