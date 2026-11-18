@@ -8,6 +8,8 @@ import { listActiveUsers, listMx, mxEligible, type MxMember, type PickableUser }
 import { thaiDateTime } from "@/lib/telegram";
 import { roleLabel, subtypeLabel, type UserType } from "@/lib/user-labels";
 import { HOLDS } from "@/lib/user-list";
+import { thaiDateSpan } from "@/lib/workbook";
+import { pastListSpan } from "@/lib/workbook-store";
 
 /**
  * What the admin page's sections show (components/repair-periods-form.tsx, mx-members.tsx and staff-list.tsx), shaped
@@ -159,5 +161,23 @@ export async function loadPeople(): Promise<PeopleData> {
   } catch (error) {
     console.error("[admin] reading the users failed:", (error as Error).message);
     return { mx: null, staff: null };
+  }
+}
+
+/** The past days that hold an imported list (app/admin/actions.ts importPastLists), for the section's line. */
+export type PastListView = { days: number; span: string | null };
+
+export async function pastListViewFrom(pool: Pool): Promise<PastListView> {
+  const { days, first, last } = await pastListSpan(pool);
+  return { days, span: first && last ? thaiDateSpan(first, last) : null };
+}
+
+/** The same for the page, or null when the table cannot be read (the section still offers the import). */
+export async function loadPastListView(): Promise<PastListView | null> {
+  try {
+    return await pastListViewFrom(await db());
+  } catch (error) {
+    console.error(`[admin] past lists unavailable (${(error as Error).name})`);
+    return null;
   }
 }
