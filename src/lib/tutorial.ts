@@ -48,16 +48,26 @@ export function practiceSubtype(subtype: string | null | undefined, date: string
   return "GENSX";
 }
 
+/**
+ * The cookie the tutorial sets when a doctor starts or skips it, holding their users.id: the board reads it as well as
+ * the doctor's tutorial_seen row, so a skip never comes back because the row was not written yet, or could not be.
+ */
+export const TUTORIAL_COOKIE = "tutorial_seen";
+
 /** The room the doctor's practice booking takes (their department's room that day), or null when none can. */
 export function practiceRoom(subtype: string, date: string, periods: RepairPeriods): string | null {
   const room = bookingRoom(subtype, "practice", date, periods, "dept");
   return room.ok ? room.roomId : null;
 }
 
-/** An ISO time on the made-up day's eve, `hour`:`minute` in Bangkok: when the made-up doctors booked. */
-function eveAt(date: string, hour: number, minute: number): string {
-  const [y, m, d] = date.split("-").map(Number);
-  // Bangkok is UTC+7 all year; a day before the operation.
+/**
+ * An ISO time on the day before `today`, `hour`:`minute` in Bangkok: when the made-up doctors booked. Always in the past,
+ * so always before the doctor's own practice booking: a room's list puts the earliest booking first, and the times on
+ * the rows have to agree with the order the tutorial teaches.
+ */
+function eveAt(today: string, hour: number, minute: number): string {
+  const [y, m, d] = today.split("-").map(Number);
+  // Bangkok is UTC+7 all year.
   return new Date(Date.UTC(y, m - 1, d - 1, hour - 7, minute)).toISOString();
 }
 
@@ -118,18 +128,23 @@ function hosxp(position: number, hn: string, operation: string, who: { name: str
  * - An orthopaedic surgeon (general surgery when the doctor is one) booked a case HOSxP does not list: it is on the
  *   board before the upload and gone after it.
  * - A plastic surgeon booked a dressing for the scrub nurse; HOSxP lists it (the nurse's portrait).
- * - HOSxP adds, nobody having booked them: an out-of-hours case in the doctor's room (a database icon, นอกเวลา, and the
- *   room's "!") and a dressing (the doctor's portrait).
+ * - HOSxP adds, nobody having booked them: a case in the doctor's room (a database icon, after the booked cases, and
+ *   the room's "!") and a dressing (the doctor's portrait). Both in hours: MX's upload drops out-of-hours cases, so the
+ *   real board never shows one.
+ * - The made-up doctors booked the day before `today` (the real one), before the doctor's own practice booking.
  * - The doctor's own practice booking (`mine`), once made; HOSxP lists it under the HN they typed, with a made-up
  *   patient's name only they see.
  */
 export function tutorialCases({
   date,
+  today,
   periods,
   doctor,
   mine,
 }: {
   date: string;
+  /** The real today, for the made-up bookings' times. */
+  today: string;
   periods: RepairPeriods;
   doctor: { name: string; subtype: string };
   mine: AddedCase | null;
@@ -149,16 +164,16 @@ export function tutorialCases({
   const dressingHn = hn();
 
   const made = [
-    booking("tutorial-gone", date, periods, BONE, other, other === "ORTHO" ? "ORIF distal radius, left" : "Herniorrhaphy, right inguinal", goneHn, eveAt(date, 9, 12)),
-    booking("tutorial-dressing", date, periods, SKIN, "PLASTIC", "D/S + VAC, sacral wound", dressingHn, eveAt(date, 10, 5), { dressing: true, scrubDoes: true }),
-    booking("tutorial-colleague", date, periods, KIND, doctor.subtype, LONG_OPERATION, colleagueHn, eveAt(date, 11, 41), { note: "เตรียมเลือด 2 unit\nขอ ultrasound" }),
+    booking("tutorial-gone", date, periods, BONE, other, other === "ORTHO" ? "ORIF distal radius, left" : "Herniorrhaphy, right inguinal", goneHn, eveAt(today, 9, 12)),
+    booking("tutorial-dressing", date, periods, SKIN, "PLASTIC", "D/S + VAC, sacral wound", dressingHn, eveAt(today, 10, 5), { dressing: true, scrubDoes: true }),
+    booking("tutorial-colleague", date, periods, KIND, doctor.subtype, LONG_OPERATION, colleagueHn, eveAt(today, 11, 41), { note: "เตรียมเลือด 2 unit\nขอ ultrasound" }),
   ].filter((item): item is AddedCase => item !== null);
   const bookings = mine ? [...made, mine] : made;
 
   const workbook = [
     hosxp(1, colleagueHn, LONG_OPERATION, KIND, dept),
     hosxp(2, dressingHn, "D/S + VAC, sacral wound", SKIN, "PLASTIC"),
-    hosxp(3, hn(), "Excision of lipoma, back", STEADY, dept, { shift: "out" }),
+    hosxp(3, hn(), "Excision of lipoma, back", STEADY, dept),
     hosxp(4, hn(), "I&D abscess, right thigh", STEADY, "GENSX"),
   ];
   if (mine?.hn) {
@@ -172,6 +187,7 @@ export function tutorialCases({
 /** The made-up day's rows as the doctor sees them, before or after the upload. */
 export function tutorialBoard(input: {
   date: string;
+  today: string;
   periods: RepairPeriods;
   doctor: { name: string; subtype: string };
   mine: AddedCase | null;

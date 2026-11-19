@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
@@ -19,6 +20,7 @@ import type { RepairPeriods } from "@/lib/repair";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import type { SessionUser } from "@/lib/tokens";
+import { TUTORIAL_COOKIE } from "@/lib/tutorial";
 import { tutorialSeen } from "@/lib/tutorial-store";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
@@ -62,7 +64,8 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
         // A doctor's first visit goes to the tutorial (Pong, 19 Nov 2026); a failed read counts as seen.
         tutorialSeen(pool, doctor.id),
       ]);
-      tutorialDue = !seen;
+      // The cookie the tutorial sets on a start or skip counts too: the row may not be written yet, or could not be.
+      tutorialDue = !seen && (await cookies()).get(TUTORIAL_COOKIE)?.value !== String(doctor.id);
       adding = {
         doctor: { name: fullName(doctor), subtype: doctor.subtype },
         today: day.today,

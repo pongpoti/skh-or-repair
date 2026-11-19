@@ -17,7 +17,16 @@ import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, openRooms, roomLabel } from "@/lib/rooms";
-import { LONG_OPERATION, practiceRoom, TUTORIAL_ME, TUTORIAL_NOTICE, tutorialBoard, tutorialCases, type TutorialPhase } from "@/lib/tutorial";
+import {
+  LONG_OPERATION,
+  practiceRoom,
+  TUTORIAL_COOKIE,
+  TUTORIAL_ME,
+  TUTORIAL_NOTICE,
+  tutorialBoard,
+  tutorialCases,
+  type TutorialPhase,
+} from "@/lib/tutorial";
 
 /**
  * The doctors' tutorial (Pong, 19 Nov 2026: "create user-friendly step-by-step interactive tutorial guide with dummy
@@ -34,7 +43,7 @@ type Box = { x: number; y: number; w: number; h: number };
 
 type Mode = "info" | "tap" | "do";
 
-type CardKind = "welcome" | "plan-symbols" | "row-symbols" | "upload" | "finish";
+type CardKind = "welcome" | "plan-symbols" | "priority" | "row-symbols" | "upload" | "finish";
 
 type Step = {
   id: string;
@@ -185,17 +194,20 @@ function sameBox(a: Box | null, b: Box | null): boolean {
 
 export function Tutorial({
   first,
+  seenKey,
   doctor,
   ownSubtype,
   profile,
-  today,
-  day,
+  today: todayProp,
+  day: dayProp,
   holidays,
   unlisted,
   periods,
 }: {
   /** The board sent the doctor here on their first visit: the welcome offers to skip, and starting or skipping notes it. */
   first: boolean;
+  /** The doctor's users.id, for the seen cookie (null for an admin who is not a doctor). */
+  seenKey: string | null;
   /** The doctor's name and the department the practice booking goes by (lib/tutorial.ts practiceSubtype). */
   doctor: { name: string; subtype: string };
   /** The doctor's own department, when it is not the practice one (obstetrics during the repair). */
@@ -209,13 +221,17 @@ export function Tutorial({
   periods: RepairPeriods;
 }) {
   const router = useRouter();
+  // The made-up day stays the one the tutorial opened on: opening a room re-renders the page on the server, and after
+  // 15:00 it would name the next day and leave the practice booking behind.
+  const [today] = useState(todayProp);
+  const [day] = useState(dayProp);
   const [phase, setPhase] = useState<TutorialPhase>("before");
   const [mine, setMine] = useState<AddedCase | null>(null);
   const [index, setIndex] = useState(0);
   // A new run of the tutorial (เล่นอีกครั้ง) starts the board afresh.
   const [run, setRun] = useState(0);
 
-  const built = useMemo(() => tutorialBoard({ date: day, periods, doctor, mine, phase }), [day, periods, doctor, mine, phase]);
+  const built = useMemo(() => tutorialBoard({ date: day, today, periods, doctor, mine, phase }), [day, today, periods, doctor, mine, phase]);
   const board: BoardView = {
     date: day,
     rows: built.rows,
@@ -260,7 +276,7 @@ export function Tutorial({
 
   // The rooms the steps point at.
   const roomId = practiceRoom(doctor.subtype, day, periods) ?? "or-12";
-  const made = useMemo(() => tutorialCases({ date: day, periods, doctor, mine: null }).bookings, [day, periods, doctor]);
+  const made = useMemo(() => tutorialCases({ date: day, today, periods, doctor, mine: null }).bookings, [day, today, periods, doctor]);
   const goneRoom = made.find((item) => item.id === "tutorial-gone")?.roomId ?? null;
   const dressingRoom = made.find((item) => item.id === "tutorial-dressing")?.roomId ?? null;
   const label = (id: string | null) => {
@@ -268,7 +284,8 @@ export function Tutorial({
     return room ? roomLabel(room) : (id ?? "");
   };
   const roomName = label(roomId);
-  const stand = ownSubtype !== null && ownSubtype !== doctor.subtype;
+  // The practice room is not the doctor's own department's (obstetrics during the repair, or no department of theirs).
+  const stand = ownSubtype === null || practiceRoom(ownSubtype, day, periods) !== roomId;
 
   const steps = useMemo(
     () =>
@@ -295,12 +312,24 @@ export function Tutorial({
   );
 
   function exit() {
-    if (first) void seeTutorial();
+    seen();
     router.push("/");
   }
 
+  /**
+   * Notes the tutorial seen: a cookie at once, which the board reads, and the doctor's row for every other phone. The
+   * cookie goes before any navigation, so the board never sends the doctor back here because the row was not written
+   * yet, or could not be written at all.
+   */
+  function seen() {
+    if (!first || !seenKey) return;
+    const secure = window.location.protocol === "https:" ? "; secure" : "";
+    document.cookie = `${TUTORIAL_COOKIE}=${encodeURIComponent(seenKey)}; path=/; max-age=31536000; samesite=lax${secure}`;
+    void seeTutorial();
+  }
+
   function start() {
-    if (first) void seeTutorial();
+    seen();
     go(1);
   }
 
@@ -342,12 +371,14 @@ export function Tutorial({
             <WelcomeCard first={first} onStart={start} onSkip={exit} />
           ) : step.card === "plan-symbols" ? (
             <PlanSymbolsCard day={day} periods={periods} onNext={() => go(index + 1)} />
+          ) : step.card === "priority" ? (
+            <PriorityCard onNext={() => go(index + 1)} />
           ) : step.card === "row-symbols" ? (
             <RowSymbolsCard onNext={() => go(index + 1)} />
           ) : step.card === "upload" ? (
             <UploadCard day={day} onNext={uploaded} />
           ) : step.card === "finish" ? (
-            <FinishCard onBoard={() => router.push("/")} onAgain={again} />
+            <FinishCard onBoard={exit} onAgain={again} />
           ) : null
         }
       />
@@ -432,7 +463,9 @@ function buildSteps({
       hand: "swipe",
     },
 
-    // 2. The practice booking.
+    // 2. Why book (Pong, 19 Nov 2026: "emphasize the importance of elective booking is to guarantee first priority of OR
+    // room queue and promote surgeon to always book"), then the practice booking.
+    { id: "priority", chapter: 1, card: "priority" },
     {
       id: "book",
       chapter: 1,
@@ -517,7 +550,7 @@ function buildSteps({
       id: "booked",
       chapter: 1,
       title: "จองแล้ว!",
-      body: "การจองของคุณอยู่ตรงนี้ ยกเลิกได้ด้วยปุ่ม ยกเลิกจอง",
+      body: "เคสนี้ได้คิวก่อนเคสที่ไม่ได้จองแล้ว การจองของคุณอยู่ตรงนี้ ยกเลิกได้ด้วยปุ่ม ยกเลิกจอง",
       target: () => find("[data-testid=my-cases]"),
       setup: form,
       scroll: "center",
@@ -529,6 +562,7 @@ function buildSteps({
       title: "กลับไปที่แปลน",
       body: "แตะ ปิด",
       target: () => find("[data-testid=add-case-close]"),
+      scroll: "nearest",
       mode: "tap",
       hand: "tap",
       round: true,
@@ -551,7 +585,7 @@ function buildSteps({
       id: "my-row",
       chapter: 2,
       title: "เคสของคุณ",
-      body: "HN ขึ้นให้เห็นเฉพาะคุณ คนอื่นไม่เห็น บรรทัดล่างคือเวลาที่จอง",
+      body: "HN ของคุณ แพทย์คนอื่นไม่เห็น บรรทัดล่างคือเวลาที่จอง",
       target: myRow,
       setup: () => openRoom(roomId),
       scroll: "nearest",
@@ -573,7 +607,7 @@ function buildSteps({
       id: "colleague",
       chapter: 2,
       title: "เคสของแพทย์คนอื่น",
-      body: "ไม่เห็น HN ของคนอื่น ลำดับในห้องเรียงตามเวลาที่จอง",
+      body: "ไม่เห็น HN ของคนอื่น เคสที่จองเรียงตามเวลาที่จอง ยิ่งจองเร็ว ยิ่งได้คิวก่อน",
       target: colleagueRow,
       setup: () => openRoom(roomId),
       scroll: "nearest",
@@ -623,7 +657,7 @@ function buildSteps({
       id: "matched",
       chapter: 3,
       title: "ไอคอนจับมือ",
-      body: "ตาราง HOSxP ตรงกับที่คุณจอง ชื่อผู้ป่วยขึ้นให้เห็นเฉพาะคุณ",
+      body: "ตาราง HOSxP ตรงกับที่คุณจอง เคสที่จองยังได้คิวก่อน ชื่อผู้ป่วยของคุณ แพทย์คนอื่นไม่เห็น",
       target: myRow,
       setup: () => openRoom(roomId),
       scroll: "nearest",
@@ -631,8 +665,8 @@ function buildSteps({
     {
       id: "unbooked",
       chapter: 3,
-      title: "ไอคอนฐานข้อมูล",
-      body: "เคสจากตาราง HOSxP ที่ไม่มีใครจอง ป้าย นอกเวลา คือผ่าตัดนอกเวลาราชการ",
+      title: "เคสที่ไม่มีใครจอง",
+      body: "เคสจากตาราง HOSxP ที่ไม่มีใครจอง ต่อท้ายคิว หลังเคสที่จองทุกเคส",
       target: () => find("li.case-row[data-flag=unbooked]", sheet()),
       setup: () => openRoom(roomId),
       scroll: "nearest",
@@ -837,9 +871,16 @@ function Coach({
           const pad = current.pad ?? 6;
           rect = { x: Math.round(box.left - pad), y: Math.round(box.top - pad), w: Math.round(box.width + pad * 2), h: Math.round(box.height + pad * 2) };
         }
-        if (rect && current.scroll && !scrolled) {
+        // A step that asks for it scrolls its target into place once; any other target out of sight (scrolled off the
+        // top of a dialog, below the screen) is brought into view once too, or a tap step could not be done.
+        const visual = window.visualViewport;
+        const top = visual?.offsetTop ?? 0;
+        const bottom = top + (visual?.height ?? window.innerHeight);
+        // Only a target that fits on the screen: a big one (the plan) is never moved.
+        const outOfSight = box.height < bottom - top && (box.top < top || box.bottom > bottom);
+        if (rect && !scrolled && (current.scroll || outOfSight)) {
           scrolled = true;
-          element.scrollIntoView({ block: current.scroll, inline: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+          element.scrollIntoView({ block: current.scroll ?? "nearest", inline: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
         }
       }
       if (current.target && !rect && !hidden) {
@@ -1109,6 +1150,7 @@ function WelcomeCard({ first, onStart, onSkip }: { first: boolean; onStart: () =
         ยินดีต้อนรับสู่ ORSKH.APP
       </h2>
       <p className="coach-card-text">มาลองจองห้องผ่าตัดในตารางตัวอย่างกัน ใช้เวลาราว 2 นาที เคสทั้งหมดเป็นเคสสมมติ ไม่ได้บันทึกจริง</p>
+      <Tip testId="coach-welcome-tip">เคสที่จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ</Tip>
       <ol className="coach-stages">
         {CHAPTERS.slice(0, 5).map((name, at) => (
           <li key={name}>
@@ -1212,7 +1254,6 @@ function RowSymbolsCard({ onNext }: { onNext: () => void }) {
         <Key symbol={<CaseSymbol source="hosxp" />}>มีในตาราง HOSxP ไม่มีการจอง</Key>
         <Key symbol={<CaseSymbol source="booking" doneBy="scrub" />}>ห้องทำแผล: ฝาก scrub ทำ</Key>
         <Key symbol={<CaseSymbol source="booking" doneBy="surgeon" />}>ห้องทำแผล: แพทย์ทำเอง</Key>
-        <Key symbol={<span className="badge badge-warning">นอกเวลา</span>}>ผ่าตัดนอกเวลาราชการ</Key>
         <Key
           symbol={
             <span className="case-note">
@@ -1224,9 +1265,75 @@ function RowSymbolsCard({ onNext }: { onNext: () => void }) {
           ข้อความถึงทีม OR แตะเพื่ออ่าน
         </Key>
       </ul>
+      <p className="coach-card-note">ลำดับในห้อง: เคสที่จองก่อน เรียงตามเวลาที่จอง แล้วจึงเป็นเคสที่ไม่ได้จอง</p>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
           ถัดไป
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function StarIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
+      {/* Lucide "star" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
+      <path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z" />
+    </svg>
+  );
+}
+
+/** The one rule the tutorial keeps coming back to: book, and the case is ahead of every case nobody booked. */
+function Tip({ children, testId }: { children: ReactNode; testId: string }) {
+  return (
+    <p className="coach-tip" data-testid={testId}>
+      <StarIcon />
+      <span>{children}</span>
+    </p>
+  );
+}
+
+/**
+ * Why book (Pong, 19 Nov 2026: "emphasize the importance of elective booking is to guarantee first priority of OR room
+ * queue and promote surgeon to always book"). A room's list puts every booked case first, earliest booking first, and
+ * the HOSxP cases nobody booked after them (lib/board-rows.ts), so the card shows that queue as it stands after the
+ * upload: handshakes, then the database icon (a calendar row never shares a list with a database one).
+ */
+function PriorityCard({ onNext }: { onNext: () => void }) {
+  return (
+    <Card testId="coach-priority">
+      <span className="coach-trophy" aria-hidden="true">
+        <StarIcon size={40} />
+      </span>
+      <p className="coach-card-eyebrow">กฎข้อสำคัญ</p>
+      <h2 id="coach-priority-title" className="coach-card-title">
+        จองก่อน ได้คิวก่อน
+      </h2>
+      <p className="coach-card-text">เคส elective ที่จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ เคสที่ไม่ได้จองต่อท้ายคิว</p>
+      <ol className="coach-queue" data-testid="coach-queue" aria-label="ลำดับคิวในห้อง">
+        <li className="is-booked">
+          <span className="coach-queue-no">1</span>
+          <CaseSymbol source="matched" />
+          <span className="coach-queue-text">เคสที่จองก่อน</span>
+          <span className="coach-queue-tag">คิวแรก</span>
+        </li>
+        <li className="is-booked">
+          <span className="coach-queue-no">2</span>
+          <CaseSymbol source="matched" />
+          <span className="coach-queue-text">เคสที่จองทีหลัง</span>
+        </li>
+        <li className="is-last">
+          <span className="coach-queue-no">3</span>
+          <CaseSymbol source="hosxp" />
+          <span className="coach-queue-text">เคสที่ไม่ได้จอง</span>
+          <span className="coach-queue-tag">ต่อท้าย</span>
+        </li>
+      </ol>
+      <Tip testId="coach-priority-tip">จองทุกเคส ก่อน 15:00 น. ของวันทำการก่อนผ่าตัด</Tip>
+      <div className="coach-card-actions">
+        <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
+          เข้าใจแล้ว ไปจองกัน
         </button>
       </div>
     </Card>
@@ -1268,6 +1375,7 @@ function FinishCard({ onBoard, onAgain }: { onBoard: () => void; onAgain: () => 
         จบบทเรียนแล้ว เก่งมาก!
       </h2>
       <p className="coach-card-text">พร้อมจองห้องผ่าตัดจริงแล้ว การจองในบทเรียนไม่ได้บันทึก</p>
+      <Tip testId="coach-finish-tip">จองทุกเคส elective ล่วงหน้า เพื่อได้คิวก่อนเสมอ</Tip>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onBoard} data-testid="coach-finish-board">
           ไปที่ตารางจริง

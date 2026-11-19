@@ -25,10 +25,10 @@ export default async function TutorialPage({ searchParams }: { searchParams: Pro
   const user = await requireUser();
   const params = await searchParams;
   const admin = isAdmin(user.sub);
-  let doctor: { name: string; subtype: string | null } | null = null;
+  let doctor: { id: string; name: string; subtype: string | null } | null = null;
   try {
     const found = await doctorFor(await db(), user);
-    if (found) doctor = { name: fullName(found), subtype: found.subtype };
+    if (found) doctor = { id: String(found.id), name: fullName(found), subtype: found.subtype };
   } catch (error) {
     console.error("[tutorial] doctor lookup failed:", (error as Error).message);
   }
@@ -44,6 +44,7 @@ export default async function TutorialPage({ searchParams }: { searchParams: Pro
   return (
     <Tutorial
       first={params.first === "1" && doctor !== null}
+      seenKey={doctor?.id ?? null}
       doctor={{ name, subtype }}
       ownSubtype={doctor?.subtype ?? null}
       profile={{ name: profile.name, role: profile.role, image: user.picture ?? null }}

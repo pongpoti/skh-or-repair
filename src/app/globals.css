@@ -1824,3 +1824,80 @@ dialog[open]::backdrop {
   .coach-hand.is-swipe { animation: none; transform: none; }
   .coach-confetti { display: none; }
 }
+
+/* Why book (Pong, 19 Nov 2026): a booked case is ahead of every case nobody booked. The star tip comes back on the
+   welcome card, the priority card and the end. */
+.coach-trophy {
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--late-tint);
+  color: #e0a100;
+  animation: coach-hop 1.6s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+.coach-tip {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1.5px solid #f0c14b;
+  background: #fff6db;
+  color: var(--late);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: left;
+}
+.coach-tip svg { flex-shrink: 0; color: #e0a100; }
+.coach-queue {
+  margin: 12px auto 0;
+  display: grid;
+  gap: 6px;
+  max-width: 19rem;
+  text-align: left;
+}
+.coach-queue li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 50px;
+  padding: 4px 10px 4px 6px;
+  border-radius: 14px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.coach-queue li.is-booked { background: var(--live-tint); color: var(--live); }
+.coach-queue li.is-last { background: var(--surface-2); color: var(--ink-3); }
+.coach-queue-no {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+.coach-queue li.is-booked .coach-queue-no { background: var(--live); }
+.coach-queue li.is-last .coach-queue-no { background: var(--ink-3); }
+.coach-queue-text { flex: 1; min-width: 0; }
+.coach-queue-tag {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.coach-queue li.is-booked .coach-queue-tag { background: var(--live); color: #fff; }
+.coach-queue li.is-last .coach-queue-tag { background: var(--line); color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) {
+  .coach-trophy { animation: none; }
+}

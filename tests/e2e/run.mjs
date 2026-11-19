@@ -4035,6 +4035,7 @@ async function main() {
       assert((await page.getAttribute("header time", "datetime")) === "2026-11-20", "the made-up day is the first day the doctor could book");
       assert((await page.locator('[data-testid="tutorial-notice"]').count()) === 1, "a badge says the cases are made up");
       assert((await textOf(page, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "a first visit may skip it");
+      assert((await page.locator('[data-testid="coach-welcome-tip"]').count()) === 1, "the welcome card says booked cases go first");
       await ownerShot(page, "tutorial-welcome.png");
       await page.click('[data-testid="coach-start"]');
       await waitUntil(async () => (await db.query("SELECT 1 FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId])).rowCount === 1, "starting notes it seen");
@@ -4058,6 +4059,7 @@ async function main() {
       const pictures = {
         plan: "tutorial-plan.png",
         "plan-symbols": "tutorial-plan-symbols.png",
+        priority: "tutorial-priority.png",
         book: "tutorial-book.png",
         "form-hn": "tutorial-hn.png",
         "my-row": "tutorial-my-row.png",
@@ -4087,6 +4089,16 @@ async function main() {
           if (checks[id]) await checks[id]();
           if (taps[id]) {
             assert(mode === "tap", `${id}: a tap step`);
+            // a doctor can only tap what is on the screen: the coach brings it into view (Playwright's click would
+            // scroll to it by itself and hide a target the coach left out of sight)
+            await page.waitForFunction((selector) => {
+              const element = document.querySelector(selector);
+              if (!element) return false;
+              const box = element.getBoundingClientRect();
+              const top = window.visualViewport?.offsetTop ?? 0;
+              const bottom = top + (window.visualViewport?.height ?? window.innerHeight);
+              return box.height > 0 && box.top >= top - 1 && box.bottom <= bottom + 1;
+            }, taps[id], { timeout: 5000 }).catch(() => assert(false, `${id}: the target is out of sight`));
             await page.click(taps[id]);
           } else if (mode === "do") {
             const example = page.locator('[data-testid="coach-example"]');
@@ -4099,6 +4111,14 @@ async function main() {
         }
       };
       const walked = await walk(page, pictures, {
+        // Pong, 19 Nov 2026: "emphasize the importance of elective booking is to guarantee first priority of OR room queue
+        // and promote surgeon to always book": a card before the booking, the queue it shows, and the star tip
+        priority: async () => {
+          assert((await textOf(page, "#coach-priority-title")) === "จองก่อน ได้คิวก่อน", "the rule as the title");
+          const queue = await page.$$eval('[data-testid="coach-queue"] li', (items) => items.map((li) => li.className));
+          assert(JSON.stringify(queue) === JSON.stringify(["is-booked", "is-booked", "is-last"]), `booked cases first, the unbooked one last: ${JSON.stringify(queue)}`);
+          assert((await page.locator('[data-testid="coach-priority-tip"]').count()) === 1, "the tip to always book");
+        },
         "my-row": async () => {
           const rows = await sheetRows(page);
           assert(JSON.stringify(rows) === JSON.stringify([["booking", null, null], ["booking", null, "HN 1234567"]]), `before the upload: the colleague's booking, then the doctor's with its HN only: ${JSON.stringify(rows)}`);
@@ -4119,13 +4139,16 @@ async function main() {
           const rows = await sheetRows(page);
           assert(JSON.stringify(rows) === JSON.stringify([["matched", null, null], ["matched", null, "HN 1234567"], ["hosxp", "unbooked", null]]), `after the upload: ${JSON.stringify(rows)}`);
           assert((await textOf(page, '.room-sheet [data-testid="row-patient"]')) === "ตัวอย่าง ผู้ป่วย", "the made-up patient's name, for the doctor alone");
-          assert((await textOf(page, '.room-sheet .case-row[data-flag="unbooked"] .badge-warning')) === "นอกเวลา", "HOSxP's unbooked case is out of hours");
+          // MX's upload drops out-of-hours cases, so the tutorial shows none (the real board never does)
+          assert((await page.locator('.room-sheet .case-row[data-flag="unbooked"] .badge-warning').count()) === 0, "HOSxP's unbooked case is in hours");
         },
         doers: async () => assert(JSON.stringify(await rowIcons(page)) === '["scrub","surgeon"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(page))}`),
       });
+      assert(walked.indexOf("priority") >= 0 && walked.indexOf("priority") + 1 === walked.indexOf("book"), `the priority card just before the booking: ${walked.join(", ")}`);
       await page.waitForTimeout(700);
       await page.screenshot({ path: join(SCREENS, "tutorial-finish.png") });
       shots.push("tutorial-finish.png");
+      assert((await page.locator('[data-testid="coach-finish-tip"]').count()) === 1, "the end reminds the doctor to book every case");
       assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === casesBefore, "the practice booking saved nothing");
 
       // the end goes to the real board, which no longer sends the doctor to the tutorial
@@ -4156,6 +4179,25 @@ async function main() {
       assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === casesBefore, "nothing saved on the computer either");
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
+
+      // a first visit's skip: the board opens and stays open, the row written behind it (a cookie covers the gap)
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId]);
+      const skipper = await contextAs(RP.drY);
+      const skipPage = await skipper.newPage();
+      await skipPage.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert(skipPage.url() === `${APP}/tutorial?first=1`, `the tutorial again for a doctor with no row: ${skipPage.url()}`);
+      await skipPage.click('[data-testid="coach-skip"]');
+      await skipPage.waitForURL(`${APP}/`);
+      await skipPage.waitForSelector('[data-testid="add-case-button"]');
+      await skipPage.waitForTimeout(1500);
+      assert(skipPage.url() === `${APP}/`, `a skip stays skipped: ${skipPage.url()}`);
+      await waitUntil(async () => (await db.query("SELECT 1 FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId])).rowCount === 1, "skipping notes it seen");
+      // with the cookie alone (the row could not be written), the board still opens
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId]);
+      await skipPage.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert(skipPage.url() === `${APP}/`, `the cookie lets the doctor in: ${skipPage.url()}`);
+      await db.query("INSERT INTO tutorial_seen (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [RP.drY.userId]);
+      await skipper.close();
 
       // for doctors only: a nurse is sent back to the board, and has no วิธีใช้งาน
       const nurse = await contextAs(RP.nurse);

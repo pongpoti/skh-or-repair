@@ -7,6 +7,7 @@ import { LONG_OPERATION, practiceRoom, practiceSubtype, TUTORIAL_ME, tutorialBoa
 const REPAIR = DEFAULT_REPAIR_PERIODS;
 const DAY = "2026-11-20"; // a Friday in the first half: OR 9 EMER, 10 D/S, 11 mixed, 12 GENSX, 13 ORTHO
 const DOCTOR = { name: "ทดลอง ใช้งาน", subtype: "GENSX" };
+const TODAY = "2026-11-19"; // the Thursday before: the made-up doctors booked on Wednesday
 
 const mine = (more: Partial<AddedCase> = {}): AddedCase => ({
   id: TUTORIAL_ME,
@@ -37,7 +38,7 @@ test("the practice room is the doctor's department's room; obstetrics practises 
 });
 
 test("before the upload: the bookings alone, calendar icons, the doctor's own HN only", () => {
-  const board = tutorialBoard({ date: DAY, periods: REPAIR, doctor: DOCTOR, mine: mine(), phase: "before" });
+  const board = tutorialBoard({ date: DAY, today: TODAY, periods: REPAIR, doctor: DOCTOR, mine: mine(), phase: "before" });
   assert.equal(board.uploaded, false);
   const room = rowsIn(board, "or-12");
   assert.deepEqual(
@@ -54,7 +55,7 @@ test("before the upload: the bookings alone, calendar icons, the doctor's own HN
 });
 
 test("after the upload: handshakes, HOSxP's unbooked case with its mark, the dressing room's portraits", () => {
-  const board = tutorialBoard({ date: DAY, periods: REPAIR, doctor: DOCTOR, mine: mine({ note: "ขอ C-arm" }), phase: "after" });
+  const board = tutorialBoard({ date: DAY, today: TODAY, periods: REPAIR, doctor: DOCTOR, mine: mine({ note: "ขอ C-arm" }), phase: "after" });
   assert.equal(board.uploaded, true);
   const room = rowsIn(board, "or-12");
   assert.deepEqual(
@@ -62,7 +63,7 @@ test("after the upload: handshakes, HOSxP's unbooked case with its mark, the dre
     [
       [1, "matched", LONG_OPERATION, null, null, "in"],
       [2, "matched", "Lap chole", "1234567", "ตัวอย่าง ผู้ป่วย", "in"],
-      [3, "hosxp", "Excision of lipoma, back", null, null, "out"],
+      [3, "hosxp", "Excision of lipoma, back", null, null, "in"],
     ],
   );
   assert.equal(room[1].note, "ขอ C-arm");
@@ -75,10 +76,21 @@ test("after the upload: handshakes, HOSxP's unbooked case with its mark, the dre
 test("an orthopaedic surgeon's day: the case HOSxP drops is general surgery's, and the made-up HNs avoid the doctor's", () => {
   const doctor = { name: DOCTOR.name, subtype: "ORTHO" };
   const own = mine({ roomId: "or-13", subtype: "ORTHO", hn: "9900101" });
-  const before = tutorialBoard({ date: DAY, periods: REPAIR, doctor, mine: own, phase: "before" });
+  const before = tutorialBoard({ date: DAY, today: TODAY, periods: REPAIR, doctor, mine: own, phase: "before" });
   assert.deepEqual(rowsIn(before, "or-12").map((row) => row.procedure), ["Herniorrhaphy, right inguinal"]);
-  const after = tutorialBoard({ date: DAY, periods: REPAIR, doctor, mine: own, phase: "after" });
+  const after = tutorialBoard({ date: DAY, today: TODAY, periods: REPAIR, doctor, mine: own, phase: "after" });
   const room = rowsIn(after, "or-13");
   assert.deepEqual(room.map((row) => row.source), ["matched", "matched", "hosxp"]);
   assert.equal(room.filter((row) => row.hn === "9900101").length, 1, "only the doctor's own case has their HN");
+});
+
+test("the made-up doctors booked before the doctor's practice booking: the times agree with the order", async () => {
+  const { tutorialCases } = await import("./tutorial.ts");
+  const own = mine({ bookedAt: "2026-11-19T03:00:00.000Z" }); // 10:00 Bangkok, the morning the tutorial runs
+  const { bookings } = tutorialCases({ date: DAY, today: TODAY, periods: REPAIR, doctor: DOCTOR, mine: own });
+  const made = bookings.filter((item) => item.id !== TUTORIAL_ME);
+  assert.equal(made.length, 3);
+  for (const item of made) assert.ok(item.bookedAt && item.bookedAt < own.bookedAt!, `${item.id} booked before the doctor: ${item.bookedAt}`);
+  const board = tutorialBoard({ date: DAY, today: TODAY, periods: REPAIR, doctor: DOCTOR, mine: own, phase: "before" });
+  assert.deepEqual(rowsIn(board, "or-12").map((row) => row.bookedAt), ["18 พ.ย. 69, 11:41", rowsIn(board, "or-12")[1].bookedAt]);
 });
