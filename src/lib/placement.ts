@@ -18,26 +18,17 @@ export function isDressingCase(procedure: string): boolean {
   return isDressingOperation(procedure);
 }
 
-/** Operation names that belong in the SCOPE room (matched case-insensitively). */
-const SCOPE_INCLUDE = /\begd\b|gastroscop|esophagoscop|\bogd\b|colono|sigmoido|\bercp\b|endoscop|\beus\b/i;
-/** ...unless they are a foreign-body removal. */
-const SCOPE_EXCLUDE = /remove\s*fb|foreign body|\bfb\b/i;
-
-/** A case for the SCOPE room: a GENSX-labelled surgeon and an endoscopic operation that is not a foreign-body removal. */
-export function isScopeCase(procedure: string, team: string | null): boolean {
-  return team === "GENSX" && SCOPE_INCLUDE.test(procedure) && !SCOPE_EXCLUDE.test(procedure);
-}
-
 /** What placement needs to know about a case. */
 export type PlaceInput = {
   /** The operation name. */
   procedure: string;
-  /** The case's department, or null when it is not known. */
+  /**
+   * The case's department, or null when it is not known: the surgeon's own department by name, else the export's
+   * แผนก or ชนิด (lib/workbook.ts surgeonDeptOf).
+   */
   dept: DeptCode | null;
   /** Marked Stat or Emergency. */
   emergency: boolean;
-  /** The surgeon's team in the physician list (resolveSurgeon in lib/week.ts), for the SCOPE rule. */
-  team: string | null;
   /**
    * The surgeon's choice of room (lib/added-cases.ts), which wins over the name: "dept" never goes to the dressing room,
    * whatever the name; "dressing" goes to the day's dressing room (or, with none that day, where the other rules
@@ -89,14 +80,15 @@ const unplaced = (reason: UnplacedReason): Placement => ({ ok: false, reason });
  *
  * Outside the repair (the weekly schedule): dressing cases use the dressing room (OR 1), emergency cases the emergency
  * room (OR 8; obstetrics-gynaecology stays in its own room), and anything else the room its department holds that
- * day. The SCOPE room is exclusive: only a GENSX-labelled surgeon's endoscopic case enters it, and such a case goes
- * nowhere else; other general-surgery cases use the GENSX rooms. Closed rooms take no case: with OR 8 closed an
- * emergency case goes to its department's room.
+ * day. Closed rooms take no case: with OR 8 closed an emergency case goes to its department's room.
  *
  * During the repair (`periods`, lib/repair.ts), with the half's rooms: obstetrics-gynaecology is not placed at all
  * (it operates in the obstetric building); dressing cases use the dressing room; emergencies the emergency room, NEURO
- * and CVT the half's own rooms for them; SCOPE cases and departments with no room of their own the mixed-department
- * room; anything else its department's room.
+ * and CVT the half's own rooms for them; departments with no room of their own the mixed-department room; anything
+ * else its department's room.
+ *
+ * There is no SCOPE rule any more (Pong, 19 Nov 2026: "now base on surgeon name and dept only, no more scope case"):
+ * a general surgeon's endoscopy goes to the GENSX room like the rest of their list.
  *
  * A department with several rooms is pooled, so the case goes to the one with the fewest cases so far (`load`).
  */
@@ -118,13 +110,8 @@ export function placeCase(input: PlaceInput, date: string, periods: RepairPeriod
   }
 
   const mixed = () => roomsHeldBy("MIXED", date, periods);
-  const scope = isScopeCase(input.procedure, input.team);
-  // During the repair there is no SCOPE room: endoscopies share the mixed-department room.
-  if (repair && scope) {
-    const rooms = mixed();
-    return rooms.length > 0 ? placed(fewest(rooms, load)) : unplaced("no-room");
-  }
-  const dept = scope ? "SCOPE" : input.dept === "SCOPE" ? "GENSX" : input.dept;
+  // A case coded SCOPE is a general surgeon's.
+  const dept = input.dept === "SCOPE" ? "GENSX" : input.dept;
   if (!dept) return unplaced("no-department");
 
   // The dressing room takes dressing cases only.
@@ -144,8 +131,6 @@ export type PlaceableCase = {
   dept: DeptCode | null;
   /** The urgency label as the export has it (Elective, Urgency, Stat, Emergency), or null. */
   urgency: string | null;
-  /** The surgeon's team for the SCOPE rule (lib/workbook.ts WorkbookRow.team); null falls back to the department, as there. */
-  team: string | null;
   /** The room chosen by the surgeon of a booking that matches the case (lib/board-rows.ts), which wins over the name. */
   choice?: RoomChoice;
 };
@@ -164,7 +149,6 @@ export function placeAll(cases: readonly PlaceableCase[], date: string, periods:
       procedure: item.operation,
       dept: item.dept,
       emergency: isEmergencyUrgency(item.urgency),
-      team: item.team ?? item.dept,
       choice: item.choice,
     };
     const placement = placeCase(input, date, periods, load);

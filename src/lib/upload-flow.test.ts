@@ -149,8 +149,9 @@ test("rows 1–17 as the file for Thu 5 Nov, in the first half as planned: 10 ke
   const result = processed(runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: PLANNED, bookings: [] }));
   // The answers sheet placed these by the weekly schedule, which this app no longer uses (Pong, 18 Nov 2026). In the
   // first half's rooms: GENSX to OR 12, ORTHO to OR 13, dressing to OR 10 (900003, "I&D abscess Rt thigh", is a dressing
-  // case now that I&D counts, Pong 15 Nov 2026), and the endoscopy, ENT and vascular surgery, which have no room of
-  // their own, to the mixed room OR 11. 900007, "Appendectomy (on call)", was keyed in the day before, so it is booked
+  // case now that I&D counts, Pong 15 Nov 2026), the endoscopy (900011) to GENSX's room like any general surgeon's case
+  // (no scope rule since Pong, 19 Nov 2026), and ENT and vascular surgery, which have no room of their own, to the
+  // mixed room OR 11. 900007, "Appendectomy (on call)", was keyed in the day before, so it is booked
   // ahead and kept (Pong, 18 Nov 2026: "Just ignore 'on call' word"); 900013, vascular surgery, is no longer cut as Tha
   // Chalom's quota ("stick to the interim schedule", "Vas stay on others room if not emer").
   assert.deepEqual(roomOf(result), {
@@ -159,7 +160,7 @@ test("rows 1–17 as the file for Thu 5 Nov, in the first half as planned: 10 ke
     "900003": "or-10",
     "900007": "or-12",
     "900010": "or-10",
-    "900011": "or-11",
+    "900011": "or-12",
     "900013": "or-11",
     "900014": "or-11",
     "900015": "or-12",
@@ -192,8 +193,8 @@ test("rows 1–17 as the file for Thu 5 Nov, in the first half as planned: 10 ke
     summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
       ["OR 10", DEPARTMENTS.INFECT.label, 2],
-      ["OR 11", DEPARTMENTS.MIXED.label, 3],
-      ["OR 12", "GENSX", 3],
+      ["OR 11", DEPARTMENTS.MIXED.label, 2],
+      ["OR 12", "GENSX", 4],
       ["OR 13", "ORTHO", 1],
     ],
   );
@@ -229,7 +230,7 @@ test("the stored cases hold what the board needs, in file order, and of the pati
   }
 });
 
-test("the same file during the first half of the repair: the half's rooms, endoscopy, vascular and ENT in the mixed room", () => {
+test("the same file during the first half of the repair: the half's rooms, vascular and ENT in the mixed room", () => {
   const result = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, FIRST_HALF));
   // Vascular surgery has no room of its own in the interim schedule, so its elective cases go to the mixed room
   // (Pong, 18 Nov 2026: "Vas stay on others room if not emer").
@@ -239,7 +240,7 @@ test("the same file during the first half of the repair: the half's rooms, endos
     "900003": "or-10",
     "900007": "or-12",
     "900010": "or-10",
-    "900011": "or-11",
+    "900011": "or-12",
     "900013": "or-11",
     "900014": "or-11",
     "900015": "or-12",
@@ -250,8 +251,8 @@ test("the same file during the first half of the repair: the half's rooms, endos
     result.summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
       ["OR 10", DEPARTMENTS.INFECT.label, 2],
-      ["OR 11", DEPARTMENTS.MIXED.label, 3],
-      ["OR 12", "GENSX", 3],
+      ["OR 11", DEPARTMENTS.MIXED.label, 2],
+      ["OR 12", "GENSX", 4],
       ["OR 13", "ORTHO", 1],
     ],
   );
@@ -266,7 +267,7 @@ test("the second half of the repair uses OR 1 to 5", () => {
     "900003": "or-1",
     "900007": "or-5",
     "900010": "or-1",
-    "900011": "or-4",
+    "900011": "or-5",
     "900013": "or-4",
     "900014": "or-4",
     "900015": "or-5",
@@ -391,7 +392,7 @@ test("the upload's own rooms are the board's: a case a doctor booked goes by the
   const board = buildBoardRows({ date: THURSDAY, periods: PLANNED, workbook: result.cases, bookings: [mine], viewer: { allHn: true, userId: null } });
   const counted = Object.fromEntries(result.summary.rooms.map((room) => [room.roomId, room.count]));
   assert.deepEqual(counted, board.countByRoom);
-  assert.deepEqual(counted, { "or-10": 1, "or-11": 3, "or-12": 4, "or-13": 1 });
+  assert.deepEqual(counted, { "or-10": 1, "or-11": 2, "or-12": 5, "or-13": 1 });
   // Read again on the upload page with the same bookings: the same; without them, the name places it again.
   assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, PLANNED, [mine]), result.summary);
   const alone = placedSummary(result.summary, result.cases, THURSDAY, PLANNED);

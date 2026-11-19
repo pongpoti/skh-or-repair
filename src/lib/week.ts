@@ -7,7 +7,7 @@ import type { RepairPeriods } from "./repair.ts";
 import type { CaseStatus, Operation, Shift } from "./schedule.ts";
 
 // The keyword rules moved to lib/placement.ts with the rest of the placement; they stay importable from here.
-export { isDressingCase, isScopeCase } from "./placement.ts";
+export { isDressingCase } from "./placement.ts";
 
 /** One row of the OR system export, reduced to what the board shows. Built by scripts/build_week.py. */
 export type WeekCase = {
@@ -74,8 +74,7 @@ export function weekBoard(
 
     // The export's room column is not trusted: every case is placed by the schedule's rules alone.
     for (const item of rows) {
-      const team = resolveSurgeon(item.surgeon, item.title).team;
-      const placement = placeCase({ procedure: item.proc, dept: item.dept, emergency: item.emergency, team }, date, periods, load);
+      const placement = placeCase({ procedure: item.proc, dept: item.dept, emergency: item.emergency }, date, periods, load);
       const roomId = placement.ok ? placement.roomId : null;
       placed.set(item, roomId);
       if (roomId) load.set(roomId, (load.get(roomId) ?? 0) + 1);

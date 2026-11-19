@@ -317,8 +317,8 @@ CREATE INDEX IF NOT EXISTS workbook_uploads_cycle_idx ON workbook_uploads (cycle
 -- costs. hn is normalised (lib/hn.ts) for matching the bookings; it and patient_name (the export's ชื่อ, NULL when the
 -- file has no such column; Pong, 16 Nov 2026: "Add patient name line above HN") are shown only to the doctor who
 -- booked the case, MX and admins, and go with the upload when it is deleted after 30 days. room_id is where the case was placed at upload (NULL when it was not, e.g. obstetrics
--- during the repair); the board places the case again when it is read, from dept, team (the surgeon's team, for the
--- SCOPE rule) and urgency, so a change of the repair's dates after the upload moves it. position is its order in the
+-- during the repair); the board places the case again when it is read, from the surgeon's own department (found by
+-- name, dept when the surgeon is on no list) and urgency, so a change of the repair's dates or of the rules moves it. position is its order in the
 -- file.
 CREATE TABLE IF NOT EXISTS workbook_cases (
   id           bigserial   PRIMARY KEY,

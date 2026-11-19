@@ -18,6 +18,7 @@ import {
   requestTimeIndex,
   splitSurgeon,
   summariseUpload,
+  surgeonDeptOf,
   thaiDateSpan,
   type WorkbookRow,
 } from "./workbook.ts";
@@ -132,7 +133,7 @@ test("board cuts: of the 10 kept, only Tha Chalom's 900012 goes, 9 are left to p
   assert.deepEqual(cuts.kept.map((row) => row.caseId), ["900001", "900002", "900003", "900007", "900010", "900011", "900013", "900014", "900015"]);
 });
 
-test("departments from แผนก, then ชนิด, then the surgeon's usual department in the file", () => {
+test("departments from the surgeon by name, then แผนก, then ชนิด, then the surgeon's usual department in the file", () => {
   const rows = byId(parsed());
   for (const [caseId, dept] of Object.entries(DEPT_BY_ANSWERS)) assert.equal(rows.get(caseId)?.dept, dept, caseId);
   assert.equal(rows.get("900001")?.deptFrom, "dept");
@@ -146,6 +147,11 @@ test("departments from แผนก, then ชนิด, then the surgeon's usual
       { ...ROW, ID: 1, ชนิด: null, แพทย์ผู้สั่ง: "สมชาย กลับกลาย (นพ.)" },
       { ...ROW, ID: 2, ชนิด: "Neuro" },
       { ...ROW, ID: 3, ชนิด: null, แพทย์ผู้สั่ง: "ไม่มี ในรายชื่อ (พญ.)" },
+      // Pong, 19 Nov 2026: "now base on surgeon name and dept only": the surgeon's own department wins over แผนก and
+      // ชนิด, so a general surgeon's case keyed under ORTHO goes to the GENSX room
+      { ...ROW, ID: 4, แผนก: "ศัลยกรรมกระดูก", ชนิด: "ORTHO", แพทย์ผู้สั่ง: "สมชาย กลับกลาย (นพ.)" },
+      // A surgeon on no list keeps แผนก (another name than row 3's, whose usual department it would otherwise give).
+      { ...ROW, ID: 5, แผนก: "ศัลยกรรมกระดูก", ชนิด: "ORTHO", แพทย์ผู้สั่ง: "อีกคน ไม่อยู่ในรายชื่อ (พญ.)" },
     ]),
   );
   assert.deepEqual(
@@ -154,8 +160,18 @@ test("departments from แผนก, then ชนิด, then the surgeon's usual
       ["URO", "surgeon"],
       ["NEURO", "type"],
       [null, null],
+      ["URO", "surgeon"],
+      ["ORTHO", "dept"],
     ],
   );
+});
+
+test("a stored case's department by its surgeon, for lists stored before the surgeon came first", () => {
+  assert.equal(surgeonDeptOf("พญ. คริสทีน โรจจวัฒน์"), "GENSX");
+  assert.equal(surgeonDeptOf("นพ. สมชาย กลับกลาย"), "URO");
+  assert.equal(surgeonDeptOf("สมชาย กลับกลาย"), "URO", "no title");
+  assert.equal(surgeonDeptOf("นพ. ไม่มี ในรายชื่อ"), null);
+  assert.equal(surgeonDeptOf(""), null);
 });
 
 test("the surgeon is split from the title, and น.พ. / พ.ญ. are normalised", () => {
@@ -169,14 +185,12 @@ test("the surgeon is split from the title, and น.พ. / พ.ญ. are normalise
   assert.deepEqual(splitSurgeon(null), { name: "", title: "" });
 });
 
-test("flags: dressing, SCOPE, Tha Chalom, SMC, emergency, and the cleaned values", () => {
+test("flags: dressing, Tha Chalom, SMC, emergency, and the cleaned values", () => {
   const rows = byId(parsed());
   assert.equal(rows.get("900010")?.dressing, true); // Dressing wound Lt leg
   assert.equal(rows.get("900004")?.dressing, true); // Debridement: a dressing case since Pong's 15 Nov 2026 rule
-  // EGD by a general surgeon who is on no list: the row's GENSX stands in for the team.
-  assert.equal(rows.get("900011")?.scope, true);
+  // A general surgeon who is on no list: the row's GENSX stands in for the team.
   assert.equal(rows.get("900011")?.team, "GENSX");
-  assert.equal(rows.get("900001")?.scope, false);
   assert.equal(rows.get("900012")?.thaChalom, true);
   assert.equal([...rows.values()].filter((row) => row.thaChalom).length, 1);
   assert.equal(rows.get("900008")?.smc, true);
@@ -194,7 +208,7 @@ test("rows keep the patient's name (Pong, 16 Nov 2026) but no age, AN, diagnosis
   const rows = parsed(SHEET);
   const keys = [
     "line", "caseId", "hn", "patientName", "operation", "surgeon", "title", "status", "urgency", "emergency", "shift",
-    "requestDate", "requestTime", "bookedDate", "bookedTime", "dept", "deptFrom", "team", "thaChalom", "smc", "dressing", "scope",
+    "requestDate", "requestTime", "bookedDate", "bookedTime", "dept", "deptFrom", "team", "thaChalom", "smc", "dressing",
   ];
   for (const row of rows) assert.deepEqual(Object.keys(row).sort(), [...keys].sort());
   assert.equal(byId(rows).get("900001")?.patientName, "ตัวอย่าง ผู้ป่วย01");

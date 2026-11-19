@@ -3546,8 +3546,9 @@ async function main() {
       }
       await ownerShot(page, "board-after-upload.png");
 
-      // OR 12: doctor Y's booking matched first, then a HOSxP case nobody booked (Pong, 15 Nov 2026: bookings first,
-      // then HOSxP's order). In the dressing room OR 10, HOSxP's I&D and dressing nobody booked, with no flag, and not
+      // OR 12: doctor Y's booking matched first, then HOSxP's cases nobody booked (Pong, 15 Nov 2026: bookings first,
+      // then HOSxP's order); 7000011, a general surgeon's endoscopy, is GENSX's since the scope rule went (Pong, 19 Nov
+      // 2026: "now base on surgeon name and dept only, no more scope case"). In the dressing room OR 10, HOSxP's I&D and dressing nobody booked, with no flag, and not
       // doctor X's dressing-room booking, which HOSxP does not list ("no real patient set"). Doctor X's matched case is
       // in OR 13, where HOSxP's list places it (ORTHO), not OR 11, the mixed room the booking was in: after the upload
       // MX's list decides the room, unless the doctor picked the dressing room.
@@ -3558,11 +3559,12 @@ async function main() {
           JSON.stringify([
             ["matched", null, `HN ${HN_Y_MATCH}`],
             ["hosxp", "unbooked", "HN 7000001"],
+            ["hosxp", "unbooked", "HN 7000011"],
           ]),
         `OR 12 for the admin: ${JSON.stringify(await sheetRows(page))}`,
       );
       // the icons alone: a handshake for the match, a database for HOSxP's case nobody booked; no word chips at all
-      assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["matched", "hosxp"]), `OR 12's icons: ${JSON.stringify(await rowIcons(page))}`);
+      assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["matched", "hosxp", "hosxp"]), `OR 12's icons: ${JSON.stringify(await rowIcons(page))}`);
       const badges = await page.$$eval(".case-row .badge", (els) => els.map((e) => e.textContent.trim()));
       assert(badges.every((text) => text === "นอกเวลา"), `no chips but นอกเวลา: ${JSON.stringify(badges)}`);
       assert((await page.locator(".case-row").nth(0).textContent()).includes("Total thyroidectomy"), "a matched row has the workbook's operation");
@@ -3597,6 +3599,7 @@ async function main() {
       assert(JSON.stringify(layout.map((row) => row.lines)) === JSON.stringify([
         ["row-op", "row-patient", "row-hn", "row-surgeon", "row-booked-at"],
         ["row-op", "row-patient", "row-hn", "row-surgeon"],
+        ["row-op", "row-patient", "row-hn", "row-surgeon"],
       ]), `the rows' lines: ${JSON.stringify(layout)}`);
       for (const row of layout) {
         assert(row.patient === 15 && row.hn === 15 && row.surgeon === 15, `the patient's name, the HN and the surgeon at 15px: ${JSON.stringify(row)}`);
@@ -3618,7 +3621,7 @@ async function main() {
       // a tap on the dimmed plan above the sheet closes the bubble and keeps the room open, like the account menu
       await page.click('button[aria-label="ปิดรายการห้อง"]', { position: { x: 195, y: 300 } });
       await matchedTip.waitFor({ state: "detached" });
-      assert((await page.locator(".room-sheet .case-row").count()) === 2, "the room stays open when a tap on the plan closes a bubble");
+      assert((await page.locator(".room-sheet .case-row").count()) === 3, "the room stays open when a tap on the plan closes a bubble");
       // on a 320px phone the long name ends in "…" and a chevron; a tap unfolds it in place, another folds it
       await page.setViewportSize({ width: 320, height: 844 });
       const cutName = page.locator('.case-row [data-testid="row-op"] button').first();
@@ -3784,13 +3787,13 @@ async function main() {
       // a room opened on the picked day keeps it, and shows that day's cases
       await page.goto(`${APP}/?date=2026-11-17&room=or-12`, { waitUntil: "networkidle" });
       await page.waitForSelector(".case-row");
-      assert((await page.locator(".case-row").count()) === 2, `OR 12 on Tuesday: ${await page.locator(".case-row").count()} rows`);
+      assert((await page.locator(".case-row").count()) === 3, `OR 12 on Tuesday: ${await page.locator(".case-row").count()} rows`);
       // Escape in the card closes the card only: the room stays open behind it
       await openPicker();
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden" });
       await page.waitForTimeout(300);
-      assert((await page.locator(".case-row").count()) === 2 && new URL(page.url()).searchParams.get("room") === "or-12", "the room stays open");
+      assert((await page.locator(".case-row").count()) === 3 && new URL(page.url()).searchParams.get("room") === "or-12", "the room stays open");
       await page.goto(`${APP}/?date=2026-11-17`, { waitUntil: "networkidle" });
 
       // a day in the repair's second half draws the second half's plan; the calendar ends on the repair's last day
@@ -3912,7 +3915,7 @@ async function main() {
     });
 
     await t("a room's list in a full screen card; a sideways swipe on the plan moves the board a workday", async () => {
-      // Tuesday after 16:00: the board's own day is Wednesday 18 Nov; Tuesday has its HOSxP list (OR 12: two cases)
+      // Tuesday after 16:00: the board's own day is Wednesday 18 Nov; Tuesday has its HOSxP list (OR 12: three cases)
       setNow("2026-11-17T17:00:00+07:00");
       const ctx = await contextAs(RP.nurse);
       const page = await ctx.newPage();
@@ -3929,7 +3932,7 @@ async function main() {
       await card.waitFor();
       // the card's short entrance (a slight rise and scale) ends before it is measured
       await page.waitForTimeout(300);
-      assert((await card.locator(".case-row").count()) === 2, "the card lists the room's two cases");
+      assert((await card.locator(".case-row").count()) === 3, "the card lists the room's three cases");
       assert((await textOf(page, "#room-full-title")) === "OR 12", "the room's name");
       assert((await textOf(page, '[data-testid="room-full-day"]')) === "วันอังคารที่ 17 พ.ย. 2569", "the card names the day, as it covers the top bar");
       assert(await page.evaluate(() => document.activeElement?.id === "room-full-title"), "the focus on the card's heading");
@@ -3943,7 +3946,7 @@ async function main() {
       await page.keyboard.press("Escape");
       await card.waitFor({ state: "detached" });
       assert(await page.evaluate(() => document.activeElement?.dataset.testid === "room-expand"), "the focus goes back to the button");
-      assert((await page.locator(".room-sheet .case-row").count()) === 2 && new URL(page.url()).searchParams.get("room") === "or-12", "the room stays open");
+      assert((await page.locator(".room-sheet .case-row").count()) === 3 && new URL(page.url()).searchParams.get("room") === "or-12", "the room stays open");
       // the shrink button and a tap outside the card close it too
       await page.click('[data-testid="room-expand"]');
       await card.waitFor();
