@@ -471,7 +471,7 @@ export function AddCase({
               }}
               maxLength={MAX_OPERATION}
               autoComplete="off"
-              placeholder="เช่น Lap chole, ORIF radius"
+              placeholder="LC, ORIF PS femur"
               required
               aria-required="true"
               aria-invalid={invalid === "operation" || undefined}

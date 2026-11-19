@@ -3942,6 +3942,8 @@ async function main() {
       const box = await card.boundingBox();
       assert(Math.abs(box.x + box.width / 2 - view.width / 2) < 1.5 && Math.abs(box.y + box.height / 2 - view.height / 2) < 1.5, `centred: ${JSON.stringify(box)}`);
       assert(box.x >= 7 && box.x <= 9, `8px from a phone's sides: ${box.x}`);
+      // Pong, 20 Nov 2026: "floating card height should expand about 2/3 of viewport height", a short list too
+      assert(Math.abs(box.height - view.height * 0.67) < 2, `two thirds of the screen's height: ${box.height} of ${view.height}`);
       assert(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="room-full"] ol')).overflowY === "auto"), "the list scrolls up and down");
       await ownerShot(page, "room-full-card.png");
       // Escape closes the card only: the sheet is still open behind it, the focus back on the button
@@ -3967,6 +3969,7 @@ async function main() {
       const columns = await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="room-full"] ol')).gridTemplateColumns.split(" ").length);
       assert(columns === 2, `two columns on a computer: ${columns}`);
       assert((await card.boundingBox()).width === 1024, "64rem wide");
+      assert(Math.abs((await card.boundingBox()).height - 800 * 0.67) < 2, "two thirds of a computer's screen too");
       await page.keyboard.press("Escape");
       await card.waitFor({ state: "detached" });
       await page.setViewportSize(view);

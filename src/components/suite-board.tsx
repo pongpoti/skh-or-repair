@@ -287,11 +287,13 @@ function RoomHead({
 }
 
 /**
- * The full screen card: centred over the dimmed, blurred board, all but 8px of a phone's screen, and up to 64rem wide on
- * a computer, where its list takes two columns (.room-full in globals.css).
+ * The full screen card: centred over the dimmed, blurred board, all but 8px of a phone's width, and up to 64rem wide on
+ * a computer, where its list takes two columns (.room-full in globals.css). Two thirds of the screen's height whatever
+ * the room holds (Pong, 20 Nov 2026: "floating card height should expand about 2/3 of viewport height"): a short list
+ * leaves room below it, a long one scrolls inside.
  */
 const ROOM_CARD =
-  "room-full m-auto max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-none flex-col sm:max-h-[calc(100dvh-3rem)] sm:w-[min(64rem,calc(100%-3rem))] overflow-hidden rounded-[22px] border border-line bg-surface p-0 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] open:flex backdrop:bg-[rgb(36_28_22/0.45)] backdrop:backdrop-blur-[3px]";
+  "room-full m-auto h-[67dvh] max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-none flex-col sm:w-[min(64rem,calc(100%-3rem))] overflow-hidden rounded-[22px] border border-line bg-surface p-0 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] open:flex backdrop:bg-[rgb(36_28_22/0.45)] backdrop:backdrop-blur-[3px]";
 
 /**
  * A room's list in a floating card in the middle of the screen (Pong, 19 Nov 2026: "add full screen btn on room dialog,
