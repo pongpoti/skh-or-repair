@@ -193,3 +193,16 @@ export function CaseIcon({
     </span>
   );
 }
+
+/**
+ * The row's icon as a picture alone, for the tutorial's key of symbols (components/tutorial.tsx): the same look as the
+ * row's button, without its bubble.
+ */
+export function CaseSymbol({ source, doneBy }: { source: RowSource; doneBy?: DoneBy }) {
+  const look = doneBy ? " case-icon-doer" : ` case-icon-${source}`;
+  return (
+    <span className={`case-icon case-icon-static${look}`} aria-hidden="true">
+      {doneBy ? <Portrait size={40}>{DOER_ICONS[doneBy]}</Portrait> : <Stroke size={22}>{SOURCE_ICONS[source]}</Stroke>}
+    </span>
+  );
+}

@@ -8,6 +8,7 @@ import { bangkokParts, now, today as todayInBangkok } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
 import { getRepairPeriods } from "@/lib/repair-store";
+import { markTutorialSeen } from "@/lib/tutorial-store";
 
 /**
  * Every answer carries the doctor's own bookings from today on, so the form's list stays current. They carry the HN:
@@ -90,5 +91,19 @@ export async function deleteCase(id: unknown): Promise<CaseResult> {
   } catch (error) {
     logFailure("Cancelling a booking failed", error);
     return { ok: false, error: "ยกเลิกไม่สำเร็จ ลองอีกครั้ง" };
+  }
+}
+
+/**
+ * Notes that the doctor started or skipped the tutorial (/tutorial), so the board stops opening it by itself. Anyone
+ * else (an admin looking at it) is ignored. Never fails: the worst case is the tutorial offered once more.
+ */
+export async function seeTutorial(): Promise<void> {
+  try {
+    const signed = await signedInDoctor();
+    if (!signed) return;
+    await markTutorialSeen(signed.pool, signed.doctor.id);
+  } catch (error) {
+    logFailure("Noting the tutorial seen failed", error);
   }
 }

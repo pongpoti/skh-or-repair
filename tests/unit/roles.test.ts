@@ -13,7 +13,7 @@ describe("roles: MX and admins (database)", () => {
 
   before(async () => {
     await ensureSchema(pool);
-    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     const { rows } = await pool.query<{ id: string; first_name: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype, active) VALUES
          ('สมหญิง', 'รักงาน', 'RN', 'OR', true), ('กมล', 'ใจดี', 'DR', 'ORTHO', true),
@@ -31,7 +31,7 @@ describe("roles: MX and admins (database)", () => {
   });
   afterEach(() => setTestEnv());
   after(async () => {
-    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.end();
   });
 

@@ -346,4 +346,10 @@ ALTER TABLE workbook_cases ADD COLUMN IF NOT EXISTS patient_name text;
 -- past_import marks them, so an import replaces only its own lists, never a list MX uploaded.
 ALTER TABLE workbook_uploads ADD COLUMN IF NOT EXISTS past_import boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS workbook_uploads_target_idx ON workbook_uploads (target_date, uploaded_at DESC);
+-- Doctors who have seen the tutorial (/tutorial; Pong, 19 Nov 2026): a doctor's first visit to the board goes to it
+-- once, and a row here, written when they start or skip it, stops that. The tutorial itself saves nothing.
+CREATE TABLE IF NOT EXISTS tutorial_seen (
+  user_id  integer     PRIMARY KEY REFERENCES users (id),
+  seen_at  timestamptz NOT NULL DEFAULT now()
+);
 `;

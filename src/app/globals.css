@@ -1448,3 +1448,456 @@ dialog[open]::backdrop {
   animation: none;
   box-shadow: 0 0 0 2px #fff, 0 8px 24px -6px rgb(41 29 20 / 0.45);
 }
+
+/*
+ * The doctors' tutorial coach (components/tutorial.tsx; Pong, 19 Nov 2026: "just like start of mobile game app"): the
+ * screen dimmed but for a lit hole on the one thing to look at or tap, a speech bubble from the app's surgeon, a
+ * pointing hand, a pulsing ring, and confetti. The layer is fixed over the screen (inside the open dialog when there is
+ * one, which makes the rest of the page inert); only its blockers, bubble and cards take taps.
+ */
+.coach {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+  font-size: 0.9375rem;
+}
+.coach-dim {
+  position: absolute;
+  inset: 0;
+  background: rgb(24 16 10 / 0.62);
+  animation: backdrop-in 0.25s ease-out;
+}
+.coach-hole {
+  position: absolute;
+  border-radius: 14px;
+  box-shadow: 0 0 0 200vmax rgb(24 16 10 / 0.62);
+  transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1), top 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.28s cubic-bezier(0.22, 1, 0.36, 1), height 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.coach-hole.is-round,
+.coach-ring.is-round { border-radius: 999px; }
+.coach-block {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+/* The lit thing to tap or use: an amber ring that breathes, and shakes when a tap lands outside it. */
+.coach-ring {
+  position: absolute;
+  border-radius: 14px;
+  box-shadow: 0 0 0 3px #f5b84a, 0 0 18px 4px rgb(245 184 74 / 0.6);
+  animation: coach-breathe 1.4s ease-in-out infinite;
+}
+.coach-ring.is-nudged { animation: coach-shake 0.4s ease-in-out, coach-breathe 1.4s ease-in-out 0.4s infinite; }
+@keyframes coach-breathe {
+  50% { box-shadow: 0 0 0 5px #f5b84a, 0 0 26px 8px rgb(245 184 74 / 0.45); }
+}
+@keyframes coach-shake {
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+.coach-hand {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  /* The fingertip (8, 2 of Lucide's 24-unit grid) on the target's centre, a little low so the finger does not hide it. */
+  margin-left: -15px;
+  margin-top: 4px;
+  filter: drop-shadow(0 4px 6px rgb(0 0 0 / 0.35));
+}
+.coach-hand.is-tap { animation: coach-tap 1.3s ease-in-out infinite; }
+/* Pointing down from above: the drawing turned upside down, its fingertip (now at 42px) on the target. */
+.coach-hand.is-up { margin-top: -50px; }
+.coach-hand.is-up svg { transform: scaleY(-1); }
+.coach-hand.is-up.is-tap { animation-name: coach-tap-up; }
+@keyframes coach-tap-up {
+  0%, 100% { transform: translate(14px, -18px) scale(1); }
+  45% { transform: translate(0, 0) scale(1); }
+  55% { transform: translate(0, 0) scale(0.88); }
+  70% { transform: translate(0, 0) scale(1); }
+}
+.coach-hand.is-swipe { animation: coach-swipe 1.8s ease-in-out infinite; }
+@keyframes coach-tap {
+  0%, 100% { transform: translate(14px, 18px) scale(1); }
+  45% { transform: translate(0, 0) scale(1); }
+  55% { transform: translate(0, 0) scale(0.88); }
+  70% { transform: translate(0, 0) scale(1); }
+}
+@keyframes coach-swipe {
+  0% { transform: translateX(70px); opacity: 0; }
+  15% { opacity: 1; }
+  70% { transform: translateX(-70px); opacity: 1; }
+  100% { transform: translateX(-70px); opacity: 0; }
+}
+.coach-ripple {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 999px;
+  border: 3px solid rgb(255 255 255 / 0.9);
+  animation: coach-ripple 1.3s ease-out infinite;
+  opacity: 0;
+}
+@keyframes coach-ripple {
+  0%, 50% { transform: scale(0.3); opacity: 0; }
+  55% { opacity: 0.9; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+/* The speech bubble, with a tail towards the target. */
+.coach-bubble {
+  position: absolute;
+  pointer-events: auto;
+  padding: 12px 14px 12px;
+  border-radius: 20px;
+  border: 2px solid var(--accent-light);
+  background: #fffdf9;
+  color: var(--ink);
+  box-shadow: 0 22px 50px -10px rgb(16 10 6 / 0.55);
+  transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1), top 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: coach-pop 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.coach-bubble[data-side="below"]::before,
+.coach-bubble[data-side="above"]::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--tail) - 9px);
+  width: 18px;
+  height: 18px;
+  background: #fffdf9;
+  border: 2px solid var(--accent-light);
+  transform: rotate(45deg);
+}
+.coach-bubble[data-side="below"]::before { top: -10px; border-right: none; border-bottom: none; }
+.coach-bubble[data-side="above"]::before { bottom: -10px; border-left: none; border-top: none; }
+@keyframes coach-pop {
+  from { opacity: 0; transform: scale(0.92) translateY(6px); }
+}
+.coach-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.coach-chapter {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--brand-tint);
+  padding: 2px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--brand);
+}
+.coach-skip {
+  flex-shrink: 0;
+  min-height: 32px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--ink-3);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.coach-progress {
+  margin: 6px 0 10px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--tan-fill);
+  overflow: hidden;
+}
+.coach-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #d98c00, #f5b84a);
+  transition: width 0.4s ease;
+}
+.coach-say { display: flex; align-items: flex-start; gap: 10px; }
+.coach-mascot {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--brand);
+  animation: coach-bob 2.4s ease-in-out infinite;
+}
+@keyframes coach-bob {
+  50% { transform: translateY(-3px) rotate(-3deg); }
+}
+.coach-title { font-size: 1rem; font-weight: 800; line-height: 1.4; }
+.coach-text { margin-top: 2px; font-size: 0.875rem; line-height: 1.55; color: var(--ink-2); }
+.coach-actions {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.coach-hint {
+  margin-top: 8px;
+  text-align: right;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--late);
+}
+
+/* The cards in the middle: welcome, the keys of symbols, the jump to 16:00, the end. */
+.coach-card-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  pointer-events: auto;
+}
+.coach-card {
+  width: min(24rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 22px 20px 18px;
+  border-radius: 24px;
+  border: 2px solid var(--accent-light);
+  background: #fffdf9;
+  color: var(--ink);
+  text-align: center;
+  box-shadow: 0 30px 70px -12px rgb(16 10 6 / 0.6);
+  animation: coach-pop 0.36s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.coach-card.is-wide { width: min(30rem, 100%); }
+.coach-mascot-big {
+  display: block;
+  width: 84px;
+  height: 84px;
+  margin: 0 auto 10px;
+  overflow: hidden;
+  border-radius: 26px;
+  background: var(--brand);
+  box-shadow: 0 10px 24px -8px rgb(41 29 20 / 0.5);
+  animation: coach-hop 1.6s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+@keyframes coach-hop {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-8px) rotate(-4deg); }
+}
+.coach-clock {
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--late-tint);
+  color: var(--late);
+}
+.coach-clock svg path { transform-origin: 12px 12px; animation: coach-hands 1.2s cubic-bezier(0.5, 0, 0.3, 1) infinite; }
+@keyframes coach-hands {
+  to { transform: rotate(360deg); }
+}
+.coach-card-eyebrow { font-size: 0.8125rem; font-weight: 700; color: var(--late); }
+.coach-card-title { font-size: 1.25rem; font-weight: 800; line-height: 1.35; }
+.coach-card-text { margin-top: 6px; font-size: 0.9375rem; line-height: 1.6; color: var(--ink-2); }
+.coach-card-note { margin-top: 10px; font-size: 0.8125rem; line-height: 1.5; color: var(--ink-3); }
+.coach-card-actions { margin-top: 16px; display: grid; gap: 6px; }
+.coach-stages {
+  margin: 14px auto 0;
+  display: grid;
+  gap: 6px;
+  max-width: 17rem;
+  text-align: left;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.coach-stages li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.coach-stage-no {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+.coach-keys {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+  text-align: left;
+}
+@media (min-width: 480px) {
+  .coach-keys { grid-template-columns: 1fr 1fr; }
+}
+.coach-key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 4px 10px 4px 6px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.coach-key-symbol {
+  display: inline-flex;
+  min-width: 58px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+.coach-key-text { min-width: 0; }
+.coach-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.coach-stripes {
+  display: inline-block;
+  width: 52px;
+  height: 26px;
+  border-radius: 8px;
+  background: repeating-linear-gradient(45deg, var(--fp-closed) 0 6px, var(--fp-closed-line) 6px 9px, var(--fp-zone) 9px 14px);
+  box-shadow: inset 0 0 0 1px var(--fp-closed-wall);
+}
+.case-icon-static { cursor: default; }
+
+/* Confetti: falls from the top with a drift and a spin. */
+.coach-confetti { position: absolute; inset: 0; overflow: hidden; }
+.coach-confetti i {
+  position: absolute;
+  top: -24px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: coach-fall;
+  animation-timing-function: cubic-bezier(0.25, 0.6, 0.4, 1);
+  animation-fill-mode: forwards;
+}
+@keyframes coach-fall {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0); }
+  85% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--drift), 92vh) rotate(var(--spin)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coach-hole,
+  .coach-bubble,
+  .coach-progress > span { transition: none; }
+  .coach-dim,
+  .coach-bubble,
+  .coach-card,
+  .coach-mascot,
+  .coach-mascot-big,
+  .coach-ring,
+  .coach-ring.is-nudged,
+  .coach-ripple,
+  .coach-clock svg path { animation: none; }
+  .coach-hand.is-tap,
+  .coach-hand.is-swipe { animation: none; transform: none; }
+  .coach-confetti { display: none; }
+}
+
+/* Why book (Pong, 19 Nov 2026): a booked case is ahead of every case nobody booked. The star tip comes back on the
+   welcome card, the priority card and the end. */
+.coach-trophy {
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--late-tint);
+  color: #e0a100;
+  animation: coach-hop 1.6s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+.coach-tip {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 14px;
+  border: 1.5px solid #f0c14b;
+  background: #fff6db;
+  color: var(--late);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: left;
+}
+.coach-tip svg { flex-shrink: 0; color: #e0a100; }
+.coach-queue {
+  margin: 12px auto 0;
+  display: grid;
+  gap: 6px;
+  max-width: 19rem;
+  text-align: left;
+}
+.coach-queue li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 50px;
+  padding: 4px 10px 4px 6px;
+  border-radius: 14px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.coach-queue li.is-booked { background: var(--live-tint); color: var(--live); }
+.coach-queue li.is-last { background: var(--surface-2); color: var(--ink-3); }
+.coach-queue-no {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+.coach-queue li.is-booked .coach-queue-no { background: var(--live); }
+.coach-queue li.is-last .coach-queue-no { background: var(--ink-3); }
+.coach-queue-text { flex: 1; min-width: 0; }
+.coach-queue-tag {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+.coach-queue li.is-booked .coach-queue-tag { background: var(--live); color: #fff; }
+.coach-queue li.is-last .coach-queue-tag { background: var(--line); color: var(--ink-2); }
+@media (prefers-reduced-motion: reduce) {
+  .coach-trophy { animation: none; }
+}

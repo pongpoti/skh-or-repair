@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
@@ -19,6 +20,8 @@ import type { RepairPeriods } from "@/lib/repair";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import type { SessionUser } from "@/lib/tokens";
+import { TUTORIAL_COOKIE } from "@/lib/tutorial";
+import { tutorialSeen } from "@/lib/tutorial-store";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
 import { workbookFor, workbookForDay } from "@/lib/workbook-store";
@@ -51,13 +54,18 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
       mismatchByRoom: built.mismatchByRoom,
     };
     let adding: CaseAdding | null = null;
+    let tutorialDue = false;
     if (doctor) {
       // The holidays over the 60 days a doctor can book, for the calendar: the same list the server action checks.
-      const [mine, { holidays, unlisted }] = await Promise.all([
+      const [mine, { holidays, unlisted }, seen] = await Promise.all([
         // The doctor's own bookings, HN included: theirs to see.
         listCasesBy(pool, doctor.id, day.today),
         holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS)),
+        // A doctor's first visit goes to the tutorial (Pong, 19 Nov 2026); a failed read counts as seen.
+        tutorialSeen(pool, doctor.id),
       ]);
+      // The cookie the tutorial sets on a start or skip counts too: the row may not be written yet, or could not be.
+      tutorialDue = !seen && (await cookies()).get(TUTORIAL_COOKIE)?.value !== String(doctor.id);
       adding = {
         doctor: { name: fullName(doctor), subtype: doctor.subtype },
         today: day.today,
@@ -70,7 +78,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
       };
     }
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
-    return { board, adding, canUpload: viewer.allHn };
+    return { board, adding, canUpload: viewer.allHn, tutorialDue };
   } catch (error) {
     console.error("[board] cases unavailable:", (error as Error).message);
     return null;
@@ -133,9 +141,12 @@ export default async function BoardPage({
   // The demo schedule, for admins only (Pong, 15 Nov 2026): /?demo=1 fills every room of the day shown with made-up
   // cases (/admin opens it on a day of either half; the date picker keeps it on). Anyone else gets the real board.
   const demo = params.demo === "1" && admin ? demoBoard(view, periods) : null;
-  const loaded = demo ? { board: demo.board, adding: null, canUpload: true } : await loadBoard(user, view, periods, view !== day);
+  const loaded = demo ? { board: demo.board, adding: null, canUpload: true, tutorialDue: false } : await loadBoard(user, view, periods, view !== day);
   // Outside the try of loadBoard: redirect() works by throwing.
   if (!loaded) redirect(unavailablePath("server", await requestPath()));
+  // A doctor who has not seen the tutorial yet starts there, once (components/tutorial.tsx): starting or skipping it
+  // notes it seen.
+  if (loaded.tutorialDue) redirect("/tutorial?first=1");
   const { board, adding, canUpload } = loaded;
   // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
   // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
@@ -160,6 +171,8 @@ export default async function BoardPage({
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
         adminHref={admin ? "/admin" : null}
         uploadHref={canUpload ? "/upload" : null}
+        // The tutorial is the doctors' (Pong, 19 Nov 2026); admins may look at it too.
+        helpHref={adding || admin ? "/tutorial" : null}
         datePick={datePick}
       />
       <SuiteBoard

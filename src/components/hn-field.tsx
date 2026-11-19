@@ -138,7 +138,7 @@ export function HnField({
   }
 
   return (
-    <div ref={cardRef} className="rounded-2xl bg-white p-3 shadow-[0_18px_40px_-18px_rgb(41_29_20/0.35),0_4px_12px_-6px_rgb(41_29_20/0.16)] ring-1 ring-line min-[360px]:p-4">
+    <div ref={cardRef} data-testid={testId ? `${testId}-card` : undefined} className="rounded-2xl bg-white p-3 shadow-[0_18px_40px_-18px_rgb(41_29_20/0.35),0_4px_12px_-6px_rgb(41_29_20/0.16)] ring-1 ring-line min-[360px]:p-4">
       <label htmlFor={id} className="flex items-baseline justify-between gap-3">
         <span className="text-sm font-semibold text-ink">HN ผู้ป่วย</span>
         <span className="text-xs text-muted">{HN_DIGITS} หลัก</span>
