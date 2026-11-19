@@ -142,6 +142,8 @@ export default async function BoardPage({
   // The demo's own badge stays first whatever else the strip shows, so made-up cases are never taken for real ones.
   const allNotices = params.notices === "all" && admin ? everyNotice(view.boardDate) : null;
   const testNotices = demo ? [demo.notices[0], ...(allNotices ?? demo.notices.slice(1))] : (allNotices ?? undefined);
+  // The days the top bar's calendar offers, which a swipe across the plan moves between too.
+  const datePick = { today: day.today, current: day.boardDate, ...range, holidays: closed, unlisted };
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -158,7 +160,7 @@ export default async function BoardPage({
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
         adminHref={admin ? "/admin" : null}
         uploadHref={canUpload ? "/upload" : null}
-        datePick={{ today: day.today, current: day.boardDate, ...range, holidays: closed, unlisted }}
+        datePick={datePick}
       />
       <SuiteBoard
         board={board}
@@ -167,6 +169,7 @@ export default async function BoardPage({
         roomId={params.room ?? null}
         adding={adding}
         notices={testNotices}
+        swipe={datePick}
       />
     </div>
   );

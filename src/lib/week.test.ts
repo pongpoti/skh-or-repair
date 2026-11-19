@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WEEK_DATA } from "../data/week-data.ts";
-import { boardHref, DAY_KEYS, DAY_NAMES, parseDay, thaiDate, todayIso, weekDates, workdayIndex } from "./days.ts";
+import { boardDayHref, boardHref, DAY_KEYS, DAY_NAMES, parseDay, shortThaiDay, thaiDate, todayIso, weekDates, workdayIndex } from "./days.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { boardFor, isDressingCase, isScopeCase, resolveSurgeon, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
 
@@ -56,6 +56,20 @@ test("builds room links and keeps other parameters", () => {
   assert.equal(boardHref("or-3"), "/?room=or-3");
   assert.equal(boardHref(null, "/preview", "?day=thu&room=or-2"), "/preview?day=thu");
   assert.equal(boardHref("or-9", "/preview", "?day=fri"), "/preview?day=fri&room=or-9");
+});
+
+test("another day's address keeps the room and drops the date for the board's own day", () => {
+  assert.equal(boardDayHref("2026-11-20", "2026-11-19"), "/?date=2026-11-20");
+  assert.equal(boardDayHref("2026-11-18", "2026-11-19", "/", "?room=or-3&date=2026-11-17"), "/?room=or-3&date=2026-11-18");
+  assert.equal(boardDayHref("2026-11-19", "2026-11-19", "/", "?room=or-3&date=2026-11-18"), "/?room=or-3");
+  assert.equal(boardDayHref(null, "2026-11-19", "/", "?date=2026-11-18"), "/");
+  assert.equal(boardDayHref("2026-11-20", "", "/preview", "?sample=1&date=2026-11-19"), "/preview?sample=1&date=2026-11-20");
+});
+
+test("a swipe's hint names the day short", () => {
+  assert.equal(shortThaiDay("2026-11-20"), "ศ. 20 พ.ย.");
+  assert.equal(shortThaiDay("2026-11-22"), "อา. 22 พ.ย.");
+  assert.equal(shortThaiDay("2027-01-04"), "จ. 4 ม.ค.");
 });
 
 test("no case data is loaded, so today's board is empty and follows this week's allocation", () => {

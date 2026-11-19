@@ -508,6 +508,28 @@ body {
   .case-row[data-status="cancelled"] { border-left-color: var(--stop); }
   .case-row[data-status="recovery"] { border-left-color: var(--rest); }
 
+  /* The full screen card's list (components/suite-board.tsx RoomCard): from 768px two columns, read across and then
+     down, with the sheet's dividers between the rows and between the columns. */
+  /* On a phone the card is 16px narrower than the sheet: its rows give back the room in their padding, so a name that
+     fits on the sheet's line fits here too. */
+  @media (max-width: 767.98px) {
+    .room-full .case-row {
+      column-gap: 0.75rem;
+      padding-right: 0.875rem;
+      padding-left: 0.625rem;
+    }
+  }
+  @media (min-width: 768px) {
+    .room-full ol:not([hidden]) {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      align-content: start;
+    }
+    .room-full .case-row { border-bottom: 1px solid var(--line); }
+    .room-full .case-row + .case-row { border-top: 0; }
+    .room-full .case-row:nth-child(odd):not(:last-child) { border-right: 1px solid var(--line); }
+  }
+
   /* The case's position in its room, as a pill. */
   .order-no {
     min-width: 2.25rem;
@@ -1095,6 +1117,93 @@ body {
   to { opacity: 1; transform: none; }
 }
 
+/* The floor plan follows a sideways swipe to the day before or after (components/day-swipe.tsx). Up and down stay the
+   page's, and a pinch still zooms. */
+.day-swipe {
+  position: relative;
+  touch-action: pan-y pinch-zoom;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.day-swipe-plan {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 0%;
+  justify-content: center;
+  transform: translate3d(var(--swipe-x, 0px), 0, 0);
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease-out;
+}
+.day-swipe[data-dragging] .day-swipe-plan { transition: none; }
+.day-swipe[data-leaving="next"] .day-swipe-plan { transform: translate3d(-22%, 0, 0); opacity: 0.3; }
+.day-swipe[data-leaving="prev"] .day-swipe-plan { transform: translate3d(22%, 0, 0); opacity: 0.3; }
+.day-swipe-from-next { animation: day-from-next 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.day-swipe-from-prev { animation: day-from-prev 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes day-from-next {
+  from { opacity: 0.3; transform: translate3d(22%, 0, 0); }
+}
+@keyframes day-from-prev {
+  from { opacity: 0.3; transform: translate3d(-22%, 0, 0); }
+}
+
+/* The day a swipe would turn to, at the side the plan uncovers: it comes in with the drag and fills once it will turn. */
+.day-swipe-hint {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  transition: opacity 200ms ease-out, transform 200ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
+}
+.day-swipe[data-dragging] .day-swipe-hint { transition: background-color 120ms ease-out, color 120ms ease-out; }
+.day-swipe-hint-prev {
+  left: 0.75rem;
+  padding: 0 1rem 0 0.625rem;
+  opacity: var(--swipe-prev, 0);
+  transform: translate3d(calc(var(--swipe-prev, 0) * 1rem - 1rem), -50%, 0);
+}
+.day-swipe-hint-next {
+  right: 0.75rem;
+  padding: 0 0.625rem 0 1rem;
+  opacity: var(--swipe-next, 0);
+  transform: translate3d(calc(1rem - var(--swipe-next, 0) * 1rem), -50%, 0);
+}
+.day-swipe[data-armed="prev"] .day-swipe-hint-prev,
+.day-swipe[data-armed="next"] .day-swipe-hint-next,
+.day-swipe[data-leaving="prev"] .day-swipe-hint-prev,
+.day-swipe[data-leaving="next"] .day-swipe-hint-next {
+  border-color: transparent;
+  background: linear-gradient(180deg, var(--brand-top), var(--brand));
+  color: #fff;
+}
+.day-swipe[data-leaving="prev"] .day-swipe-hint-prev,
+.day-swipe[data-leaving="next"] .day-swipe-hint-next {
+  opacity: 1;
+  transform: translate3d(0, -50%, 0);
+}
+.day-swipe-spin {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 2px solid rgb(255 255 255 / 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: day-swipe-spin 0.7s linear infinite;
+}
+@keyframes day-swipe-spin {
+  to { transform: rotate(1turn); }
+}
+
 @keyframes inline-status-in {
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: none; }
@@ -1316,9 +1425,13 @@ dialog[open]::backdrop {
   .notice-bubble,
   .case-tip,
   .calendar-from-next,
-  .calendar-from-prev {
+  .calendar-from-prev,
+  .day-swipe-from-next,
+  .day-swipe-from-prev {
     animation: none;
   }
+  .day-swipe-plan,
+  .day-swipe-hint { transition: none; }
   .notice-badge-chevron,
   .case-op-chev,
   .case-note { transition: none; }

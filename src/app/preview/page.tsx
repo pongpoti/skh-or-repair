@@ -3,9 +3,10 @@ import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
 import { TopBar } from "@/components/top-bar";
-import { boardEyebrow, loadBoardDay, nextBoardRefresh, type BoardDay } from "@/lib/board-day";
+import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickRange, type BoardDay } from "@/lib/board-day";
 import { everyNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
+import { demoBoardRows } from "@/lib/demo-schedule";
 import { addDays, parseDay, todayIso, weekDates } from "@/lib/days";
 import { holidaysBetween } from "@/lib/holidays";
 import { currentRepairPeriods } from "@/lib/repair-store";
@@ -30,10 +31,13 @@ function fixedDay(date: string, time: string | undefined): BoardDay {
  * 16:00 turnover, holidays from the BOT feed when a token is set).
  *
  * - ?date=2026-12-14 shows the board as on that date (e.g. the repair's second half); ?day=tue the Tuesday of this week.
+ *   A sideways swipe across the plan moves ?date= to the workday before or after.
  * - ?at=2026-11-16T16:30+07:00 shows the board's day at that moment (after 16:00: the next workday).
  * - ?holiday=วันปิยมหาราช shows the closed day (no badge in the strip since 16 Nov 2026).
  * - ?sample=1 adds made-up HOSxP cases and bookings (preview/sample.ts) to see the row icons, flags and room marks;
  *   with ?upload=0 the bookings alone, as before MX uploads.
+ * - ?demo=1 fills every open room with the admin's demo schedule (lib/demo-schedule.ts, ten or more made-up cases a
+ *   room), as an admin sees it: a long list for the room's sheet and its full screen card.
  * - ?mx=1 shows the board as MX sees it (every HN, the upload button); otherwise as the sample's doctor, who sees the
  *   HN of their own bookings. ?admin=1 adds the admin button.
  * - ?failed=1 shows the board as when its cases cannot be read (no badge since 16 Nov 2026); ?notices=all puts every
@@ -59,6 +63,7 @@ export default async function PreviewPage({
     book?: string;
     dept?: string;
     time?: string;
+    demo?: string;
   }>;
 }) {
   if (process.env.NODE_ENV !== "development") notFound();
@@ -76,13 +81,15 @@ export default async function PreviewPage({
   const holiday = params.holiday?.trim() || null;
 
   const sample = params.sample ? sampleCases(day.boardDate, periods) : { workbook: [], bookings: [] };
-  const built = buildBoardRows({
-    date: day.boardDate,
-    periods,
-    workbook: params.sample && params.upload !== "0" ? sample.workbook : null,
-    bookings: sample.bookings,
-    viewer: { allHn: Boolean(params.mx), userId: params.mx ? null : SAMPLE_DOCTOR_ID },
-  });
+  const built = params.demo
+    ? demoBoardRows(day.boardDate, periods, { allHn: true, userId: null })
+    : buildBoardRows({
+        date: day.boardDate,
+        periods,
+        workbook: params.sample && params.upload !== "0" ? sample.workbook : null,
+        bookings: sample.bookings,
+        viewer: { allHn: Boolean(params.mx), userId: params.mx ? null : SAMPLE_DOCTOR_ID },
+      });
   const board: BoardView | null = holiday
     ? null
     : { date: day.boardDate, rows: built.rows, uploaded: built.uploaded, mismatchCount: built.mismatchCount, mismatchByRoom: built.mismatchByRoom };
@@ -104,6 +111,12 @@ export default async function PreviewPage({
       onRemove: previewRemoveCase,
     };
   }
+
+  // A swipe across the plan moves ?date= to the workday before or after. The preview's date is its "today", so the
+  // address always keeps it (no board's own day to drop it for).
+  const range = pickRange(day.today, periods);
+  const { holidays: closed, unlisted } = await holidaysBetween(range.min, range.max);
+  const swipe = { today: day.today, current: "", ...range, holidays: closed, unlisted };
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -127,6 +140,7 @@ export default async function PreviewPage({
         casesUnavailable={Boolean(params.failed)}
         adding={adding}
         notices={params.notices === "all" ? everyNotice(day.boardDate) : undefined}
+        swipe={swipe}
       />
     </div>
   );

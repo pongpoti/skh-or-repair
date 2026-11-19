@@ -3911,6 +3911,107 @@ async function main() {
       rmSync(NOW_FILE, { force: true });
     });
 
+    await t("a room's list in a full screen card; a sideways swipe on the plan moves the board a workday", async () => {
+      // Tuesday after 16:00: the board's own day is Wednesday 18 Nov; Tuesday has its HOSxP list (OR 12: two cases)
+      setNow("2026-11-17T17:00:00+07:00");
+      const ctx = await contextAs(RP.nurse);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      const shownDay = () => page.getAttribute("header time", "datetime");
+      const waitDay = (iso) => page.waitForFunction((day) => document.querySelector("header time")?.getAttribute("datetime") === day, iso);
+      await page.goto(`${APP}/?date=2026-11-17&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+
+      // Pong, 19 Nov 2026: "add full screen btn on room dialog, click to display Y-scrollable floating card center - center"
+      const card = page.locator('[data-testid="room-full"]');
+      await page.click('[data-testid="room-expand"]');
+      await card.waitFor();
+      // the card's short entrance (a slight rise and scale) ends before it is measured
+      await page.waitForTimeout(300);
+      assert((await card.locator(".case-row").count()) === 2, "the card lists the room's two cases");
+      assert((await textOf(page, "#room-full-title")) === "OR 12", "the room's name");
+      assert((await textOf(page, '[data-testid="room-full-day"]')) === "วันอังคารที่ 17 พ.ย. 2569", "the card names the day, as it covers the top bar");
+      assert(await page.evaluate(() => document.activeElement?.id === "room-full-title"), "the focus on the card's heading");
+      const view = page.viewportSize();
+      const box = await card.boundingBox();
+      assert(Math.abs(box.x + box.width / 2 - view.width / 2) < 1.5 && Math.abs(box.y + box.height / 2 - view.height / 2) < 1.5, `centred: ${JSON.stringify(box)}`);
+      assert(box.x >= 7 && box.x <= 9, `8px from a phone's sides: ${box.x}`);
+      assert(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="room-full"] ol')).overflowY === "auto"), "the list scrolls up and down");
+      await ownerShot(page, "room-full-card.png");
+      // Escape closes the card only: the sheet is still open behind it, the focus back on the button
+      await page.keyboard.press("Escape");
+      await card.waitFor({ state: "detached" });
+      assert(await page.evaluate(() => document.activeElement?.dataset.testid === "room-expand"), "the focus goes back to the button");
+      assert((await page.locator(".room-sheet .case-row").count()) === 2 && new URL(page.url()).searchParams.get("room") === "or-12", "the room stays open");
+      // the shrink button and a tap outside the card close it too
+      await page.click('[data-testid="room-expand"]');
+      await card.waitFor();
+      await page.click('[data-testid="room-full-close"]');
+      await card.waitFor({ state: "detached" });
+      await page.click('[data-testid="room-expand"]');
+      await card.waitFor();
+      await page.mouse.click(view.width / 2, 3);
+      await card.waitFor({ state: "detached" });
+      assert(new URL(page.url()).searchParams.get("room") === "or-12", "still the room");
+      // on a computer the list takes two columns
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.click('[data-testid="room-expand"]');
+      await card.waitFor();
+      await page.waitForTimeout(300);
+      const columns = await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="room-full"] ol')).gridTemplateColumns.split(" ").length);
+      assert(columns === 2, `two columns on a computer: ${columns}`);
+      assert((await card.boundingBox()).width === 1024, "64rem wide");
+      await page.keyboard.press("Escape");
+      await card.waitFor({ state: "detached" });
+      await page.setViewportSize(view);
+      await page.click('[data-testid="room-close"]');
+      await page.waitForURL((url) => !url.searchParams.has("room"));
+
+      // Pong, 19 Nov 2026: "allow swipe on layout to select date". To the left: the next workday, here the board's own
+      // day, so the address drops its date
+      const plan = '[data-testid="day-swipe"]';
+      assert((await textOf(page, '[data-testid="swipe-hint-next"]')) === "พ. 18 พ.ย.", "the next day's hint");
+      assert((await textOf(page, '[data-testid="swipe-hint-prev"]')) === "จ. 16 พ.ย.", "the day before's hint");
+      await swipe(page, plan, -140);
+      await waitDay("2026-11-18");
+      assert(!new URL(page.url()).searchParams.has("date"), "the board's own day has no date in the address");
+      // to the right: the day before, twice
+      await swipe(page, plan, 140);
+      await waitDay("2026-11-17");
+      assert(new URL(page.url()).searchParams.get("date") === "2026-11-17", "Tuesday in the address");
+      await swipe(page, plan, 140);
+      await waitDay("2026-11-16");
+      // a short drag springs back, and a move up or down is not a swipe
+      await swipe(page, plan, -30);
+      await swipe(page, plan, -60, 160);
+      await page.waitForTimeout(800);
+      assert((await shownDay()) === "2026-11-16", "still Monday");
+      // over the weekend: Friday to Monday and back
+      await page.goto(`${APP}/?date=2026-11-20`, { waitUntil: "networkidle" });
+      await swipe(page, plan, -140);
+      await waitDay("2026-11-23");
+      await swipe(page, plan, 140);
+      await waitDay("2026-11-20");
+      // a swipe that starts on a room moves the day and opens no room; a tap still opens it
+      await page.goto(`${APP}/?date=2026-11-17`, { waitUntil: "networkidle" });
+      await swipe(page, "#or-12 .fp-floor", -140);
+      await waitDay("2026-11-18");
+      await page.waitForTimeout(400);
+      assert(!new URL(page.url()).searchParams.has("room") && (await page.locator(".room-sheet.is-open").count()) === 0, "no room opened");
+      await page.locator("#or-12 .fp-floor").click();
+      await page.waitForURL((url) => url.searchParams.get("room") === "or-12");
+      // the repair's last day has no day after it: the plan only gives a little
+      await page.goto(`${APP}/?date=2027-03-17`, { waitUntil: "networkidle" });
+      assert((await page.locator('[data-testid="swipe-hint-next"]').count()) === 0, "no next day's hint");
+      await swipe(page, plan, -140);
+      await page.waitForTimeout(800);
+      assert((await shownDay()) === "2027-03-17", "still the repair's last day");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+      rmSync(NOW_FILE, { force: true });
+    });
+
     await t("admin: the demo schedule on /admin: at least 10 made-up cases in every room of a day in either half, nothing saved; admins only", async () => {
       // Monday 10:00: the board shows Monday, in the repair's first half (14 Nov 2026 – 26 Jan 2027)
       setNow("2026-11-16T10:00:00+07:00");

@@ -97,6 +97,25 @@ export function pickRange(today: string, periods: RepairPeriods): { min: string;
   return { min: first, max: REPAIR_IN_USE && end >= today ? end : addDays(today, PICK_AHEAD_DAYS) };
 }
 
+/**
+ * The workday before (`step` -1) or after (1) `from` that the date picker offers: within `min`..`max`, not a weekend or
+ * holiday. Null when there is none, at either end of the range. A swipe across the floor plan moves the board by it
+ * (Pong, 19 Nov 2026: "allow swipe on layout to select date").
+ */
+export function stepDay(
+  from: string,
+  step: -1 | 1,
+  range: { min: string; max: string; holidays: readonly Holiday[] },
+): string | null {
+  // A range holds a little over a year, so a walk this long has left it whatever `from` is.
+  for (let walked = 1; walked <= 800; walked += 1) {
+    const day = addDays(from, step * walked);
+    if (step > 0 ? day > range.max : day < range.min) return null;
+    if (day >= range.min && day <= range.max && isWorkday(day, range.holidays)) return day;
+  }
+  return null;
+}
+
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**

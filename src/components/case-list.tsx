@@ -165,8 +165,10 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
     }
     function onKey(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      // Escape closes the bubble only, not the room as well (the board's own Escape listens on the window too).
+      // Escape closes the bubble only, not the room as well (the board's own Escape listens on the window too), nor the
+      // full screen card around the list.
       event.stopImmediatePropagation();
+      event.preventDefault();
       const button = iconFor(listRef.current, key);
       setTip(null);
       if (button && listRef.current?.contains(document.activeElement)) button.focus();
@@ -197,8 +199,8 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
     noteFrom.current = null;
     if (document.activeElement !== null && document.activeElement !== document.body) return;
     // The button, or when a refresh took its row away (the booking cancelled, or matched with HOSxP's case and so a new
-    // row), the room's heading, so the focus stays in the room.
-    const heading = noteRef.current?.closest("aside")?.querySelector<HTMLElement>("h2[tabindex='-1']");
+    // row), the room's heading (in the sheet or the full screen card), so the focus stays in the room.
+    const heading = noteRef.current?.closest("[data-room-view]")?.querySelector<HTMLElement>("h2[tabindex='-1']");
     (from?.isConnected ? from : heading)?.focus({ preventScroll: true });
   }
 
