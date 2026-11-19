@@ -65,6 +65,29 @@ export function thaiDate(iso: string, month: "long" | "short" = "long"): string 
   return `${weekday}ที่ ${day} ${tail.join(" ")}`;
 }
 
+/**
+ * The board's address for another day (`iso`), keeping the other parameters in `search` (the open room, the demo): the
+ * board's own day (`current`), or none, drops the date, so the board turns over at 16:00 again.
+ */
+export function boardDayHref(iso: string | null, current: string, pathname = "/", search = ""): string {
+  const query = new URLSearchParams(search);
+  if (!iso || iso === current) query.delete("date");
+  else query.set("date", iso);
+  const qs = query.toString();
+  return qs ? `${pathname}?${qs}` : pathname;
+}
+
+/** Thai weekdays, short, Sunday first. Written out here: Intl's short weekday is the full name in some ICU builds. */
+const SHORT_WEEKDAYS = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
+
+/** A day as a swipe's hint names it: "ศ. 20 พ.ย." (the weekday, the day and the month, short). */
+export function shortThaiDay(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const rest = new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", timeZone: "UTC" }).format(date);
+  return `${SHORT_WEEKDAYS[date.getUTCDay()]} ${rest}`;
+}
+
 /** Board URL with an optional selected room. Other parameters in `search` (such as the preview's `day`) are kept. */
 export function boardHref(room?: string | null, pathname = "/", search = ""): string {
   const query = new URLSearchParams(search);

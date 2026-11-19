@@ -247,7 +247,7 @@ export function bookingRoom(subtype: string | null | undefined, operation: strin
     const rooms = roomsHeldBy("INFECT", date, periods);
     return rooms.length > 0 ? { ok: true, roomId: rooms[0], dressing: true } : noRoom("no-dressing-room");
   }
-  const placed = placeCase({ procedure: operation, dept, emergency: false, team: dept, choice: "dept" }, date, periods, new Map());
+  const placed = placeCase({ procedure: operation, dept, emergency: false, choice: "dept" }, date, periods, new Map());
   if (!placed.ok) return noRoom(placed.reason);
   return { ok: true, roomId: placed.roomId, dressing: false };
 }

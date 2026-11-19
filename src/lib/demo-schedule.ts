@@ -30,17 +30,17 @@ import type { CaseStatus, Shift } from "./schedule.ts";
 export const DEMO_MIN_CASES = 10;
 
 /** A made-up case for a room: the department HOSxP gives it and the operation's name. */
-type DemoCase = { dept: DeptCode; operation: string; team?: string };
+type DemoCase = { dept: DeptCode; operation: string };
 
 /** A department's own cases. */
-function own(dept: DeptCode, operations: readonly string[], team?: string): DemoCase[] {
-  return operations.map((operation) => ({ dept, operation, ...(team ? { team } : {}) }));
+function own(dept: DeptCode, operations: readonly string[]): DemoCase[] {
+  return operations.map((operation) => ({ dept, operation }));
 }
 
 /**
  * The cases by the room's use. The dressing room's names are all dressing names (lib/dressing.ts), so they go there by
  * the name too; the emergency room's are marked Emergency or Stat; the mixed room's are departments with no room of
- * their own during the repair, and endoscopies (a GENSX surgeon's EGD or colonoscopy, the SCOPE rule).
+ * their own during the repair (a general surgeon's endoscopies go to GENSX's room like the rest of their cases).
  */
 const CASES: Partial<Record<DeptCode, readonly DemoCase[]>> = {
   GENSX: [
@@ -75,12 +75,12 @@ const CASES: Partial<Record<DeptCode, readonly DemoCase[]>> = {
     { dept: "URO", operation: "TURP" },
     { dept: "ENT", operation: "Tonsillectomy" },
     { dept: "EYE", operation: "Phacoemulsification with IOL, right eye" },
-    { dept: "GENSX", operation: "EGD with biopsy", team: "GENSX" },
+    { dept: "CVT", operation: "Pericardial window" },
     { dept: "VASCULAR", operation: "AV fistula creation, left arm" },
     { dept: "URO", operation: "Ureteroscopy with laser lithotripsy, left" },
     { dept: "PEDSX", operation: "Herniotomy, right" },
     { dept: "MAXILLO", operation: "Removal of impacted tooth 38" },
-    { dept: "GENSX", operation: "Colonoscopy with polypectomy", team: "GENSX" },
+    { dept: "NEPHRO", operation: "Tenckhoff catheter insertion" },
     { dept: "ENT", operation: "Functional endoscopic sinus surgery" },
     { dept: "PLASTIC", operation: "Excision of keloid, ear" },
     { dept: "NEURO", operation: "Ventriculoperitoneal shunt" },
@@ -114,8 +114,8 @@ const CASES: Partial<Record<DeptCode, readonly DemoCase[]>> = {
     { dept: "ORTHO", operation: "Wound dressing under GA, right knee" },
   ],
   // The weekly schedule's rooms, for a day outside the repair.
-  // A GENSX surgeon's endoscopies: the SCOPE room's by the SCOPE rule (lib/placement.ts isScopeCase).
-  SCOPE: own("GENSX", ["EGD with biopsy", "Colonoscopy with polypectomy", "ERCP with stent insertion", "EGD with variceal banding", "Flexible sigmoidoscopy", "EUS with FNA"], "GENSX"),
+  // A room kept for endoscopies (ส่องกล้อง): a general surgeon's, so GENSX's by the department.
+  SCOPE: own("GENSX", ["EGD with biopsy", "Colonoscopy with polypectomy", "ERCP with stent insertion", "EGD with variceal banding", "Flexible sigmoidoscopy", "EUS with FNA"]),
   VASCULAR: own("VASCULAR", ["AV fistula creation, left arm", "Endovenous laser ablation, right leg", "Femoral embolectomy", "Permanent catheter insertion", "Varicose vein stripping", "Carotid endarterectomy"]),
   OBGYN: own("OBGYN", ["Caesarean section", "Total abdominal hysterectomy", "Laparoscopic ovarian cystectomy", "Dilatation and curettage", "Tubal sterilization", "Myomectomy"]),
   EYE: own("EYE", ["Phacoemulsification with IOL, right eye", "Pterygium excision, left eye", "Trabeculectomy, left eye", "Pars plana vitrectomy, right eye", "Strabismus surgery", "Chalazion excision"]),
@@ -222,7 +222,7 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
         operation: item.operation,
         surgeon: `${surgeon.title} ${surgeon.name}`,
         dept: item.dept,
-        team: item.team ?? item.dept,
+        team: item.dept,
         urgency: emergency ? (i % 3 === 0 ? "Stat" : "Emergency") : "Elective",
         shift,
         status: statusOf(r, i),

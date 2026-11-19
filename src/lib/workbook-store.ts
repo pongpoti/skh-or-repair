@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import type { DeptCode } from "./allocation";
 import { withTx } from "./db";
 import { normalizeHn } from "./hn";
+import { surgeonDeptOf } from "./workbook";
 import type { CaseStatus, Shift } from "./schedule";
 
 type Q = Pool | PoolClient;
@@ -32,10 +33,7 @@ export type PlacedCase = {
   /** Title and name of the surgeon, e.g. "นพ. ชื่อ นามสกุล". */
   surgeon: string;
   dept: DeptCode | null;
-  /**
-   * The surgeon's team for the SCOPE rule (lib/workbook.ts WorkbookRow.team). Kept so the board can place the case
-   * again under the repair's dates in force when it is read (lib/board-rows.ts).
-   */
+  /** The surgeon's team in the physician list, else the department (lib/workbook.ts WorkbookRow.team). No rule uses it. */
   team: string | null;
   /**
    * The room placement chose at upload, or null when the case was not placed. Only a record: the board places the case
@@ -175,7 +173,8 @@ function toCase(r: CaseRow): StoredCase {
     hn: r.hn,
     operation: r.operation,
     surgeon: r.surgeon,
-    dept: r.dept,
+    // The surgeon's own department decides the room, for a list stored before that rule too (Pong, 19 Nov 2026).
+    dept: surgeonDeptOf(r.surgeon) ?? r.dept,
     team: r.team,
     roomId: r.room_id,
     shift: r.shift,

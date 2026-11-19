@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
 import { ThaiCalendar, type DayState } from "@/components/thai-date-field";
 import { closedDayNote } from "@/lib/added-cases";
-import { thaiDate } from "@/lib/days";
+import { boardDayHref, thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 
 /** What the board's date picker needs from the page, all by the server's clock. */
@@ -82,11 +82,8 @@ export function BoardDatePicker({
 
   function go(iso: string | null) {
     dialogRef.current?.close();
-    const query = new URLSearchParams(window.location.search);
-    if (!iso || iso === pick.current) query.delete("date");
-    else query.set("date", iso);
-    const qs = query.toString();
-    startTransition(() => router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));
+    const href = boardDayHref(iso, pick.current, pathname, window.location.search);
+    startTransition(() => router.push(href, { scroll: false }));
   }
 
   const dayState = (iso: string): DayState => {

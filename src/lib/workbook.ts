@@ -1,7 +1,7 @@
 import { SURGEONS } from "../data/surgeons.ts";
 import type { DeptCode } from "./allocation.ts";
 import { isEmergencyUrgency } from "./placement.ts";
-import { isDressingCase, isScopeCase, resolveSurgeon } from "./week.ts";
+import { isDressingCase, resolveSurgeon } from "./week.ts";
 import type { XlsxCell } from "./xlsx.ts";
 
 /**
@@ -284,6 +284,23 @@ export function surgeonDept(name: string, title: string): DeptCode | null {
   return listed.get(cleanText(name)) ?? resolveSurgeon(name, title).team;
 }
 
+const bySurgeonText = new Map<string, DeptCode | null>();
+
+/**
+ * The department of a stored case's surgeon ("พญ. ชื่อ นามสกุล", as an upload keeps it), by name (surgeonDept), or null
+ * for a name on neither list. The board reads stored lists through it, so a case uploaded before the rule changed is
+ * placed by its surgeon too (Pong, 19 Nov 2026: "now base on surgeon name and dept only").
+ */
+export function surgeonDeptOf(surgeon: string): DeptCode | null {
+  let dept = bySurgeonText.get(surgeon);
+  if (dept === undefined) {
+    const { name, title } = splitSurgeon(surgeon);
+    dept = name ? surgeonDept(name, title) : null;
+    bySurgeonText.set(surgeon, dept);
+  }
+  return dept;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Rows
 
@@ -314,19 +331,21 @@ export type WorkbookRow = {
   bookedDate: string | null;
   /** สั่งผ่าตัดเวลา (X), "HH:MM" ("HH:MM:SS" when it has seconds), often blank. */
   bookedTime: string | null;
+  /**
+   * The case's department, which decides its room: the surgeon's own department by name (the surgeon list, then the
+   * physician list), else แผนก, else ชนิด, else the surgeon's usual department in the file (Pong, 19 Nov 2026: "now
+   * base on surgeon name and dept only"; until then แผนก came first, so a general surgeon's case keyed under ORTHO
+   * went to the ORTHO room).
+   */
   dept: DeptCode | null;
   deptFrom: DeptSource | null;
-  /**
-   * The team the SCOPE rule checks (placeCase's `team`): the surgeon's team in the physician list, else the row's
-   * department, so a general surgeon missing from the list still takes an endoscopy to the SCOPE room.
-   */
+  /** The surgeon's team in the physician list, else the case's department. Kept with the case; no rule uses it. */
   team: string | null;
   /** A row of the partner hospital (รพ.นครท่าฉลอม) by its แผนก, room or operation text. */
   thaChalom: boolean;
   /** "SMC" in the operation text: the after-hours private list. */
   smc: boolean;
   dressing: boolean;
-  scope: boolean;
 };
 
 export type ParseOptions = {
@@ -388,8 +407,8 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
     const operation = text(at.operation);
     const { name, title } = splitSurgeon(cells[at.surgeon]);
     const deptText = text(at.dept);
-    const fromColumns = deptOfColumns(deptText, text(at.type));
-    const fromSurgeon = fromColumns ? null : lookUp(name, title);
+    const fromSurgeon = name ? lookUp(name, title) : null;
+    const fromColumns = fromSurgeon ? null : deptOfColumns(deptText, text(at.type));
     const urgency = urgencyOf(text(at.urgency));
     rows.push({
       line: index + 1,
@@ -407,13 +426,12 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
       requestTime: parseTimeCell(cells[at.requestTime]),
       bookedDate: parseDateCell(cells[at.bookedDate], options.date1904),
       bookedTime: parseTimeCell(cells[at.bookedTime]),
-      dept: fromColumns?.dept ?? fromSurgeon,
-      deptFrom: fromColumns?.from ?? (fromSurgeon ? "surgeon" : null),
+      dept: fromSurgeon ?? fromColumns?.dept ?? null,
+      deptFrom: fromSurgeon ? "surgeon" : (fromColumns?.from ?? null),
       team: null,
       thaChalom: [deptText, text(at.room), operation].some((value) => value.includes("ท่าฉลอม")),
       smc: /\bsmc\b/i.test(operation),
       dressing: isDressingCase(operation),
-      scope: false,
     });
   }
 
@@ -438,7 +456,6 @@ export function parseExport(sheetRows: SheetRows, options: ParseOptions = {}): P
       }
     }
     row.team = resolveSurgeon(row.surgeon, row.title).team ?? row.dept;
-    row.scope = isScopeCase(row.operation, row.team);
   }
   return { ok: true, rows, missingHeaders: [] };
 }

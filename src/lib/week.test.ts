@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WEEK_DATA } from "../data/week-data.ts";
-import { boardHref, DAY_KEYS, DAY_NAMES, parseDay, thaiDate, todayIso, weekDates, workdayIndex } from "./days.ts";
+import { boardDayHref, boardHref, DAY_KEYS, DAY_NAMES, parseDay, shortThaiDay, thaiDate, todayIso, weekDates, workdayIndex } from "./days.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
-import { boardFor, isDressingCase, isScopeCase, resolveSurgeon, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
+import { boardFor, isDressingCase, resolveSurgeon, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
 
 // These weeks (Sep and Oct 2026) fall in the first half, which runs from 1 Jan 2026, so its rooms place the cases:
 // there is no weekly schedule in this app (Pong, 18 Nov 2026: "forget normal day OR schedule"). lib/placement.test.ts
@@ -58,6 +58,20 @@ test("builds room links and keeps other parameters", () => {
   assert.equal(boardHref("or-9", "/preview", "?day=fri"), "/preview?day=fri&room=or-9");
 });
 
+test("another day's address keeps the room and drops the date for the board's own day", () => {
+  assert.equal(boardDayHref("2026-11-20", "2026-11-19"), "/?date=2026-11-20");
+  assert.equal(boardDayHref("2026-11-18", "2026-11-19", "/", "?room=or-3&date=2026-11-17"), "/?room=or-3&date=2026-11-18");
+  assert.equal(boardDayHref("2026-11-19", "2026-11-19", "/", "?room=or-3&date=2026-11-18"), "/?room=or-3");
+  assert.equal(boardDayHref(null, "2026-11-19", "/", "?date=2026-11-18"), "/");
+  assert.equal(boardDayHref("2026-11-20", "", "/preview", "?sample=1&date=2026-11-19"), "/preview?sample=1&date=2026-11-20");
+});
+
+test("a swipe's hint names the day short", () => {
+  assert.equal(shortThaiDay("2026-11-20"), "ศ. 20 พ.ย.");
+  assert.equal(shortThaiDay("2026-11-22"), "อา. 22 พ.ย.");
+  assert.equal(shortThaiDay("2027-01-04"), "จ. 4 ม.ค.");
+});
+
 test("no case data is loaded, so today's board is empty and follows this week's allocation", () => {
   assert.equal(WEEK_DATA.cases.length, 0);
   assert.deepEqual(WEEK_DATA.meta.days, []);
@@ -93,14 +107,15 @@ test("rooms follow the first half's rules, with no weekly schedule", () => {
     { dept: "GENSX" },
     { dept: "OBGYN" }, // operates in the obstetric building: off the board
   ]);
-  // Monday 28 Sep 2026: dressing OR 10, emergency OR 9, EYE and the endoscopy the mixed room OR 11, ORTHO OR 13,
-  // GENSX OR 12. Before 18 Nov 2026 this was the weekly schedule's OR 1, 8, 10, 11 or 12, 3 and 2 or 5.
-  assert.deepEqual(roomsOf(data), ["or-10", "or-9", "or-11", "or-13", "or-11", "or-12"]);
+  // Monday 28 Sep 2026: dressing OR 10, emergency OR 9, EYE the mixed room OR 11, ORTHO OR 13, GENSX OR 12, the
+  // general surgeon's colonoscopy too (no scope rule since Pong, 19 Nov 2026). Before 18 Nov 2026 this was the weekly
+  // schedule's OR 1, 8, 10, 11 or 12, 3 and 2 or 5.
+  assert.deepEqual(roomsOf(data), ["or-10", "or-9", "or-11", "or-13", "or-12", "or-12"]);
 });
 
 test("orders each room's cases and tells the surgeon's department", () => {
   const day = weekBoard(fixture([{ dept: "GENSX", surgeon: GENSX_SURGEON, proc: "EGD" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "ERCP" }, { dept: "GENSX", surgeon: GENSX_SURGEON, proc: "hernia" }]), REPAIR)[0];
-  assert.deepEqual(day.operations.map((item) => [item.roomId, item.order]), [["or-11", 1], ["or-11", 2], ["or-12", 1]]);
+  assert.deepEqual(day.operations.map((item) => [item.roomId, item.order]), [["or-12", 1], ["or-12", 2], ["or-12", 3]]);
   assert.equal(day.operations[0].specialty, "ศัลยกรรม · GENSX");
 });
 
@@ -115,20 +130,6 @@ test("ignores a room the export names and places the case by the half's rooms", 
   // The file says OR 4, closed in the first half; general surgery lands in OR 12 whatever the file says.
   const data = fixture([{ dept: "GENSX", room: 4 } as Partial<WeekCase>]);
   assert.deepEqual(roomsOf(data), ["or-12"]);
-});
-
-test("the SCOPE room takes only a GENSX surgeon's endoscopic cases", () => {
-  for (const name of ["EGD", "OGD under GA", "Gastroscopy", "Esophagoscopy", "colonoscopy+polypectomy", "Sigmoidoscopy", "ERCP", "Endoscopic sphincterotomy", "EUS"]) {
-    assert.ok(isScopeCase(name, "GENSX"), name);
-  }
-  assert.equal(isScopeCase("BEGD", "GENSX"), false); // \b: whole word only
-  // foreign-body removal is excluded, and so is anyone who is not labelled GENSX
-  for (const name of ["remove FB by EGD", "Remove  fb", "foreign body removal gastroscopy", "FB esophagus"]) {
-    assert.equal(isScopeCase(name, "GENSX"), false, name);
-  }
-  assert.equal(isScopeCase("colonoscopy", "URO"), false);
-  assert.equal(isScopeCase("colonoscopy", null), false);
-  assert.equal(isScopeCase("hernia repair", "GENSX"), false);
 });
 
 test("finds dressing cases by the rule bookings use: Pong's words, debridement in, grafts out (15 Nov 2026)", () => {

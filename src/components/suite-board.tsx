@@ -1,18 +1,20 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
 import { AddCase, type Doctor } from "@/components/add-case";
+import type { DatePick } from "@/components/board-date-picker";
 import { BoardNotices, noticeBadge } from "@/components/board-notices";
 import { CaseList, isCaseBubbleOpen } from "@/components/case-list";
+import { DaySwipe } from "@/components/day-swipe";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
 import { NoTableIcon } from "@/components/no-table-icon";
 import type { AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
-import { boardHref } from "@/lib/days";
+import { boardHref, thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, isSelectableRoom, openRooms, roomLabel, type Room } from "@/lib/rooms";
@@ -196,6 +198,141 @@ function RoomOverview({
   );
 }
 
+const EXPAND_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+  </svg>
+);
+
+const SHRINK_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
+  </svg>
+);
+
+const CLOSE_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+    <path d="M6 6l12 12M18 6L6 18" />
+  </svg>
+);
+
+/**
+ * The top of a room's list, in the sheet and in the full screen card alike: the room's name, how many cases, the no-table
+ * mark, the department badges on their own line, and the buttons (`children`) at the right, over a wash of the
+ * department's colour.
+ */
+function RoomHead({
+  room,
+  count,
+  allocation,
+  noTable,
+  headingRef,
+  headingId,
+  eyebrow,
+  handle = false,
+  children,
+}: {
+  room: Room;
+  count: number;
+  allocation: ReturnType<typeof allocationFor>;
+  noTable: boolean;
+  headingRef?: RefObject<HTMLHeadingElement | null>;
+  headingId?: string;
+  /** A line above the name: the card says the day, since it covers the top bar. */
+  eyebrow?: string;
+  /** The bottom sheet's drag handle, on phones. */
+  handle?: boolean;
+  children: ReactNode;
+}) {
+  const wash = allocation?.am?.color ?? allocation?.pm?.color;
+  return (
+    <div className="sheet-head shrink-0 border-b border-line" style={wash ? ({ "--wash": wash } as CSSProperties) : undefined}>
+      {handle ? <span aria-hidden className="mx-auto mt-2 block h-1 w-10 rounded-full bg-line-strong lg:hidden" /> : null}
+      <div className={`flex items-start justify-between gap-3 px-5 ${handle ? "pt-1.5 lg:pt-4" : "pt-4"}`}>
+        <div className="min-w-0 flex-1">
+          {eyebrow ? (
+            <p className="truncate pt-0.5 text-sm font-medium text-muted" data-testid="room-full-day">
+              {eyebrow}
+            </p>
+          ) : null}
+          <div className="flex min-h-11 items-center gap-2.5">
+            <h2 ref={headingRef} id={headingId} tabIndex={-1} className="text-xl leading-snug font-bold text-ink outline-none">
+              {roomLabel(room)}
+            </h2>
+            <span className="count-tag">
+              <span className="tabular-nums">{count}</span> รายการ
+            </span>
+            {noTable ? (
+              <span className="room-no-table" data-testid="room-no-table">
+                <NoTableIcon size={22} label="ยังไม่มีตาราง HOSxP" />
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-0.5">{children}</div>
+      </div>
+      {/* The department badges always sit on one line, across the full width. */}
+      <div className="flex min-w-0 flex-nowrap items-center gap-x-2.5 px-5 pt-1 pb-3.5 text-sm">
+        {allocation?.split ? (
+          <>
+            <Owner part="เช้า" dept={allocation.am} split />
+            <Owner part="บ่าย" dept={allocation.pm} split />
+          </>
+        ) : allocation ? (
+          <Owner dept={allocation.am} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The full screen card: centred over the dimmed, blurred board, all but 8px of a phone's screen, and up to 64rem wide on
+ * a computer, where its list takes two columns (.room-full in globals.css).
+ */
+const ROOM_CARD =
+  "room-full m-auto max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-none flex-col sm:max-h-[calc(100dvh-3rem)] sm:w-[min(64rem,calc(100%-3rem))] overflow-hidden rounded-[22px] border border-line bg-surface p-0 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] open:flex backdrop:bg-[rgb(36_28_22/0.45)] backdrop:backdrop-blur-[3px]";
+
+/**
+ * A room's list in a floating card in the middle of the screen (Pong, 19 Nov 2026: "add full screen btn on room dialog,
+ * click to display Y-scrollable floating card center - center"): the sheet's head with the day above the room's name,
+ * then every case, the list scrolling up and down when they are more than the screen holds; from 768px in two columns,
+ * read across and then down, so a computer's width shows twice as many. The shrink button, Escape or
+ * a tap outside the card closes it, back to the sheet as it was, the focus on the button that opened it.
+ */
+function RoomCard({ onClose, headingRef, children }: { onClose: () => void; headingRef: RefObject<HTMLHeadingElement | null>; children: ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  // Whether the press began on the backdrop: a selection dragged out past the card ends with a click on the dialog
+  // itself, which must not close it.
+  const pressedOutside = useRef(false);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    headingRef.current?.focus({ preventScroll: true });
+  }, [headingRef]);
+  return (
+    <dialog
+      ref={ref}
+      aria-labelledby="room-full-title"
+      className={ROOM_CARD}
+      onClose={onClose}
+      onPointerDown={(event) => {
+        pressedOutside.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        const outside = pressedOutside.current && event.target === event.currentTarget;
+        pressedOutside.current = false;
+        if (outside) ref.current?.close();
+      }}
+      data-room-view=""
+      data-testid="room-full"
+    >
+      {children}
+    </dialog>
+  );
+}
+
 export function SuiteBoard({
   board,
   today,
@@ -205,6 +342,7 @@ export function SuiteBoard({
   adding = null,
   casesUnavailable = false,
   notices: givenNotices,
+  swipe = null,
 }: {
   /** The board's day, or null when the suite is closed (the preview of a weekend or holiday). */
   board: BoardView | null;
@@ -220,6 +358,8 @@ export function SuiteBoard({
   casesUnavailable?: boolean;
   /** The notices above the plan, when the page sets them itself (an admin's /?notices=all, or the preview's); else the board's own. */
   notices?: readonly BoardNotice[];
+  /** The days a swipe across the plan moves between (the date picker's); none turns the swipe off. */
+  swipe?: DatePick | null;
 }) {
   const router = useRouter();
   // The day whose rooms are shown: the board's own date, or today when the suite is closed.
@@ -229,6 +369,9 @@ export function SuiteBoard({
   const [selectedId, setSelectedId] = useState<string | null>(urlRoom);
   const [prevUrl, setPrevUrl] = useState(urlRoom);
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const cardHeadingRef = useRef<HTMLHeadingElement>(null);
+  // The open room's list in the full screen card.
+  const [full, setFull] = useState(false);
   const [addRequest, setAddRequest] = useState<object | null>(null);
   // The notice whose chat bubble is open (BoardNotices).
   const [noticeId, setNoticeId] = useState<string | null>(null);
@@ -251,6 +394,8 @@ export function SuiteBoard({
   if (noticeId !== null && !notices.some((notice) => notice.id === noticeId)) setNoticeId(null);
   const room = getRoom(selectedId);
   const open = room !== null;
+  // The card goes with its room (closed, or gone with a refresh).
+  if (full && !open) setFull(false);
 
   const counts = useMemo(() => {
     const next: Record<string, number> = {};
@@ -314,7 +459,6 @@ export function SuiteBoard({
   const planDate = board?.date ?? null;
   const cases = room ? rowsOf(operations, room.id) : NONE;
   const allocation = room && planDate ? allocationFor(room.id, planDate, periods) : null;
-  const wash = allocation?.am?.color ?? allocation?.pm?.color;
   // While the strip says there is no HOSxP table yet, the header of every operating room's card says so too, except the
   // emergency room's (Pong, 16 Nov 2026). The room's department on the day whose rooms are shown decides, so the
   // emergency room is known even when the suite is closed (the preview's test mode).
@@ -332,8 +476,12 @@ export function SuiteBoard({
           <BoardNotices notices={notices} openId={noticeId} onOpenChange={setNoticeId} />
           {/* The plan stops above the จองห้อง button and its glow, so the button never covers a room (Pong, 15 Nov
               2026). */}
-          <div
-            className={`flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0 ${adding ? "pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.75rem)] lg:pb-[4.5rem]" : ""}`}
+          {/* A sideways swipe across the plan shows the day before or after (Pong, 19 Nov 2026). */}
+          <DaySwipe
+            day={day}
+            pick={board ? swipe : null}
+            pathname={pathname}
+            className={`flex min-h-0 flex-1 overflow-hidden p-1 lg:p-0 ${adding ? "pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.75rem)] lg:pb-[4.5rem]" : ""}`}
           >
             <FloorPlan
               selectedId={selectedId}
@@ -345,7 +493,7 @@ export function SuiteBoard({
               mismatches={board?.mismatchByRoom ?? NO_MISMATCH}
               onSelect={onSelect}
             />
-          </div>
+          </DaySwipe>
           {adding ? (
             // Centred under the plan on every screen, with a slow glow that draws the eye (Pong, 15 Nov 2026); on phones
             // the room sheet covers it. The wrapper centres it, so the button's own press transform stays free.
@@ -385,28 +533,25 @@ export function SuiteBoard({
 
         <aside
           aria-label="รายการผ่าตัดของห้อง"
+          data-room-view=""
           className={`room-sheet z-20 flex min-h-0 flex-col overflow-hidden max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:max-h-[60dvh] max-lg:rounded-t-[24px] lg:static lg:h-full lg:w-[26rem] lg:shrink-0 xl:w-[30rem] 2xl:w-[34rem] ${open ? "is-open" : "max-lg:pointer-events-none"}`}
         >
           {open ? (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="sheet-head shrink-0 border-b border-line" style={wash ? ({ "--wash": wash } as CSSProperties) : undefined}>
-                <span aria-hidden className="mx-auto mt-2 block h-1 w-10 rounded-full bg-line-strong lg:hidden" />
-                <div className="flex items-start justify-between gap-3 px-5 pt-1.5 lg:pt-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-h-11 items-center gap-2.5">
-                      <h2 ref={headingRef} tabIndex={-1} className="text-xl leading-snug font-bold text-ink outline-none">
-                        {room ? roomLabel(room) : null}
-                      </h2>
-                      <span className="count-tag">
-                        <span className="tabular-nums">{cases.length}</span> รายการ
-                      </span>
-                      {noTable ? (
-                        <span className="room-no-table" data-testid="room-no-table">
-                          <NoTableIcon size={22} label="ยังไม่มีตาราง HOSxP" />
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
+              {room ? (
+                <RoomHead room={room} count={cases.length} allocation={allocation} noTable={noTable} headingRef={headingRef} handle>
+                  {/* The room's list in a floating card in the middle of the screen (RoomCard). */}
+                  <button
+                    type="button"
+                    className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
+                    aria-label="ขยายเต็มจอ"
+                    aria-haspopup="dialog"
+                    title="ขยายเต็มจอ"
+                    onClick={() => setFull(true)}
+                    data-testid="room-expand"
+                  >
+                    {EXPAND_ICON}
+                  </button>
                   {/* On a computer it goes back to the list of open rooms (RoomOverview). */}
                   <button
                     type="button"
@@ -416,25 +561,37 @@ export function SuiteBoard({
                     onClick={() => choose(null)}
                     data-testid="room-close"
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                      <path d="M6 6l12 12M18 6L6 18" />
-                    </svg>
+                    {CLOSE_ICON}
                   </button>
-                </div>
-                {/* The department badges always sit on one line, across the sheet's full width. */}
-                <div className="flex min-w-0 flex-nowrap items-center gap-x-2.5 px-5 pt-1 pb-3.5 text-sm">
-                  {allocation?.split ? (
-                    <>
-                      <Owner part="เช้า" dept={allocation.am} split />
-                      <Owner part="บ่าย" dept={allocation.pm} split />
-                    </>
-                  ) : allocation ? (
-                    <Owner dept={allocation.am} />
-                  ) : null}
-                </div>
-              </div>
+                </RoomHead>
+              ) : null}
               {/* An empty room too: the list says ไม่มีรายการ itself, so a note open when a refresh empties the room stays. */}
               <CaseList key={room?.id} cases={cases} />
+              {full && room ? (
+                <RoomCard onClose={() => setFull(false)} headingRef={cardHeadingRef}>
+                  <RoomHead
+                    room={room}
+                    count={cases.length}
+                    allocation={allocation}
+                    noTable={noTable}
+                    headingRef={cardHeadingRef}
+                    headingId="room-full-title"
+                    eyebrow={thaiDate(day, "short")}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
+                      aria-label="ย่อหน้าต่าง"
+                      title="ย่อหน้าต่าง"
+                      onClick={(event) => event.currentTarget.closest("dialog")?.close()}
+                      data-testid="room-full-close"
+                    >
+                      {SHRINK_ICON}
+                    </button>
+                  </RoomHead>
+                  <CaseList key={room.id} cases={cases} />
+                </RoomCard>
+              ) : null}
             </div>
           ) : planDate && overviewRooms.length > 0 ? (
             <RoomOverview

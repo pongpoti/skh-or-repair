@@ -13,6 +13,7 @@ import {
   pickedDay,
   pickRange,
   relationTo,
+  stepDay,
 } from "./board-day.ts";
 import { BOOK_AHEAD_DAYS } from "./added-cases.ts";
 import { DEFAULT_REPAIR_PERIODS as REPAIR } from "./repair.ts";
@@ -202,4 +203,25 @@ test("how a picked day stands to today, and its eyebrow", () => {
   assert.equal(relationTo("2026-11-18", "2026-11-17"), "tomorrow");
   assert.equal(relationTo("2026-11-20", "2026-11-17"), "later");
   assert.equal(boardEyebrow(relationTo("2026-11-20", "2026-11-17")), "ตารางผ่าตัดถัดไป");
+});
+
+test("a swipe moves the board to the workday before or after, within the picker's range", () => {
+  // Pong, 19 Nov 2026: "allow swipe on layout to select date"
+  const range = { min: "2026-01-01", max: "2027-03-17", holidays: HOLIDAYS };
+  assert.equal(stepDay("2026-11-19", 1, range), "2026-11-20");
+  assert.equal(stepDay("2026-11-19", -1, range), "2026-11-18");
+  assert.equal(stepDay("2026-11-20", 1, range), "2026-11-23", "over the weekend");
+  assert.equal(stepDay("2026-11-23", -1, range), "2026-11-20");
+  // Fri 4 Dec, then the weekend, Mon 7 Dec (a substitution day), Tue 8 Dec
+  assert.equal(stepDay("2026-12-04", 1, range), "2026-12-08", "over a weekend and a holiday");
+  assert.equal(stepDay("2026-12-08", -1, range), "2026-12-04");
+  assert.equal(stepDay("2026-12-30", 1, range), "2027-01-04", "over the New Year");
+  // the ends of the range: 1 Jan 2026 is a Thursday, the repair's last day 17 Mar 2027 a Wednesday
+  assert.equal(stepDay("2026-01-02", -1, range), "2026-01-01");
+  assert.equal(stepDay("2026-01-01", -1, range), null);
+  assert.equal(stepDay("2027-03-17", 1, range), null);
+  assert.equal(stepDay("2027-03-16", 1, range), "2027-03-17");
+  // a range that starts on a weekend: the first workday in it
+  assert.equal(stepDay("2026-11-20", 1, { min: "2026-11-21", max: "2026-11-30", holidays: [] }), "2026-11-23");
+  assert.equal(stepDay("2026-11-23", -1, { min: "2026-11-21", max: "2026-11-30", holidays: [] }), null);
 });

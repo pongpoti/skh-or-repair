@@ -84,7 +84,7 @@ export type WorkbookCase = {
   operation: string;
   surgeon: string;
   dept: DeptCode | null;
-  /** The surgeon's team for the SCOPE rule, null for a case saved without one. */
+  /** The surgeon's team from the physician list, null for a case saved without one; no placement rule uses it. */
   team: string | null;
   /** The urgency label (Stat and Emergency go to the emergency room). */
   urgency: string | null;
@@ -230,7 +230,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   const pairs = pairCases(cases, today, bookingRooms);
   const taken = new Set(pairs.values());
   // A matched case is placed by the doctor's choice of room instead of its name, and by the workbook's other rules
-  // (emergencies, NEURO and CVT, SCOPE, the load of a department's rooms) as any other case.
+  // (emergencies, NEURO and CVT, the load of a department's rooms) as any other case.
   const placements = placeAll(
     cases.map((item) => ({ ...item, choice: choiceOf(pairs.get(item), bookingRooms) })),
     date,
