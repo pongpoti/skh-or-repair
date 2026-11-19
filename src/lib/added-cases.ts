@@ -228,7 +228,7 @@ const noRoom = (reason: NoRoomReason): BookingRoom => ({ ok: false, reason, erro
  * that is not a department) has no room of its own and goes to the mixed-department room, so an elective booking never
  * takes the emergency or dressing room by its subtype; no subtype at all cannot be placed.
  */
-function bookingDept(subtype: string | null | undefined): DeptCode | null {
+export function bookingDept(subtype: string | null | undefined): DeptCode | null {
   if (typeof subtype !== "string" || !subtype.trim()) return null;
   return isSpecialtyCode(subtype) || subtype === "SCOPE" ? subtype : "MIXED";
 }

@@ -205,7 +205,7 @@ describe("doctors sign in by email (database)", () => {
 
   async function load() {
     await pool.query(
-      "TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
+      "TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
     );
     const { rows } = await pool.query<{ id: string; first_name: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype, active) VALUES
@@ -235,7 +235,7 @@ describe("doctors sign in by email (database)", () => {
   });
   after(async () => {
     await pool.query(
-      "TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
+      "TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
     );
     await pool.end();
   });

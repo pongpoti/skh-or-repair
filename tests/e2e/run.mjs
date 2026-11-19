@@ -623,7 +623,7 @@ async function main() {
   // loaded once the app has created them, as in production: loadUsers() after the servers are up).
   const db = new pg.Pool({ connectionString: DB_URL, max: 2 });
   await assertDisposableUsers((sql) => db.query(sql), "E2E_DATABASE_URL"); // users holding real data: stop before the DROP
-  await db.query("DROP TABLE IF EXISTS otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+  await db.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
 
   const appEnv = {
     ...baseEnv(),
@@ -695,6 +695,8 @@ async function main() {
     await sleep(500);
     for (const p of [line, sms, app]) if (p.exit) throw new Error(`${p.name} exited (${p.exit}); log: ${p.logFile}`);
     await loadUsers(db);
+    // Every doctor has seen the doctors' tutorial already, so the board opens as before; its own test takes one back.
+    await db.query("INSERT INTO tutorial_seen (user_id) SELECT id FROM users ON CONFLICT DO NOTHING");
   } catch (e) {
     await db.end();
     throw e;
@@ -4012,6 +4014,156 @@ async function main() {
       assert((await shownDay()) === "2027-03-17", "still the repair's last day");
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
+      rmSync(NOW_FILE, { force: true });
+    });
+
+    await t("doctors' tutorial: a doctor's first visit opens it once; a practice booking on a made-up day, before and after the 16:00 upload, every symbol explained; nothing saved", async () => {
+      // Thursday 10:00: the first day a doctor could book is Friday 20 Nov, the made-up day (the repair's first half:
+      // OR 10 the dressing room, OR 12 general surgery, OR 13 orthopaedics)
+      setNow("2026-11-19T10:00:00+07:00");
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId]);
+      const casesBefore = (await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n;
+      const ctx = await contextAs(RP.drY);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      // Pong, 19 Nov 2026: "create user-friendly step-by-step interactive tutorial guide with dummy example (just like
+      // start of mobile game app), also explain details of symbols. Note that this tutorial is for DR role only"
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert(page.url() === `${APP}/tutorial?first=1`, `a doctor's first visit opens the tutorial: ${page.url()}`);
+      await page.waitForSelector('[data-testid="coach-welcome"]');
+      assert((await page.getAttribute("header time", "datetime")) === "2026-11-20", "the made-up day is the first day the doctor could book");
+      assert((await page.locator('[data-testid="tutorial-notice"]').count()) === 1, "a badge says the cases are made up");
+      assert((await textOf(page, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "a first visit may skip it");
+      await ownerShot(page, "tutorial-welcome.png");
+      await page.click('[data-testid="coach-start"]');
+      await waitUntil(async () => (await db.query("SELECT 1 FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId])).rowCount === 1, "starting notes it seen");
+
+      // The steps, as a doctor goes through them: ถัดไป on a bubble or a card, the example answer and ถัดไป where
+      // something is typed, and the real button, room or icon where the coach asks for a tap.
+      const taps = {
+        book: '[data-testid="add-case-button"]',
+        "form-submit": '[data-testid="case-submit"]',
+        "form-close": '[data-testid="add-case-close"]',
+        room: "#or-12 .fp-floor",
+        "room-again": "#or-12 .fp-floor",
+        "my-icon": '.room-sheet .case-row:has([data-testid="row-hn"]) [data-testid="row-icon"]',
+        unfold: '.room-sheet .case-row:has([data-testid="row-note"]) button.case-op',
+        note: '.room-sheet .case-row [data-testid="row-note"]',
+        "note-close": 'dialog[open] [data-testid="case-note-close"]',
+        expand: '[data-testid="room-expand"]',
+        "full-close": '[data-testid="room-full-close"]',
+        dressing: "#or-10 .fp-floor",
+      };
+      const pictures = {
+        plan: "tutorial-plan.png",
+        "plan-symbols": "tutorial-plan-symbols.png",
+        book: "tutorial-book.png",
+        "form-hn": "tutorial-hn.png",
+        "my-row": "tutorial-my-row.png",
+        upload: "tutorial-upload.png",
+        mismatch: "tutorial-mismatch.png",
+        matched: "tutorial-matched.png",
+        unfold: "tutorial-unfold.png",
+        doers: "tutorial-dressing.png",
+        "row-symbols": "tutorial-row-symbols.png",
+      };
+      /** Goes through the steps from the welcome card to the end, with `pictures` (step id: file) and `checks` (step id: fn). */
+      const walk = async (page, pictures, checks = {}) => {
+        const walked = [];
+        let previous = "welcome";
+        for (;;) {
+          await page.waitForFunction((prev) => {
+            const coach = document.querySelector('[data-testid="coach"]');
+            return coach !== null && coach.dataset.step !== prev;
+          }, previous);
+          const id = await page.getAttribute('[data-testid="coach"]', "data-step");
+          const mode = await page.getAttribute('[data-testid="coach"]', "data-mode");
+          walked.push(id);
+          previous = id;
+          assert(walked.length < 60, `too many steps: ${walked.join(", ")}`);
+          if (id === "finish") return walked;
+          if (pictures[id]) await ownerShot(page, pictures[id]);
+          if (checks[id]) await checks[id]();
+          if (taps[id]) {
+            assert(mode === "tap", `${id}: a tap step`);
+            await page.click(taps[id]);
+          } else if (mode === "do") {
+            const example = page.locator('[data-testid="coach-example"]');
+            if (await example.count()) await example.click();
+            await page.click('[data-testid="coach-next"]:not([disabled])');
+          } else {
+            assert(mode === "info", `${id}: ${mode} step without a tap`);
+            await page.click('[data-testid="coach-next"]');
+          }
+        }
+      };
+      const walked = await walk(page, pictures, {
+        "my-row": async () => {
+          const rows = await sheetRows(page);
+          assert(JSON.stringify(rows) === JSON.stringify([["booking", null, null], ["booking", null, "HN 1234567"]]), `before the upload: the colleague's booking, then the doctor's with its HN only: ${JSON.stringify(rows)}`);
+        },
+        booked: async () => {
+          // the confetti, mid-fall
+          await page.waitForTimeout(700);
+          await page.screenshot({ path: join(SCREENS, "tutorial-booked.png") });
+          shots.push("tutorial-booked.png");
+          assert((await textOf(page, '[data-testid="my-case-hn"]')) === "HN 1234567", "the practice booking in the form's own list");
+        },
+        mismatch: async () => {
+          assert((await page.locator("#or-12 .fp-mismatch").count()) === 1, "the room's ! mark after the upload");
+          assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "no more no-HOSxP badge");
+        },
+        gone: async () => assert((await page.getAttribute("#or-13 .fp-floor", "aria-label"))?.includes("ไม่มีเคส"), "the booking HOSxP lacks is gone from OR 13"),
+        matched: async () => {
+          const rows = await sheetRows(page);
+          assert(JSON.stringify(rows) === JSON.stringify([["matched", null, null], ["matched", null, "HN 1234567"], ["hosxp", "unbooked", null]]), `after the upload: ${JSON.stringify(rows)}`);
+          assert((await textOf(page, '.room-sheet [data-testid="row-patient"]')) === "ตัวอย่าง ผู้ป่วย", "the made-up patient's name, for the doctor alone");
+          assert((await textOf(page, '.room-sheet .case-row[data-flag="unbooked"] .badge-warning')) === "นอกเวลา", "HOSxP's unbooked case is out of hours");
+        },
+        doers: async () => assert(JSON.stringify(await rowIcons(page)) === '["scrub","surgeon"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(page))}`),
+      });
+      await page.waitForTimeout(700);
+      await page.screenshot({ path: join(SCREENS, "tutorial-finish.png") });
+      shots.push("tutorial-finish.png");
+      assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === casesBefore, "the practice booking saved nothing");
+
+      // the end goes to the real board, which no longer sends the doctor to the tutorial
+      await page.click('[data-testid="coach-finish-board"]');
+      await page.waitForURL(`${APP}/`);
+      await page.waitForSelector('[data-testid="add-case-button"]');
+      await page.goto(`${APP}/`, { waitUntil: "networkidle" });
+      assert(page.url() === `${APP}/`, `seen once, the board stays: ${page.url()}`);
+      // วิธีใช้งาน in the account menu opens it again, without the first visit's skip
+      await page.click('[data-testid="user-menu"]');
+      await page.click('[data-testid="account-help-link"]');
+      await page.waitForURL(`${APP}/tutorial`);
+      await page.waitForSelector('[data-testid="coach-welcome"]');
+      assert((await textOf(page, '[data-testid="coach-skip"]')) === "กลับตาราง", "a replay goes back to the board");
+      await page.click('[data-testid="coach-skip"]');
+      await page.waitForURL(`${APP}/`);
+
+      // on a computer: the same steps beside the room column, the full screen card in two columns
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`${APP}/tutorial`, { waitUntil: "networkidle" });
+      await page.click('[data-testid="coach-start"]');
+      const onComputer = await walk(page, {
+        "plan-symbols": "tutorial-plan-symbols-computer.png",
+        "form-hn": "tutorial-hn-computer.png",
+        matched: "tutorial-matched-computer.png",
+      });
+      assert(JSON.stringify(onComputer) === JSON.stringify(walked), `the same steps on a computer: ${onComputer.join(", ")}`);
+      assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === casesBefore, "nothing saved on the computer either");
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+
+      // for doctors only: a nurse is sent back to the board, and has no วิธีใช้งาน
+      const nurse = await contextAs(RP.nurse);
+      const nursePage = await nurse.newPage();
+      await nursePage.goto(`${APP}/tutorial`, { waitUntil: "networkidle" });
+      assert(nursePage.url() === `${APP}/`, `a nurse goes back to the board: ${nursePage.url()}`);
+      assert((await nursePage.locator('[data-testid="account-help-link"]').count()) === 0, "no tutorial link for a nurse");
+      await nurse.close();
       rmSync(NOW_FILE, { force: true });
     });
 

@@ -55,7 +55,7 @@ const NOTE_DIALOG =
   "m-auto max-h-[calc(100dvh-1.5rem)] w-[min(26rem,calc(100%-1.5rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-surface p-0 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px]";
 
 /** A note: a sheet with a folded corner and two lines (drawn for this app on a 24-unit grid, as the Lucide icons). */
-function NoteIcon({ size }: { size: number }) {
+export function NoteIcon({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />

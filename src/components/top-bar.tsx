@@ -17,6 +17,15 @@ const ADMIN_ICON = (
   </svg>
 );
 
+/** Lucide "circle-help" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */
+const HELP_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+    <path d="M12 17h.01" />
+  </svg>
+);
+
 /** Lucide "upload" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */
 const UPLOAD_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -43,6 +52,7 @@ export function TopBar({
   showAccount = true,
   adminHref = null,
   uploadHref = null,
+  helpHref = null,
   datePick = null,
 }: {
   /** The person's full name (claimed user, else the LINE name). */
@@ -63,6 +73,8 @@ export function TopBar({
   adminHref?: string | null;
   /** The HOSxP upload page, shown only to MX and admins. */
   uploadHref?: string | null;
+  /** The doctors' tutorial (วิธีใช้งาน), in the account menu of doctors and admins. */
+  helpHref?: string | null;
   /** When given, the date is a button that opens a calendar to show the board of another day (BoardDatePicker). */
   datePick?: DatePick | null;
 }) {
@@ -199,6 +211,12 @@ export function TopBar({
                 <Link href={adminHref} className="btn btn-ghost mb-2 w-full" data-testid="account-admin-link">
                   {ADMIN_ICON}
                   จัดการระบบ
+                </Link>
+              ) : null}
+              {helpHref ? (
+                <Link href={helpHref} className="btn btn-ghost mb-2 w-full" data-testid="account-help-link">
+                  {HELP_ICON}
+                  วิธีใช้งาน
                 </Link>
               ) : null}
               <SignOutButton showLabel />

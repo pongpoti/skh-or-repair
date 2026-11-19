@@ -11,13 +11,13 @@ describe("adding a name on /admin (lib/user-admin.ts)", () => {
 
   before(async () => {
     await ensureSchema(pool);
-    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.query(
       "INSERT INTO users (first_name, last_name, type, subtype, active) VALUES ('มีอยู่', 'แล้ว', 'RN', 'OR', true), ('ปิด', 'ไปแล้ว', 'PN', 'OR', false)",
     );
   });
   after(async () => {
-    await pool.query("TRUNCATE cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.end();
   });
 
