@@ -4207,6 +4207,8 @@ async function main() {
       assert(page.url() === `${APP}/`, `seen once, the board stays: ${page.url()}`);
       // วิธีใช้งาน in the account menu opens it again, without the first visit's skip
       await page.click('[data-testid="user-menu"]');
+      await page.waitForSelector('[data-testid="account-help-link"]');
+      await ownerShot(page, "board-doctor-menu.png");
       await page.click('[data-testid="account-help-link"]');
       await page.waitForURL(`${APP}/tutorial`);
       await page.waitForSelector('[data-testid="coach-welcome"]');
