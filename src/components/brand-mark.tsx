@@ -11,9 +11,10 @@ export function BrandMark({ className = "h-9 w-9 rounded-[10px]" }: { className?
   );
 }
 
-const SCRUBS = "#7fbfb7";
-const MASK = "#eaf4f5";
-const PLEAT = "#a7c9cf";
+/** The drawing's colours, shared with the tutorial's moving mascot (components/mascot.tsx). */
+export const SCRUBS = "#7fbfb7";
+export const MASK = "#eaf4f5";
+export const PLEAT = "#a7c9cf";
 
 export function Surgeon({ className }: { className?: string }) {
   return (

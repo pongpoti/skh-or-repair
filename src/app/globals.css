@@ -1623,15 +1623,11 @@ dialog[open]::backdrop {
 .coach-say { display: flex; align-items: flex-start; gap: 10px; }
 .coach-mascot {
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: 15px;
   background: var(--brand);
-  animation: coach-bob 2.4s ease-in-out infinite;
-}
-@keyframes coach-bob {
-  50% { transform: translateY(-3px) rotate(-3deg); }
 }
 .coach-title { font-size: 1rem; font-weight: 800; line-height: 1.4; }
 .coach-text { margin-top: 2px; font-size: 0.875rem; line-height: 1.55; color: var(--ink-2); }
@@ -1677,14 +1673,93 @@ dialog[open]::backdrop {
 .coach-card.is-wide { width: min(30rem, 100%); }
 .coach-mascot-big {
   display: block;
-  width: 84px;
-  height: 84px;
+  width: 96px;
+  height: 96px;
   margin: 0 auto 10px;
   overflow: hidden;
-  border-radius: 26px;
+  border-radius: 28px;
   background: var(--brand);
   box-shadow: 0 10px 24px -8px rgb(41 29 20 / 0.5);
-  animation: coach-hop 1.6s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+
+/*
+ * The tutorial's moving surgeon (components/mascot.tsx; Pong, 20 Nov 2026: "Create animated mascot surgeon display
+ * during tutorial"). It pops up into its tile with each bubble, sways, blinks, and its mask moves while it talks (--talk
+ * moves). Moods: wave (hello), point (up at a target above), cheer (both arms up, happy eyes, little jumps). Parts turn
+ * on their own boxes (transform-box: fill-box): the head on its neck, a hand on its wrist.
+ */
+.mascot { display: block; overflow: hidden; animation: mascot-in 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes mascot-in {
+  from { transform: translateY(34%) scale(0.92); }
+}
+.mascot .m-figure,
+.mascot .m-head,
+.mascot .m-eyes,
+.mascot .m-eyes-open,
+.mascot .m-mask,
+.mascot .m-arm,
+.mascot .m-hand { transform-box: fill-box; }
+.mascot .m-head { transform-origin: 50% 100%; animation: mascot-sway 3.4s ease-in-out infinite; }
+@keyframes mascot-sway {
+  0%, 100% { rotate: -2.5deg; }
+  50% { rotate: 2.5deg; }
+}
+.mascot .m-eyes { transition: translate 0.3s ease; }
+.mascot.look-up .m-eyes { translate: 0 -0.8px; }
+.mascot.look-down .m-eyes { translate: 0 0.8px; }
+.mascot .m-eyes-open { transform-origin: 50% 50%; animation: mascot-blink 4.2s ease-in-out 1.2s infinite; }
+@keyframes mascot-blink {
+  0%, 88%, 100% { scale: 1 1; }
+  91% { scale: 1 0.12; }
+  94% { scale: 1 1; }
+}
+.mascot .m-eyes-happy { opacity: 0; }
+.mascot.is-cheer .m-eyes-open { opacity: 0; }
+.mascot.is-cheer .m-eyes-happy { opacity: 1; }
+.mascot:not(.is-idle) .m-mask {
+  transform-origin: 50% 0%;
+  animation: mascot-talk 0.16s ease-in-out 0.3s var(--talk, 10) alternate both;
+}
+@keyframes mascot-talk {
+  from { scale: 1 1; }
+  to { scale: 1.02 1.1; }
+}
+/* Arms wait below the tile and come up with a little overshoot. */
+.mascot .m-arm { transform-origin: 50% 100%; translate: 0 24px; transition: translate 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s; }
+.mascot .m-hand { transform-origin: 50% 100%; }
+.mascot .m-hand-point { display: none; }
+.mascot.is-point .m-hand-open { display: none; }
+.mascot.is-point .m-hand-point { display: inline; }
+.mascot.is-wave .m-arm-r,
+.mascot.is-point .m-arm-r,
+.mascot.is-cheer .m-arm { translate: 0 0; }
+.mascot.is-wave .m-arm-r,
+.mascot.is-point .m-arm-r,
+.mascot.is-cheer .m-arm { animation: mascot-arm-up 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both; }
+@keyframes mascot-arm-up {
+  from { translate: 0 24px; }
+}
+.mascot.is-wave .m-hand { animation: mascot-wave 2.6s ease-in-out 0.55s infinite; }
+@keyframes mascot-wave {
+  0%, 56%, 100% { rotate: 0deg; }
+  8%, 24%, 40% { rotate: 18deg; }
+  16%, 32%, 48% { rotate: -14deg; }
+}
+.mascot.is-point .m-arm-r .m-hand { animation: mascot-jab 0.9s ease-in-out 0.6s infinite; }
+@keyframes mascot-jab {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -1.6px; }
+}
+.mascot.is-cheer .m-arm { translate: 0 -3px; rotate: 10deg; }
+.mascot.is-cheer .m-figure { animation: mascot-jump 0.62s cubic-bezier(0.3, 0, 0.4, 1) 0.2s 4; }
+@keyframes mascot-jump {
+  0%, 100% { translate: 0 0; }
+  45% { translate: 0 -3.2px; }
+}
+.mascot.is-cheer .m-hand { animation: mascot-shake 0.31s ease-in-out 0.2s 8 alternate; }
+@keyframes mascot-shake {
+  from { rotate: -10deg; }
+  to { rotate: 12deg; }
 }
 @keyframes coach-hop {
   0%, 60%, 100% { transform: translateY(0); }
@@ -1814,8 +1889,6 @@ dialog[open]::backdrop {
   .coach-dim,
   .coach-bubble,
   .coach-card,
-  .coach-mascot,
-  .coach-mascot-big,
   .coach-ring,
   .coach-ring.is-nudged,
   .coach-ripple,
@@ -1823,6 +1896,9 @@ dialog[open]::backdrop {
   .coach-hand.is-tap,
   .coach-hand.is-swipe { animation: none; transform: none; }
   .coach-confetti { display: none; }
+  /* The mascot holds still in its pose: arms where the mood puts them, eyes open (happy when cheering). */
+  .mascot,
+  .mascot * { animation: none !important; transition: none !important; }
 }
 
 /* Why book (Pong, 19 Nov 2026): a booked case is ahead of every case nobody booked. The star tip comes back on the

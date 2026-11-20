@@ -4,10 +4,10 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { seeTutorial, type CaseResult } from "@/app/(board)/actions";
-import { Surgeon } from "@/components/brand-mark";
 import { NoteIcon } from "@/components/case-list";
 import { CaseSymbol } from "@/components/case-source";
 import { NoTableIcon } from "@/components/no-table-icon";
+import { Mascot, talkFor, type MascotMood } from "@/components/mascot";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
 import { bookedMessage, checkCase, type AddedCase } from "@/lib/added-cases";
@@ -1012,6 +1012,11 @@ function Coach({
     bubbleStyle = { left: Math.max(12, (view.vw - width) / 2), top: view.vtop + Math.max(12, (view.vh - bubbleHeight) / 2), width };
   }
 
+  // The surgeon cheers with the confetti, points up at a target above the bubble that is to be tapped or filled, and
+  // otherwise talks, for about as long as the bubble's words take.
+  const mood: MascotMood = step.confetti ? "cheer" : side === "below" && mode !== "info" ? "point" : "talk";
+  const talk = talkFor(`${step.title ?? ""}${typeof step.body === "string" ? step.body : " ".repeat(48)}`);
+
   const hole = rect ? { left: rect.x, top: rect.y, width: rect.w, height: rect.h } : null;
   const blockers: CSSProperties[] =
     !rect || mode === "info"
@@ -1057,7 +1062,7 @@ function Coach({
           </div>
           <div className="coach-say">
             <span className="coach-mascot" aria-hidden="true">
-              <Surgeon className="h-full w-full" />
+              <Mascot key={step.id} mood={mood} look={side === "below" ? "up" : side === "above" ? "down" : undefined} talk={talk} />
             </span>
             <div className="min-w-0" aria-live="polite">
               <p className="coach-title" data-testid="coach-title">
@@ -1163,10 +1168,10 @@ function Card({ children, testId, wide = false }: { children: ReactNode; testId:
   );
 }
 
-function BigMascot() {
+function BigMascot({ mood }: { mood: MascotMood }) {
   return (
     <span className="coach-mascot-big" aria-hidden="true">
-      <Surgeon className="h-full w-full" />
+      <Mascot mood={mood} talk={14} />
     </span>
   );
 }
@@ -1174,7 +1179,7 @@ function BigMascot() {
 function WelcomeCard({ first, onStart, onSkip }: { first: boolean; onStart: () => void; onSkip: () => void }) {
   return (
     <Card testId="coach-welcome">
-      <BigMascot />
+      <BigMascot mood="wave" />
       <h2 id="coach-welcome-title" className="coach-card-title">
         ยินดีต้อนรับสู่ ORSKH.APP
       </h2>
@@ -1515,7 +1520,7 @@ function ExamplesCard({ onNext }: { onNext: () => void }) {
 function FinishCard({ onBoard, onAgain }: { onBoard: () => void; onAgain: () => void }) {
   return (
     <Card testId="coach-finish">
-      <BigMascot />
+      <BigMascot mood="cheer" />
       <h2 id="coach-finish-title" className="coach-card-title">
         จบบทเรียนแล้ว เก่งมาก!
       </h2>

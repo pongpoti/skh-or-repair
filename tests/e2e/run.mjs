@@ -4040,6 +4040,8 @@ async function main() {
       assert((await textOf(page, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "a first visit may skip it");
       assert((await page.locator('[data-testid="coach-welcome-tip"]').count()) === 1, "the welcome card says booked cases go first");
       assert((await page.locator(".coach-stages li").count()) === 6, "six chapters on the welcome card, ตัวอย่างจริง among them");
+      // Pong, 20 Nov 2026: "Create animated mascot surgeon display during tutorial": the surgeon waves hello
+      assert((await page.getAttribute('[data-testid="coach-welcome"] [data-testid="mascot"]', "data-mood")) === "wave", "the mascot waves on the welcome card");
       await ownerShot(page, "tutorial-welcome.png");
       await page.click('[data-testid="coach-start"]');
       await waitUntil(async () => (await db.query("SELECT 1 FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId])).rowCount === 1, "starting notes it seen");
@@ -4118,6 +4120,8 @@ async function main() {
         }
       };
       const walked = await walk(page, pictures, {
+        // every bubble has the surgeon in it, talking, pointing or cheering
+        plan: async () => assert(["talk", "point"].includes(await page.getAttribute('[data-testid="coach-bubble"] [data-testid="mascot"]', "data-mood")), "the mascot talks in the bubble"),
         // Pong, 19 Nov 2026: "emphasize the importance of elective booking is to guarantee first priority of OR room queue
         // and promote surgeon to always book": a card before the booking, the queue it shows, and the star tip
         priority: async () => {
@@ -4136,6 +4140,7 @@ async function main() {
           await page.screenshot({ path: join(SCREENS, "tutorial-booked.png") });
           shots.push("tutorial-booked.png");
           assert((await textOf(page, '[data-testid="my-case-hn"]')) === "HN 1234567", "the practice booking in the form's own list");
+          assert((await page.getAttribute('[data-testid="coach-bubble"] [data-testid="mascot"]', "data-mood")) === "cheer", "the mascot cheers the booking");
         },
         mismatch: async () => {
           assert((await page.locator("#or-12 .fp-mismatch").count()) === 1, "the room's ! mark after the upload");
@@ -4191,6 +4196,7 @@ async function main() {
       await page.screenshot({ path: join(SCREENS, "tutorial-finish.png") });
       shots.push("tutorial-finish.png");
       assert((await page.locator('[data-testid="coach-finish-tip"]').count()) === 1, "the end reminds the doctor to book every case");
+      assert((await page.getAttribute('[data-testid="coach-finish"] [data-testid="mascot"]', "data-mood")) === "cheer", "the mascot cheers at the end");
       assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === casesBefore, "the practice booking saved nothing");
 
       // the end goes to the real board, which no longer sends the doctor to the tutorial
