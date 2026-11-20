@@ -39,6 +39,19 @@ const SKIN = { name: "ตัวอย่าง ผิวสวย", title: "พ�
 export const LONG_OPERATION = "Laparoscopic assisted right hemicolectomy with primary anastomosis";
 
 /**
+ * HOSxP's case nobody booked whose name reads as a dressing (lib/dressing.ts): the board puts it in the dressing room by
+ * itself, not general surgery's room (Pong, 20 Nov 2026: "show how app automatically assign some cases to dressing
+ * room").
+ */
+export const AUTO_DRESSING_OPERATION = "I&D abscess, right thigh";
+
+/**
+ * The names the dressing-room card shows with where the board puts each when nobody booked it (the card asks the rule
+ * itself): three dressings, then a graft, which stays in its department's room.
+ */
+export const DRESSING_EXAMPLES = ["I&D abscess", "Debridement", "D/S + VAC", "STSG"] as const;
+
+/**
  * The department the practice booking goes by: the doctor's own, unless it has no room on the day (obstetrics during
  * the repair operates in its own building), when general surgery stands in so the practice booking can be made.
  */
@@ -129,8 +142,9 @@ function hosxp(position: number, hn: string, operation: string, who: { name: str
  *   board before the upload and gone after it.
  * - A plastic surgeon booked a dressing for the scrub nurse; HOSxP lists it (the nurse's portrait).
  * - HOSxP adds, nobody having booked them: a case in the doctor's room (a database icon, after the booked cases, and
- *   the room's "!") and a dressing (the doctor's portrait). Both in hours: MX's upload drops out-of-hours cases, so the
- *   real board never shows one.
+ *   the room's "!") and a general surgery case whose name reads as a dressing, which the board puts in the dressing room
+ *   by itself (the doctor's portrait). Both in hours: MX's upload drops out-of-hours cases, so the real board never
+ *   shows one.
  * - The made-up doctors booked the day before `today` (the real one), before the doctor's own practice booking.
  * - The doctor's own practice booking (`mine`), once made; HOSxP lists it under the HN they typed, with a made-up
  *   patient's name only they see.
@@ -174,7 +188,7 @@ export function tutorialCases({
     hosxp(1, colleagueHn, LONG_OPERATION, KIND, dept),
     hosxp(2, dressingHn, "D/S + VAC, sacral wound", SKIN, "PLASTIC"),
     hosxp(3, hn(), "Excision of lipoma, back", STEADY, dept),
-    hosxp(4, hn(), "I&D abscess, right thigh", STEADY, "GENSX"),
+    hosxp(4, hn(), AUTO_DRESSING_OPERATION, STEADY, "GENSX"),
   ];
   if (mine?.hn) {
     workbook.unshift(

@@ -15,9 +15,12 @@ import { allocationFor, DEPARTMENTS, INSTRUMENT_ROOM, readableTextOn, RECOVERY_R
 import { boardNotices } from "@/lib/board-notices";
 import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
+import { isDressingCase } from "@/lib/placement";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, openRooms, roomLabel } from "@/lib/rooms";
 import {
+  AUTO_DRESSING_OPERATION,
+  DRESSING_EXAMPLES,
   LONG_OPERATION,
   practiceRoom,
   TUTORIAL_COOKIE,
@@ -43,7 +46,7 @@ type Box = { x: number; y: number; w: number; h: number };
 
 type Mode = "info" | "tap" | "do";
 
-type CardKind = "welcome" | "plan-symbols" | "priority" | "row-symbols" | "upload" | "finish";
+type CardKind = "welcome" | "plan-symbols" | "priority" | "row-symbols" | "upload" | "dressing-rule" | "examples" | "finish";
 
 type Step = {
   id: string;
@@ -75,7 +78,7 @@ type Step = {
   confetti?: boolean;
 };
 
-const CHAPTERS = ["แปลนห้อง", "จองห้อง", "ดูการจอง", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "จบบทเรียน"] as const;
+const CHAPTERS = ["แปลนห้อง", "จองห้อง", "ดูการจอง", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "ตัวอย่างจริง", "จบบทเรียน"] as const;
 
 const EXAMPLE_HN = "1234567";
 const EXAMPLE_OPERATION = "Lap chole";
@@ -103,6 +106,11 @@ function myRow(): HTMLElement | null {
 /** The colleague's booking with the long name and the note. */
 function colleagueRow(): HTMLElement | null {
   return caseRows().find((row) => row.querySelector("[data-op-id]")?.textContent === LONG_OPERATION) ?? null;
+}
+
+/** HOSxP's case nobody booked that the board put in the dressing room by its name. */
+function autoDressingRow(): HTMLElement | null {
+  return caseRows().find((row) => row.querySelector("[data-op-id]")?.textContent === AUTO_DRESSING_OPERATION) ?? null;
 }
 
 function floor(roomId: string): Element | null {
@@ -377,6 +385,10 @@ export function Tutorial({
             <RowSymbolsCard onNext={() => go(index + 1)} />
           ) : step.card === "upload" ? (
             <UploadCard day={day} onNext={uploaded} />
+          ) : step.card === "dressing-rule" ? (
+            <DressingRuleCard onNext={() => go(index + 1)} />
+          ) : step.card === "examples" ? (
+            <ExamplesCard onNext={() => go(index + 1)} />
           ) : step.card === "finish" ? (
             <FinishCard onBoard={exit} onAgain={again} />
           ) : null
@@ -743,6 +755,18 @@ function buildSteps({
       skip: () => dressingRoom === null,
       setup: closeRoom,
     },
+    // Pong, 20 Nov 2026: "show how app automatically assign some cases to dressing room".
+    {
+      id: "auto-dressing",
+      chapter: 4,
+      title: "ระบบจัดลงห้องทำแผลให้เอง",
+      body: "เคสนี้ไม่มีใครจอง ชื่อการผ่าตัดมี I&D ระบบจึงจัดลงห้องทำแผล ไม่ใช่ห้องของแผนก",
+      target: autoDressingRow,
+      skip: () => dressingRoom === null,
+      setup: () => (dressingRoom ? openRoom(dressingRoom) : undefined),
+      scroll: "nearest",
+    },
+    { id: "dressing-rule", chapter: 4, card: "dressing-rule" },
     {
       id: "doers",
       chapter: 4,
@@ -753,18 +777,23 @@ function buildSteps({
       setup: () => (dressingRoom ? openRoom(dressingRoom) : undefined),
     },
 
-    // 6. The end.
-    { id: "row-symbols", chapter: 5, card: "row-symbols" },
+    // 6. The real days before (Pong, 20 Nov 2026: "note to user that user can view previous real example of in-hours
+    // elective case assignment (ตัวอย่างเคส elective ในเวลา) on month Jan to Oct 2026 by swiping layout or choose date
+    // from calendar, the OR layout will assume to be first half of repair phase").
+    { id: "examples", chapter: 5, card: "examples", setup: closeRoom },
+
+    // 7. The end.
+    { id: "row-symbols", chapter: 6, card: "row-symbols" },
     {
       id: "help",
-      chapter: 5,
+      chapter: 6,
       title: "ดูบทเรียนอีกครั้ง",
       body: "แตะรูปโปรไฟล์ แล้วเลือก วิธีใช้งาน",
       target: () => find("[data-testid=user-menu]"),
       round: true,
       setup: closeRoom,
     },
-    { id: "finish", chapter: 5, card: "finish", confetti: true },
+    { id: "finish", chapter: 6, card: "finish", confetti: true },
   ];
 }
 
@@ -1152,7 +1181,7 @@ function WelcomeCard({ first, onStart, onSkip }: { first: boolean; onStart: () =
       <p className="coach-card-text">มาลองจองห้องผ่าตัดในตารางตัวอย่างกัน ใช้เวลาราว 2 นาที เคสทั้งหมดเป็นเคสสมมติ ไม่ได้บันทึกจริง</p>
       <Tip testId="coach-welcome-tip">เคสที่จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ</Tip>
       <ol className="coach-stages">
-        {CHAPTERS.slice(0, 5).map((name, at) => (
+        {CHAPTERS.slice(0, -1).map((name, at) => (
           <li key={name}>
             <span className="coach-stage-no">{at + 1}</span>
             {name}
@@ -1361,6 +1390,122 @@ function UploadCard({ day, onNext }: { day: string; onNext: () => void }) {
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
           ดูตารางหลังอัปโหลด
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+/** Lucide "arrow-right" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */
+function ArrowIcon() {
+  return (
+    <svg className="coach-route-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </svg>
+  );
+}
+
+/**
+ * How the board puts HOSxP's cases nobody booked in the dressing room (Pong, 20 Nov 2026: "show how app automatically
+ * assign some cases to dressing room"): by the operation's name alone, whatever the department (lib/dressing.ts). Each
+ * example's room is asked of the rule itself, so the card says what the board does. A booked case goes where its doctor
+ * chose on the form, whatever its name.
+ */
+function DressingRuleCard({ onNext }: { onNext: () => void }) {
+  return (
+    <Card testId="coach-dressing-rule">
+      <p className="coach-card-eyebrow">ระบบจัดให้เอง</p>
+      <h2 id="coach-dressing-rule-title" className="coach-card-title">
+        เคสทำแผล ไปห้องทำแผลเอง
+      </h2>
+      <p className="coach-card-text">เคสใน HOSxP ที่ไม่มีใครจอง ระบบดูจากชื่อการผ่าตัด ถ้าเป็นงานทำแผล จัดลงห้องทำแผลให้ ทุกแผนก</p>
+      <ul className="coach-route" data-testid="coach-dressing-examples" aria-label="ตัวอย่างชื่อการผ่าตัด และห้องที่ระบบจัดให้">
+        {DRESSING_EXAMPLES.map((name) => {
+          const dressing = isDressingCase(name);
+          return (
+            <li key={name} data-dressing={dressing ? "true" : "false"}>
+              <span className="coach-route-op">{name}</span>
+              <ArrowIcon />
+              <span className="coach-route-to">
+                {dressing ? <Chip dept={DEPARTMENTS.INFECT} /> : <span className="coach-chip is-dept">แผนก</span>}
+                {dressing ? "ห้องทำแผล" : "ห้องแผนก"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="coach-card-note">คำที่ระบบดู เช่น dressing, D/S, VAC, debridement, I&amp;D, ทำแผล</p>
+      <p className="coach-card-note mt-1">เคสที่จองไว้ ลงห้องตามที่แพทย์เลือกตอนจอง</p>
+      <div className="coach-card-actions">
+        <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
+          เข้าใจแล้ว
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * The real days before (Pong, 20 Nov 2026: "note to user that user can view previous real example of in-hours elective
+ * case assignment (ตัวอย่างเคส elective ในเวลา) on month Jan to Oct 2026 by swiping layout or choose date from
+ * calendar, the OR layout will assume to be first half of repair phase"). HOSxP's lists of January to October 2026 are
+ * on the board's past days (admin import, lib/past-lists.ts: cases booked ahead, in hours), each drawn on the first
+ * half's plan (lib/repair.ts repairOn).
+ */
+function ExamplesCard({ onNext }: { onNext: () => void }) {
+  return (
+    <Card testId="coach-examples">
+      <span className="coach-history" aria-hidden="true">
+        <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {/* Lucide "history" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+          <path d="M3 3v5h5" />
+          <path d="M12 7v5l4 2" />
+        </svg>
+      </span>
+      <p className="coach-card-eyebrow">ตารางจริงย้อนหลัง</p>
+      <h2 id="coach-examples-title" className="coach-card-title">
+        ดูตัวอย่างเคส elective ในเวลา
+      </h2>
+      <p className="coach-card-text">เปิดดูวันใดก็ได้ใน ม.ค.–ต.ค. 2569 ว่าเคส elective ในเวลาของวันนั้น ลงห้องไหน</p>
+      <ol className="coach-stages" data-testid="coach-examples-ways">
+        <li>
+          <span className="coach-stage-no" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {/* Lucide "move-horizontal" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
+              <path d="m18 8 4 4-4 4" />
+              <path d="M2 12h20" />
+              <path d="m6 8-4 4 4 4" />
+            </svg>
+          </span>
+          ปัดแปลนไปทางขวา ย้อนทีละวัน
+        </li>
+        <li>
+          <span className="coach-stage-no" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              {/* Lucide "calendar-days" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
+              <path d="M8 2v4" />
+              <path d="M16 2v4" />
+              <rect width="18" height="18" x="3" y="4" rx="2" />
+              <path d="M3 10h18" />
+              <path d="M8 14h.01" />
+              <path d="M12 14h.01" />
+              <path d="M16 14h.01" />
+              <path d="M8 18h.01" />
+              <path d="M12 18h.01" />
+              <path d="M16 18h.01" />
+            </svg>
+          </span>
+          แตะวันที่ด้านบน เลือกจากปฏิทิน
+        </li>
+      </ol>
+      <p className="coach-card-note" data-testid="coach-examples-plan">
+        วันย้อนหลังแสดงแปลนห้องช่วงซ่อมครึ่งแรกเสมอ
+      </p>
+      <div className="coach-card-actions">
+        <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
+          เข้าใจแล้ว
         </button>
       </div>
     </Card>

@@ -1898,6 +1898,50 @@ dialog[open]::backdrop {
 }
 .coach-queue li.is-booked .coach-queue-tag { background: var(--live); color: #fff; }
 .coach-queue li.is-last .coach-queue-tag { background: var(--line); color: var(--ink-2); }
+
+/* How the board puts a case nobody booked in the dressing room by its name (Pong, 20 Nov 2026): a name, an arrow, the
+   room. The real days before: a quiet history mark in the brand's tint. */
+.coach-route {
+  margin: 12px auto 0;
+  display: grid;
+  gap: 6px;
+  max-width: 20rem;
+  text-align: left;
+}
+.coach-route li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+}
+.coach-route-op { flex: 1; min-width: 0; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.coach-route-arrow { flex-shrink: 0; color: var(--ink-3); }
+.coach-route-to {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  width: 7.25rem;
+  font-weight: 600;
+}
+.coach-route .coach-chip { min-width: 44px; }
+.coach-chip.is-dept { background: var(--line-strong); color: var(--ink); }
+.coach-history {
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 8px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--brand-tint);
+  color: var(--brand);
+}
 @media (prefers-reduced-motion: reduce) {
   .coach-trophy { animation: none; }
 }
