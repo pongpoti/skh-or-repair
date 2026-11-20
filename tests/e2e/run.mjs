@@ -3942,6 +3942,8 @@ async function main() {
       const box = await card.boundingBox();
       assert(Math.abs(box.x + box.width / 2 - view.width / 2) < 1.5 && Math.abs(box.y + box.height / 2 - view.height / 2) < 1.5, `centred: ${JSON.stringify(box)}`);
       assert(box.x >= 7 && box.x <= 9, `8px from a phone's sides: ${box.x}`);
+      // Pong, 20 Nov 2026: "floating card height should expand about 2/3 of viewport height", a short list too
+      assert(Math.abs(box.height - view.height * 0.67) < 2, `two thirds of the screen's height: ${box.height} of ${view.height}`);
       assert(await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="room-full"] ol')).overflowY === "auto"), "the list scrolls up and down");
       await ownerShot(page, "room-full-card.png");
       // Escape closes the card only: the sheet is still open behind it, the focus back on the button
@@ -3967,6 +3969,7 @@ async function main() {
       const columns = await page.evaluate(() => getComputedStyle(document.querySelector('[data-testid="room-full"] ol')).gridTemplateColumns.split(" ").length);
       assert(columns === 2, `two columns on a computer: ${columns}`);
       assert((await card.boundingBox()).width === 1024, "64rem wide");
+      assert(Math.abs((await card.boundingBox()).height - 800 * 0.67) < 2, "two thirds of a computer's screen too");
       await page.keyboard.press("Escape");
       await card.waitFor({ state: "detached" });
       await page.setViewportSize(view);
@@ -4036,6 +4039,9 @@ async function main() {
       assert((await page.locator('[data-testid="tutorial-notice"]').count()) === 1, "a badge says the cases are made up");
       assert((await textOf(page, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "a first visit may skip it");
       assert((await page.locator('[data-testid="coach-welcome-tip"]').count()) === 1, "the welcome card says booked cases go first");
+      assert((await page.locator(".coach-stages li").count()) === 6, "six chapters on the welcome card, ตัวอย่างจริง among them");
+      // Pong, 20 Nov 2026: "Create animated mascot surgeon display during tutorial": the surgeon waves hello
+      assert((await page.getAttribute('[data-testid="coach-welcome"] [data-testid="mascot"]', "data-mood")) === "wave", "the mascot waves on the welcome card");
       await ownerShot(page, "tutorial-welcome.png");
       await page.click('[data-testid="coach-start"]');
       await waitUntil(async () => (await db.query("SELECT 1 FROM tutorial_seen WHERE user_id = $1", [RP.drY.userId])).rowCount === 1, "starting notes it seen");
@@ -4067,7 +4073,10 @@ async function main() {
         mismatch: "tutorial-mismatch.png",
         matched: "tutorial-matched.png",
         unfold: "tutorial-unfold.png",
+        "auto-dressing": "tutorial-auto-dressing.png",
+        "dressing-rule": "tutorial-dressing-rule.png",
         doers: "tutorial-dressing.png",
+        examples: "tutorial-examples.png",
         "row-symbols": "tutorial-row-symbols.png",
       };
       /** Goes through the steps from the welcome card to the end, with `pictures` (step id: file) and `checks` (step id: fn). */
@@ -4111,6 +4120,8 @@ async function main() {
         }
       };
       const walked = await walk(page, pictures, {
+        // every bubble has the surgeon in it, talking, pointing or cheering
+        plan: async () => assert(["talk", "point"].includes(await page.getAttribute('[data-testid="coach-bubble"] [data-testid="mascot"]', "data-mood")), "the mascot talks in the bubble"),
         // Pong, 19 Nov 2026: "emphasize the importance of elective booking is to guarantee first priority of OR room queue
         // and promote surgeon to always book": a card before the booking, the queue it shows, and the star tip
         priority: async () => {
@@ -4129,6 +4140,7 @@ async function main() {
           await page.screenshot({ path: join(SCREENS, "tutorial-booked.png") });
           shots.push("tutorial-booked.png");
           assert((await textOf(page, '[data-testid="my-case-hn"]')) === "HN 1234567", "the practice booking in the form's own list");
+          assert((await page.getAttribute('[data-testid="coach-bubble"] [data-testid="mascot"]', "data-mood")) === "cheer", "the mascot cheers the booking");
         },
         mismatch: async () => {
           assert((await page.locator("#or-12 .fp-mismatch").count()) === 1, "the room's ! mark after the upload");
@@ -4142,13 +4154,49 @@ async function main() {
           // MX's upload drops out-of-hours cases, so the tutorial shows none (the real board never does)
           assert((await page.locator('.room-sheet .case-row[data-flag="unbooked"] .badge-warning').count()) === 0, "HOSxP's unbooked case is in hours");
         },
+        // Pong, 20 Nov 2026: "show how app automatically assign some cases to dressing room": HOSxP's general surgery
+        // case nobody booked is in OR 10 by its name, lit by the coach, then a card on the rule
+        "auto-dressing": async () => {
+          assert(await page.locator("#or-10.is-selected").count() === 1, "the dressing room is open");
+          // the rows inside the spotlight, once it has settled on one (the list may still be scrolling to it)
+          const lit = await (
+            await page.waitForFunction(() => {
+              const hole = document.querySelector(".coach-hole")?.getBoundingClientRect();
+              if (!hole) return null;
+              const rows = Array.from(document.querySelectorAll("aside[data-room-view] li.case-row")).filter((row) => {
+                const box = row.getBoundingClientRect();
+                return box.height > 0 && box.top >= hole.top - 1 && box.bottom <= hole.bottom + 1;
+              });
+              return rows.length === 1 ? rows.map((row) => [row.querySelector("[data-op-id]")?.textContent, row.dataset.source, row.dataset.flag ?? null]) : null;
+            }, null, { timeout: 5000 })
+          ).jsonValue();
+          assert(JSON.stringify(lit) === JSON.stringify([["I&D abscess, right thigh", "hosxp", null]]), `the I&D case nobody booked, with no mark: ${JSON.stringify(lit)}`);
+        },
+        "dressing-rule": async () => {
+          const examples = await page.$$eval('[data-testid="coach-dressing-examples"] li', (items) => items.map((li) => [li.querySelector(".coach-route-op")?.textContent, li.dataset.dressing]));
+          assert(
+            JSON.stringify(examples) === JSON.stringify([["I&D abscess", "true"], ["Debridement", "true"], ["D/S + VAC", "true"], ["STSG", "false"]]),
+            `three dressings, then a graft that stays in its department's room: ${JSON.stringify(examples)}`,
+          );
+        },
         doers: async () => assert(JSON.stringify(await rowIcons(page)) === '["scrub","surgeon"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(page))}`),
+        // Pong, 20 Nov 2026: "note to user that user can view previous real example of in-hours elective case assignment
+        // (ตัวอย่างเคส elective ในเวลา) on month Jan to Oct 2026 by swiping layout or choose date from calendar, the OR
+        // layout will assume to be first half of repair phase"
+        examples: async () => {
+          assert((await textOf(page, "#coach-examples-title")) === "ดูตัวอย่างเคส elective ในเวลา", "Pong's words as the title");
+          assert((await textOf(page, '[data-testid="coach-examples"] .coach-card-text')).includes("ม.ค.–ต.ค. 2569"), "January to October 2026");
+          assert((await page.locator('[data-testid="coach-examples-ways"] li').count()) === 2, "swipe the plan, or the calendar");
+          assert((await textOf(page, '[data-testid="coach-examples-plan"]')).includes("ช่วงซ่อมครึ่งแรก"), "a past day shows the first half's plan");
+        },
       });
+      assert(walked.indexOf("examples") > walked.indexOf("doers") && walked.indexOf("examples") < walked.indexOf("finish"), `the real days before, after the dressing room: ${walked.join(", ")}`);
       assert(walked.indexOf("priority") >= 0 && walked.indexOf("priority") + 1 === walked.indexOf("book"), `the priority card just before the booking: ${walked.join(", ")}`);
       await page.waitForTimeout(700);
       await page.screenshot({ path: join(SCREENS, "tutorial-finish.png") });
       shots.push("tutorial-finish.png");
       assert((await page.locator('[data-testid="coach-finish-tip"]').count()) === 1, "the end reminds the doctor to book every case");
+      assert((await page.getAttribute('[data-testid="coach-finish"] [data-testid="mascot"]', "data-mood")) === "cheer", "the mascot cheers at the end");
       assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === casesBefore, "the practice booking saved nothing");
 
       // the end goes to the real board, which no longer sends the doctor to the tutorial

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AddedCase } from "./added-cases.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
-import { LONG_OPERATION, practiceRoom, practiceSubtype, TUTORIAL_ME, tutorialBoard } from "./tutorial.ts";
+import { isDressingCase } from "./placement.ts";
+import { AUTO_DRESSING_OPERATION, DRESSING_EXAMPLES, LONG_OPERATION, practiceRoom, practiceSubtype, TUTORIAL_ME, tutorialBoard } from "./tutorial.ts";
 
 const REPAIR = DEFAULT_REPAIR_PERIODS;
 const DAY = "2026-11-20"; // a Friday in the first half: OR 9 EMER, 10 D/S, 11 mixed, 12 GENSX, 13 ORTHO
@@ -71,6 +72,28 @@ test("after the upload: handshakes, HOSxP's unbooked case with its mark, the dre
   assert.deepEqual(board.mismatchByRoom, { "or-12": 1 }, "the room's ! mark");
   assert.deepEqual(rowsIn(board, "or-13"), [], "the booking HOSxP does not list is gone");
   assert.deepEqual(rowsIn(board, "or-10").map((row) => row.doneBy), ["scrub", "surgeon"]);
+});
+
+test("the dressing room by name: HOSxP's general surgery case nobody booked goes there by itself, and the card's examples", () => {
+  // Pong, 20 Nov 2026: "show how app automatically assign some cases to dressing room"
+  for (const subtype of ["GENSX", "ORTHO", "URO"]) {
+    const board = tutorialBoard({ date: DAY, today: TODAY, periods: REPAIR, doctor: { ...DOCTOR, subtype }, mine: null, phase: "after" });
+    const auto = board.rows.filter((row) => row.procedure === AUTO_DRESSING_OPERATION);
+    assert.equal(auto.length, 1, subtype);
+    assert.deepEqual([auto[0].roomId, auto[0].source, auto[0].flag ?? null, auto[0].doneBy], ["or-10", "hosxp", null, "surgeon"], `${subtype}: in the dressing room, not general surgery's OR 12, with no mark`);
+    assert.equal(board.mismatchByRoom["or-10"] ?? 0, 0, `${subtype}: no "!" on the dressing room`);
+  }
+  // the card asks the rule; what it teaches: three dressings, and a graft stays in its department's room
+  assert.deepEqual(
+    DRESSING_EXAMPLES.map((name) => [name, isDressingCase(name)]),
+    [
+      ["I&D abscess", true],
+      ["Debridement", true],
+      ["D/S + VAC", true],
+      ["STSG", false],
+    ],
+  );
+  assert.ok(isDressingCase(AUTO_DRESSING_OPERATION), "the I&D the bubble names");
 });
 
 test("an orthopaedic surgeon's day: the case HOSxP drops is general surgery's, and the made-up HNs avoid the doctor's", () => {
