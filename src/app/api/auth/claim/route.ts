@@ -4,7 +4,7 @@ import { noteAuthorized } from "@/lib/authz";
 import { clearCookie, sessionTtlFor, setSessionCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { sessionSecret, telegramEnabled } from "@/lib/env";
-import { guardPost, json, MSG } from "@/lib/http";
+import { guardPost, json, MSG, phoneSignInClosed } from "@/lib/http";
 import { logEvent } from "@/lib/otp";
 import { clientIp, readJsonBody, userAgent } from "@/lib/security";
 import { announceClaim, ensureWebhook } from "@/lib/telegram";
@@ -30,6 +30,8 @@ function userIdOf(v: unknown): string | null {
 export async function POST(req: NextRequest) {
   const blocked = guardPost(req);
   if (blocked) return blocked;
+  const closed = phoneSignInClosed();
+  if (closed) return closed;
   const grant = await accessGrantFor(req);
   if (grant instanceof NextResponse) return grant;
 

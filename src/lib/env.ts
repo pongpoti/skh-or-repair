@@ -82,6 +82,16 @@ export function allowedPhonesRaw(): string {
   return read("ALLOWED_PHONES") ?? "";
 }
 
+/**
+ * Whether nurses and assistants (RN, PN, PCA) may sign in by an SMS code. The pre-release is for doctors only (Pong,
+ * 20 Nov 2026: "I gonna pre-release for DR only. Disable login process (select, input phone number) for non DR."), so
+ * it is closed unless PHONE_SIGNIN=open: the position step (/login/verify) leaves only the doctors' way in, and the SMS
+ * code and name-claim APIs refuse. A LINE account that already holds a name keeps signing in as before.
+ */
+export function phoneSignInOpen(): boolean {
+  return read("PHONE_SIGNIN")?.toLowerCase() === "open";
+}
+
 export function otpPepper(): string {
   const c = new Collector();
   const v = c.need("OTP_PEPPER", (s) => s.length >= 16);

@@ -3,7 +3,8 @@
 // (Chromium). The main app runs in provider mode (SMS_PROVIDER=deesmsx against tests/mock-deesmsx.mjs through
 // DEESMSX_API_URL); a second app on the same build runs in local file mode (SMS_PROVIDER=file) near the end.
 // Configurable so several copies can run in parallel:
-//   E2E_APP_PORT (3100)  E2E_FILE_APP_PORT (3101)  E2E_GATE_APP_PORT (3103)  E2E_LINE_PORT (4010)  E2E_SMS_PORT (4011)
+//   E2E_APP_PORT (3100)  E2E_FILE_APP_PORT (3101)  E2E_GATE_APP_PORT (3103)  E2E_DR_ONLY_APP_PORT (3104)
+//   E2E_LINE_PORT (4010)  E2E_SMS_PORT (4011)
 //   E2E_DATABASE_URL (postgres://postgres:postgres@localhost:5432/orskh_e2e)
 //   E2E_OUTBOX_DIR (tmp)  E2E_SCREENS_DIR (tmp)  E2E_SKIP_BUILD=1 (reuse .next)
 //   ALLOW_REMOTE_TEST_DB=1 (allow a non-local E2E_DATABASE_URL; see tests/db-guard.mjs)
@@ -40,6 +41,7 @@ const APP_PORT = Number(process.env.E2E_APP_PORT ?? 3100);
 const FILE_APP_PORT = Number(process.env.E2E_FILE_APP_PORT ?? 3101);
 const DOWN_APP_PORT = Number(process.env.E2E_DOWN_APP_PORT ?? 3102);
 const GATE_APP_PORT = Number(process.env.E2E_GATE_APP_PORT ?? 3103);
+const DR_ONLY_APP_PORT = Number(process.env.E2E_DR_ONLY_APP_PORT ?? 3104);
 const LINE_PORT = Number(process.env.E2E_LINE_PORT ?? 4010);
 const SMS_PORT = Number(process.env.E2E_SMS_PORT ?? 4011);
 const DB_URL = process.env.E2E_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/orskh_e2e";
@@ -52,6 +54,7 @@ const APP = `http://localhost:${APP_PORT}`;
 const FILE_APP = `http://localhost:${FILE_APP_PORT}`;
 const DOWN_APP = `http://localhost:${DOWN_APP_PORT}`;
 const GATE_APP = `http://localhost:${GATE_APP_PORT}`;
+const DR_ONLY_APP = `http://localhost:${DR_ONLY_APP_PORT}`;
 const LINE = `http://127.0.0.1:${LINE_PORT}`;
 const SMS = `http://127.0.0.1:${SMS_PORT}`;
 
@@ -122,6 +125,7 @@ const SUB_P = "U0000000000000000000000000000000p"; // PHONE_DOC's LINE account
 const SUB_Q = "U0000000000000000000000000000000q";
 const SUB_R = "U0000000000000000000000000000000r";
 const SUB_DOC = "U000000000000000000000000000000dc";
+const SUB_PRE = "U000000000000000000000000000000pr"; // a nurse trying the doctors-only pre-release
 // AUTH_ADMIN_LINE_IDS: admins are listed by LINE user id, the session's sub
 const ADMIN_SUB = "U00000000000000000000000000000ad1";
 const TG_TOKEN = "123456789:AAe2eTOKENe2eTOKENe2eTOKEN_test";
@@ -609,6 +613,7 @@ async function main() {
     await assertPortFree(FILE_APP_PORT, undefined, "E2E_FILE_APP_PORT");
     await assertPortFree(DOWN_APP_PORT, undefined, "E2E_DOWN_APP_PORT");
     await assertPortFree(GATE_APP_PORT, undefined, "E2E_GATE_APP_PORT");
+    await assertPortFree(DR_ONLY_APP_PORT, undefined, "E2E_DR_ONLY_APP_PORT");
     await assertPortFree(LINE_PORT, "127.0.0.1", "E2E_LINE_PORT");
     await assertPortFree(SMS_PORT, "127.0.0.1", "E2E_SMS_PORT");
   };
@@ -639,6 +644,8 @@ async function main() {
     LINE_API_URL: LINE,
     SESSION_SECRET,
     OTP_PEPPER,
+    // nurses and assistants sign in by number here; the doctors-only pre-release (unset, as on Vercel) has its own test
+    PHONE_SIGNIN: "open",
     // break-glass only: everyone else claims a name from the list (any common way of writing the number)
     ALLOWED_PHONES: ` ${fmt(BREAK_GLASS)} `,
     DATABASE_URL: DB_URL,
@@ -687,6 +694,7 @@ async function main() {
   let fileApp = null; // the local file mode app, started by its test
   let downApp = null; // the app with its database down, started by its test
   let gateApp = null; // the app with the device gate on (as on Vercel), started by its test
+  let drOnlyApp = null; // the app without PHONE_SIGNIN (the doctors-only pre-release), started by its test
   try {
     await waitFor(`${LINE}/__control/health`, line);
     await waitFor(`${SMS}/__control/health`, sms);
@@ -4207,6 +4215,8 @@ async function main() {
       assert(page.url() === `${APP}/`, `seen once, the board stays: ${page.url()}`);
       // วิธีใช้งาน in the account menu opens it again, without the first visit's skip
       await page.click('[data-testid="user-menu"]');
+      await page.waitForSelector('[data-testid="account-help-link"]');
+      await ownerShot(page, "board-doctor-menu.png");
       await page.click('[data-testid="account-help-link"]');
       await page.waitForURL(`${APP}/tutorial`);
       await page.waitForSelector('[data-testid="coach-welcome"]');
@@ -4528,9 +4538,82 @@ async function main() {
       await ctx.close();
     });
 
+    await t("doctors-only pre-release (Pong, 20 Nov 2026): without PHONE_SIGNIN only doctors start signing in; no SMS form, code or name claim for anyone else", async () => {
+      // the same build without PHONE_SIGNIN, as on Vercel
+      const preEnv = { ...appEnv, APP_URL: DR_ONLY_APP };
+      delete preEnv.PHONE_SIGNIN;
+      drOnlyApp = startProcess("app-dr-only", ["node_modules/next/dist/bin/next", "start", "-p", String(DR_ONLY_APP_PORT)], preEnv);
+      await waitFor(`${DR_ONLY_APP}/login`, drOnlyApp);
+      const sentBefore = (await smsIssued()).length;
+      await setIdentity({ sub: SUB_PRE, name: "พยาบาลลองเข้า" });
+      const ctx = await newContext(browser);
+      const page = await ctx.newPage();
+      await lineLogin(page, undefined, DR_ONLY_APP);
+      assert(new URL(page.url()).pathname === "/login/verify", `at ${page.url()}`);
+      await page.waitForSelector('[data-testid="verify-types"]');
+
+      // doctors keep their link; the other positions are on the list, greyed and inert, and a line says why
+      const types = await page.$$eval('[data-testid^="verify-type-"]', (els) =>
+        els.map((e) => [e.dataset.testid, e.tagName, e.getAttribute("href"), e.matches(":disabled"), e.textContent.trim()]),
+      );
+      assert(
+        JSON.stringify(types) ===
+          JSON.stringify([
+            ["verify-type-DR", "A", "/login/doctor", false, "แพทย์ยืนยันตัวตนด้วยรหัสทางอีเมล"],
+            ["verify-type-RN", "BUTTON", null, true, "พยาบาลยังไม่เปิดให้ใช้"],
+            ["verify-type-PN", "BUTTON", null, true, "ผู้ช่วยพยาบาลยังไม่เปิดให้ใช้"],
+            ["verify-type-PCA", "BUTTON", null, true, "พนักงานช่วยเหลือคนไข้ยังไม่เปิดให้ใช้"],
+          ]),
+        `positions: ${JSON.stringify(types)}`,
+      );
+      assert((await plainText(page, '[data-testid="doctors-only"]')) === "ช่วงทดลองใช้ เปิดให้แพทย์ก่อน", "the line that says why");
+      await page.click('[data-testid="verify-type-RN"]', { force: true });
+      await sleep(300);
+      assert(new URL(page.url()).search === "" && (await page.locator("#phone").count()) === 0, `a tap on พยาบาล does nothing: ${page.url()}`);
+      await noLineLogin(page, "/login/verify (doctors only)");
+      await touchTargets(page, "/login/verify (doctors only)");
+      await shoot(page, "verify-doctors-only", { narrow: true });
+
+      // the SMS form by address: the position step again
+      await page.goto(`${DR_ONLY_APP}/login/verify?as=RN`);
+      await page.waitForSelector('[data-testid="verify-types"]');
+      assert(new URL(page.url()).pathname === "/login/verify" && new URL(page.url()).search === "", `?as=RN -> ${page.url()}`);
+      assert((await page.locator("#phone").count()) === 0, "no number field");
+
+      // the APIs refuse before anything else: no code is sent, checked or turned into a name
+      const call = (path, method, body) =>
+        page.evaluate(
+          async ([p, m, b]) => {
+            const r = await fetch(p, { method: m, headers: b ? { "content-type": "application/json" } : {}, body: b ? JSON.stringify(b) : undefined });
+            return { status: r.status, body: await r.json() };
+          },
+          [path, method, body],
+        );
+      const refused = { error: "ช่วงทดลองใช้ เปิดให้แพทย์ก่อน", reason: "doctors_only" };
+      for (const [path, method, body] of [
+        ["/api/auth/otp/send", "POST", { phone: "0900000099" }],
+        ["/api/auth/otp/verify", "POST", { phone: "0900000099", code: "123456", as: "RN" }],
+        ["/api/auth/claim", "POST", { userId: 1 }],
+        ["/api/auth/claim/list?type=RN", "GET", null],
+      ]) {
+        const r = await call(path, method, body);
+        assert(r.status === 403 && JSON.stringify(r.body) === JSON.stringify(refused), `${method} ${path}: ${r.status} ${JSON.stringify(r.body)}`);
+      }
+      assert((await smsIssued()).length === sentBefore, "no SMS was sent");
+
+      // the name page leads back to the start, and doctors still go on to the email sign-in
+      await page.goto(`${DR_ONLY_APP}/login/claim?type=RN`);
+      await page.waitForSelector('[data-testid="verify-types"]');
+      assert(new URL(page.url()).pathname === "/login/verify", `/login/claim -> ${page.url()}`);
+      await page.click('[data-testid="verify-type-DR"]');
+      await page.waitForURL(`${DR_ONLY_APP}/login/doctor`);
+      await page.waitForSelector('[data-testid="doctor-pick-step"]');
+      await ctx.close();
+    });
+
     await t("no OTP code, deeSMSX token, key, HN or workbook row appears in server logs", async () => {
       assert(issuedCodes.length >= 20, `codes and tokens collected: ${issuedCodes.length}`);
-      for (const proc of [app, fileApp, downApp, gateApp].filter(Boolean)) {
+      for (const proc of [app, fileApp, downApp, gateApp, drOnlyApp].filter(Boolean)) {
         const log = proc.log();
         for (const code of issuedCodes) assert(!log.includes(code), `code or token found in the ${proc.name} log`);
         assert(!log.includes(SESSION_SECRET) && !log.includes(OTP_PEPPER) && !log.includes(TG_TOKEN), `secret in the ${proc.name} log`);

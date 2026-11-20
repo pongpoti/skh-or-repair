@@ -15,6 +15,7 @@ export function setTestEnv(): void {
   delete process.env.VERCEL_ENV;
   delete process.env.AUTH_LINE_ID;
   delete process.env.AUTH_LINE_SECRET;
+  delete process.env.PHONE_SIGNIN;
   Object.assign(process.env, {
     APP_URL: "http://localhost:3999",
     SESSION_SECRET: TEST_SESSION_SECRET,

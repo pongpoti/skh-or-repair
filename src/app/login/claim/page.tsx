@@ -4,6 +4,7 @@ import { VerifiedIdentity } from "@/components/verified-identity";
 import { getAccessGrant, getUser } from "@/lib/auth/server";
 import { isListedUser } from "@/lib/authz";
 import { db } from "@/lib/db";
+import { phoneSignInOpen } from "@/lib/env";
 import { formatPhone } from "@/lib/phone";
 import { claimUndoAvailable } from "@/lib/telegram";
 import { isPhoneType } from "@/lib/user-labels";
@@ -21,6 +22,8 @@ export const dynamic = "force-dynamic";
  */
 export default async function ClaimPage({ searchParams }: { searchParams: Promise<{ type?: string | string[] }> }) {
   if (await getUser()) redirect("/");
+  // Closed for the doctors-only pre-release (lib/env.ts phoneSignInOpen): no names to claim, back to the start.
+  if (!phoneSignInOpen()) redirect("/login");
   const grant = await getAccessGrant();
   if (!grant) redirect("/login");
   const phone = formatPhone(grant.phone);
