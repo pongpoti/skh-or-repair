@@ -1,7 +1,7 @@
 import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
-import { appUrl } from "./env";
-import { CLAIM_BLOCKED, CLAIM_BLOCKED_LINE } from "./claim-text";
+import { appUrl, phoneSignInOpen } from "./env";
+import { CLAIM_BLOCKED, CLAIM_BLOCKED_LINE, DOCTORS_ONLY } from "./claim-text";
 import { isJsonRequest, isSameOrigin } from "./security";
 
 export const MSG = {
@@ -43,6 +43,8 @@ export const MSG = {
   emailLineHasName: "LINE นี้ใช้กับชื่ออื่นแล้ว ติดต่อผู้ดูแล",
   // the doctor's name is held by another LINE account: only an administrator can free it
   emailTaken: "ชื่อนี้มีคนใช้แล้ว ถ้าเป็นชื่อคุณ ติดต่อผู้ดูแล",
+  // sign-in by number is closed for the doctors-only pre-release (lib/env.ts phoneSignInOpen)
+  doctorsOnly: DOCTORS_ONLY,
 } as const;
 
 export function json(body: unknown, status = 200, init?: { headers?: Record<string, string> }): NextResponse {
@@ -50,6 +52,14 @@ export function json(body: unknown, status = 200, init?: { headers?: Record<stri
     status,
     headers: { "Cache-Control": "no-store", ...(init?.headers ?? {}) },
   });
+}
+
+/**
+ * 403 while sign-in by number is closed (the doctors-only pre-release, lib/env.ts phoneSignInOpen), else null: the SMS
+ * code routes and the name claim routes answer this before anything else, so no SMS is sent and no name is claimed.
+ */
+export function phoneSignInClosed(): NextResponse | null {
+  return phoneSignInOpen() ? null : json({ error: MSG.doctorsOnly, reason: "doctors_only" }, 403);
 }
 
 /** Origin of the app if configured, else the request's own origin (used only for error redirects). */

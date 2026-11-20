@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
 import { NextResponse } from "next/server";
 import { cookieName, cookieOptions, sessionTtlFor, setSessionCookie } from "@/lib/cookies";
-import { allowedPhonesRaw, appUrl, assertOtpReady, ConfigError, lineConfig, smsConfig } from "@/lib/env";
+import { allowedPhonesRaw, appUrl, assertOtpReady, ConfigError, lineConfig, phoneSignInOpen, smsConfig } from "@/lib/env";
+import { phoneSignInClosed } from "@/lib/http";
 import { setTestEnv } from "./_setup";
 
 afterEach(() => setTestEnv());
@@ -23,6 +24,24 @@ describe("env validation", () => {
       assert.ok(e instanceof ConfigError);
       assert.deepEqual(e.names.sort(), ["DATABASE_URL", "DEESMSX_API_KEY", "DEESMSX_SECRET_KEY", "OTP_PEPPER", "SESSION_SECRET"]);
       assert.ok(!e.message.includes("short-secret-value"));
+    }
+  });
+
+  test("sign-in by number is closed unless PHONE_SIGNIN=open (doctors-only pre-release, Pong 20 Nov 2026)", async () => {
+    delete process.env.PHONE_SIGNIN;
+    assert.equal(phoneSignInOpen(), false);
+    const closed = phoneSignInClosed();
+    assert.ok(closed);
+    assert.equal(closed.status, 403);
+    assert.deepEqual(await closed.json(), { error: "ช่วงทดลองใช้ เปิดให้แพทย์ก่อน", reason: "doctors_only" });
+    for (const v of ["", " ", "yes", "true", "1", "closed"]) {
+      process.env.PHONE_SIGNIN = v;
+      assert.equal(phoneSignInOpen(), false, JSON.stringify(v));
+    }
+    for (const v of ["open", " OPEN ", "Open"]) {
+      process.env.PHONE_SIGNIN = v;
+      assert.equal(phoneSignInOpen(), true, JSON.stringify(v));
+      assert.equal(phoneSignInClosed(), null);
     }
   });
 

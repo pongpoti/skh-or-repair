@@ -8,3 +8,9 @@ export const CLAIM_BLOCKED =
 /** As CLAIM_BLOCKED, when the undone claim was this LINE account's (so no other number helps either). */
 export const CLAIM_BLOCKED_LINE =
   "ผู้ดูแลยกเลิกชื่อของ LINE นี้แล้ว เลือกใหม่ได้หลัง 24\u00A0ชั่วโมง หรือติดต่อผู้ดูแล";
+
+/**
+ * While sign-in by number is closed (lib/env.ts phoneSignInOpen, the doctors-only pre-release): said on the position
+ * step under the closed choices and by the SMS code and name-claim APIs.
+ */
+export const DOCTORS_ONLY = "ช่วงทดลองใช้ เปิดให้แพทย์ก่อน";

@@ -111,6 +111,8 @@ describe("users and claims (database)", () => {
 
   before(async () => {
     setTestEnv();
+    // nurses and assistants claim names here; the doctors-only pre-release (PHONE_SIGNIN unset) has its own test
+    process.env.PHONE_SIGNIN = "open";
     pool = await db();
   });
   beforeEach(async () => {
@@ -459,6 +461,30 @@ describe("users and claims (database)", () => {
     } finally {
       telegram(null);
     }
+  });
+
+  test("doctors-only pre-release: without PHONE_SIGNIN=open the name list and the claim refuse first and claim nothing", async (t) => {
+    delete process.env.PHONE_SIGNIN;
+    t.after(() => {
+      process.env.PHONE_SIGNIN = "open";
+    });
+    const grant = await signAccess({ sub: "U-pre", name: "x", picture: null, phone: "0900000216" }, TEST_SESSION_SECRET);
+    const refused = { error: "ช่วงทดลองใช้ เปิดให้แพทย์ก่อน", reason: "doctors_only" };
+    const listed = await listRoute(new NextRequest("http://localhost:3999/api/auth/claim/list?type=PCA", { headers: { cookie: `access=${grant}` } }));
+    assert.equal(listed.status, 403);
+    assert.deepEqual(await listed.json(), refused);
+    const claimed = await claimRoute(
+      new NextRequest("http://localhost:3999/api/auth/claim", {
+        method: "POST",
+        headers: { cookie: `access=${grant}`, origin: "http://localhost:3999", "content-type": "application/json" },
+        body: JSON.stringify({ userId: Number(ids["PCA:สมชาย"]) }),
+      }),
+    );
+    assert.equal(claimed.status, 403);
+    assert.deepEqual(await claimed.json(), refused);
+    assert.equal(claimed.headers.get("set-cookie"), null, "no session");
+    const { rowCount } = await pool.query("SELECT 1 FROM user_claims WHERE phone = '0900000216'");
+    assert.equal(rowCount, 0, "nothing claimed");
   });
 
   test("the claim-page list endpoint needs the access cookie, is never cached, and names no number or LINE id", async (t) => {

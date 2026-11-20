@@ -3,7 +3,7 @@ import { cookieName } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { assertOtpReady, ConfigError, otpPepper, sessionSecret, smsConfig } from "@/lib/env";
 import { waitText } from "@/lib/format";
-import { guardPost, json, MSG, sleepUntil } from "@/lib/http";
+import { guardPost, json, MSG, phoneSignInClosed, sleepUntil } from "@/lib/http";
 import { hasLiveCode, LIMITS, logEvent, sendCode } from "@/lib/otp";
 import { formatPhone, normalizePhone } from "@/lib/phone";
 import { clientIp, readJsonBody, userAgent } from "@/lib/security";
@@ -19,6 +19,8 @@ export async function POST(req: NextRequest) {
   const started = Date.now();
   const blocked = guardPost(req);
   if (blocked) return blocked;
+  const closed = phoneSignInClosed();
+  if (closed) return closed;
 
   try {
     assertOtpReady();

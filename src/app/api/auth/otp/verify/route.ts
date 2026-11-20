@@ -3,7 +3,7 @@ import { isAuthorizedPhone } from "@/lib/authz";
 import { clearCookie, cookieName, sessionTtlFor, setCookie, setSessionCookie } from "@/lib/cookies";
 import { db } from "@/lib/db";
 import { assertOtpReady, ConfigError, otpPepper, sessionSecret, smsConfig, telegramEnabled } from "@/lib/env";
-import { guardPost, json, MSG } from "@/lib/http";
+import { guardPost, json, MSG, phoneSignInClosed } from "@/lib/http";
 import { countOtpPhones, logEvent, otpHistory, upsertBinding, verifyCode } from "@/lib/otp";
 import { normalizePhone } from "@/lib/phone";
 import { clientIp, readJsonBody, safeNextPath, userAgent } from "@/lib/security";
@@ -17,6 +17,8 @@ import { signAccess, signSession, verifyPending } from "@/lib/tokens";
 export async function POST(req: NextRequest) {
   const blocked = guardPost(req);
   if (blocked) return blocked;
+  const closed = phoneSignInClosed();
+  if (closed) return closed;
 
   try {
     assertOtpReady();

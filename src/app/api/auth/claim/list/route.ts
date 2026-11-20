@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { accessGrantFor } from "@/lib/access-http";
 import { db } from "@/lib/db";
-import { json, MSG } from "@/lib/http";
+import { json, MSG, phoneSignInClosed } from "@/lib/http";
 import { isUserType, subtypeLabel } from "@/lib/user-labels";
 import { listClaimable } from "@/lib/user-list";
 
@@ -11,6 +11,8 @@ import { listClaimable } from "@/lib/user-list";
  * and whether it is taken (a taken name cannot be picked); never a number or a LINE id. Not cached anywhere.
  */
 export async function GET(req: NextRequest) {
+  const closed = phoneSignInClosed();
+  if (closed) return closed;
   const grant = await accessGrantFor(req);
   if (grant instanceof NextResponse) return grant;
   const type = req.nextUrl.searchParams.get("type");
