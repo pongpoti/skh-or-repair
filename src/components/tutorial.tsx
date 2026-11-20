@@ -81,7 +81,8 @@ type Step = {
 const CHAPTERS = ["แปลนห้อง", "จองห้อง", "ดูการจอง", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "ตัวอย่างจริง", "จบบทเรียน"] as const;
 
 const EXAMPLE_HN = "1234567";
-const EXAMPLE_OPERATION = "Lap chole";
+/** The short name surgeons type (Pong, 20 Nov 2026: "For พิมพ์ชื่อผ่าตัด change from lap chole to LC"). */
+const EXAMPLE_OPERATION = "LC";
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The page's own elements, found as the board draws them.
