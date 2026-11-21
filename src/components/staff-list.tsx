@@ -6,6 +6,7 @@ import type { StaffView } from "@/app/admin/data";
 import { AdminSection } from "@/components/admin-section";
 import { Notice } from "@/components/auth-shell";
 import { InlineStatus } from "@/components/inline-status";
+import { cleanPhoneInput, EMAIL_RULE, normalizeEmail, PHONE_RULE, phoneProblem } from "@/lib/contact";
 import { specialtyOf } from "@/lib/specialties";
 import { searchKey, subtypeChoices, subtypeLabel, TYPE_LABELS, USER_TYPES, type UserType } from "@/lib/user-labels";
 
@@ -21,9 +22,26 @@ const PLUS = (
 
 const UNSAVED = "บันทึกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
 
-/** A new name's draft: nurses and assistants start in the OR unit, a doctor's specialty is picked. */
-type Draft = { firstName: string; lastName: string; type: UserType; subtype: string };
-const EMPTY_DRAFT: Draft = { firstName: "", lastName: "", type: "RN", subtype: "OR" };
+/**
+ * A new name's draft: nurses and assistants start in the OR unit, a doctor's specialty is picked. A doctor needs their
+ * email address, anyone else their mobile number (Pong, 21 Nov 2026): the way each signs in.
+ */
+type Draft = { firstName: string; lastName: string; type: UserType; subtype: string; email: string; phone: string };
+const EMPTY_DRAFT: Draft = { firstName: "", lastName: "", type: "RN", subtype: "OR", email: "", phone: "" };
+
+/**
+ * What the draft's email or number field says is wrong, or null. A number that cannot become a mobile number is said at
+ * once; one still being typed, and an email address, only once the field was left (`left`) or the form sent.
+ */
+function contactError(draft: Draft, left: boolean): string | null {
+  if (draft.type === "DR") {
+    if (!draft.email.trim()) return left ? "กรอกอีเมล" : null;
+    return left && !normalizeEmail(draft.email) ? EMAIL_RULE : null;
+  }
+  const problem = phoneProblem(draft.phone);
+  if (problem === "empty") return left ? "กรอกเบอร์มือถือ" : null;
+  return problem === "invalid" || (left && problem === "partial") ? PHONE_RULE : null;
+}
 
 const SEARCH_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -90,9 +108,12 @@ export function StaffList({
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [addError, setAddError] = useState("");
+  // The email or number field was left once (or the form sent): from then on it says what is wrong as it is typed.
+  const [contactLeft, setContactLeft] = useState(false);
   const [done, setDone] = useState("");
   const [pending, startTransition] = useTransition();
   const addRef = useRef<HTMLDialogElement>(null);
+  const contactRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!done) return;
@@ -141,6 +162,7 @@ export function StaffList({
   function openAdd() {
     setDraft(EMPTY_DRAFT);
     setAddError("");
+    setContactLeft(false);
     addRef.current?.showModal();
   }
 
@@ -165,6 +187,12 @@ export function StaffList({
       setAddError(draft.type === "DR" ? "เลือกสาขา" : "เลือกหน่วย");
       return;
     }
+    const contact = contactError(draft, true);
+    if (contact) {
+      setContactLeft(true);
+      contactRef.current?.focus();
+      return;
+    }
     const name = `${firstName} ${lastName}`;
 
     if (!onAdd) {
@@ -181,7 +209,9 @@ export function StaffList({
     setAddError("");
     startTransition(async () => {
       try {
-        const result = await onAdd({ ...draft, firstName, lastName });
+        // only the way this type signs in is sent
+        const sent = draft.type === "DR" ? { ...draft, phone: "" } : { ...draft, email: "" };
+        const result = await onAdd({ ...sent, firstName, lastName });
         if (!result.ok) {
           setAddError(result.error);
           return;
@@ -230,6 +260,8 @@ export function StaffList({
     </button>
   );
   const choices = subtypeChoices(draft.type);
+  const doctor = draft.type === "DR";
+  const contactProblem = contactError(draft, contactLeft);
 
   return (
     <AdminSection id="staff" title="รายชื่อทั้งหมด" summary={summary} actions={addButton} testId="staff-section">
@@ -358,7 +390,10 @@ export function StaffList({
                   key={code}
                   type="button"
                   aria-pressed={draft.type === code}
-                  onClick={() => change({ type: code, subtype: code === "DR" ? "" : "OR" })}
+                  onClick={() => {
+                    if ((code === "DR") !== doctor) setContactLeft(false);
+                    change({ type: code, subtype: code === "DR" ? "" : "OR" });
+                  }}
                   className={TYPE_OPTION}
                   data-testid={`staff-add-type-${code}`}
                 >
@@ -384,6 +419,40 @@ export function StaffList({
               ))}
             </select>
           </label>
+          {/* How this person signs in: a doctor by an email code, anyone else by an SMS code to this number. */}
+          <div className="mt-4">
+            <label htmlFor="staff-add-contact" className="mb-1 block text-sm font-semibold text-ink-2">
+              {doctor ? "อีเมล" : "เบอร์มือถือ"}
+            </label>
+            <input
+              key={doctor ? "email" : "phone"}
+              id="staff-add-contact"
+              ref={contactRef}
+              type={doctor ? "email" : "tel"}
+              inputMode={doctor ? "email" : "numeric"}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              maxLength={doctor ? 254 : 24}
+              value={doctor ? draft.email : draft.phone}
+              onChange={(event) => change(doctor ? { email: event.target.value } : { phone: cleanPhoneInput(event.target.value) })}
+              onBlur={() => setContactLeft(true)}
+              placeholder={doctor ? "name@gmail.com" : "0xx-xxx-xxxx"}
+              aria-invalid={contactProblem ? true : undefined}
+              aria-describedby="staff-add-contact-note"
+              className={`field field-text${doctor ? "" : " tabular-nums"}`}
+              data-testid={doctor ? "staff-add-email" : "staff-add-phone"}
+            />
+            {contactProblem ? (
+              <InlineStatus tone="warning" id="staff-add-contact-note" testId="staff-add-contact-error" className="mt-1">
+                {contactProblem}
+              </InlineStatus>
+            ) : (
+              <p id="staff-add-contact-note" className="mt-1 text-[0.8125rem] leading-5 text-muted">
+                {doctor ? "รหัสเข้าระบบส่งไปที่อีเมลนี้" : "เข้าระบบได้ด้วยเบอร์นี้เท่านั้น"}
+              </p>
+            )}
+          </div>
           {/* A refused add is said just above the buttons that sent it. */}
           <div className="mt-5">
             {addError ? (

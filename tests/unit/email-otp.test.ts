@@ -205,7 +205,7 @@ describe("doctors sign in by email (database)", () => {
 
   async function load() {
     await pool.query(
-      "TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
+      "TRUNCATE tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
     );
     const { rows } = await pool.query<{ id: string; first_name: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype, active) VALUES
@@ -235,7 +235,7 @@ describe("doctors sign in by email (database)", () => {
   });
   after(async () => {
     await pool.query(
-      "TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
+      "TRUNCATE tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY",
     );
     await pool.end();
   });
@@ -502,7 +502,7 @@ describe("doctors sign in by email (database)", () => {
     resetAuthzCache();
     assert.equal(await freshEmailClaim(pool, "U-dr"), null, "no LINE sign-in without an SMS code");
     assert.equal(await isAuthorizedDoctor(ids["สมชาย"], "U-dr", { fresh: true }), false);
-    assert.equal((await listClaimable(pool, "RN")).find((n) => n.id === ids["สมชาย"])?.claimed, false, "free on the claim page");
+    assert.equal((await listClaimable(pool, "RN", "0899999999")).find((n) => n.id === ids["สมชาย"])?.claimed, false, "free on the claim page");
     assert.equal((await claim(ids["สมชาย"], "0900000313", "U-sms")).status, "claimed", "claimed by number like any RN");
     assert.deepEqual(await reasons(ids["สมชาย"]), ["replaced", null]);
   });

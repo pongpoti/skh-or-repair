@@ -628,7 +628,7 @@ async function main() {
   // loaded once the app has created them, as in production: loadUsers() after the servers are up).
   const db = new pg.Pool({ connectionString: DB_URL, max: 2 });
   await assertDisposableUsers((sql) => db.query(sql), "E2E_DATABASE_URL"); // users holding real data: stop before the DROP
-  await db.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, schedule_mode, user_claims, email_codes, user_emails, users, access_requests");
+  await db.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, schedule_mode, user_claims, email_codes, user_emails, users, access_requests");
 
   const appEnv = {
     ...baseEnv(),
@@ -1407,16 +1407,21 @@ async function main() {
         assert((await page.locator('img[src="x"]').count()) === 0, `no injected <img> (${step})`);
         assert((await page.evaluate(() => window.__xss)) === undefined, `no script executed (${step})`);
       }
-      // a landline is refused before anything is sent
+      // the number is checked as it is typed (Pong, 21 Nov 2026): a landline is said at once, before anything is sent
+      const smsBefore = (await smsIssued()).length;
       await page.fill("#phone", "02-123-4567");
-      await page.click('button[type="submit"]');
       await page.waitForSelector("#phone-error");
-      assert((await page.textContent("#phone-error")).includes("ใส่เบอร์มือถือ 10"), "invalid number message");
+      assert((await page.textContent("#phone-error")).includes("ใส่เบอร์มือถือ 10"), "invalid number message as it is typed");
       assert((await page.getAttribute("#phone", "aria-invalid")) === "true", "the number is marked invalid");
+      await page.click('button[type="submit"]');
       await page.waitForFunction(() => document.activeElement?.id === "phone", null, { timeout: 2000 });
-      await page.keyboard.press("End");
-      await page.keyboard.type("8");
-      assert((await page.getAttribute("#phone", "aria-invalid")) === null, "editing the number clears the invalid mark");
+      // a number still being typed says nothing until the field is left; then it is too short
+      await page.fill("#phone", "081-234");
+      assert((await page.getAttribute("#phone", "aria-invalid")) === "true", "after a refused send, a short number is still wrong");
+      await page.fill("#phone", "081-234-5678");
+      assert((await page.getAttribute("#phone", "aria-invalid")) === null, "a mobile number clears the invalid mark");
+      assert((await page.locator("#phone-error").count()) === 0, "and the message");
+      assert((await smsIssued()).length === smsBefore, "nothing was sent for the wrong numbers");
       const tgBefore = (await telegramMessages()).length;
       const sms = await requestCode(page, LOCKED);
       const wrong = sms.pin === "000000" ? "111111" : "000000";
@@ -2963,13 +2968,27 @@ async function main() {
       await addButton.click();
       await page.waitForSelector("dialog[open] #staff-add-title");
       assert((await page.inputValue('[data-testid="staff-add-subtype"]')) === "OR", "a nurse starts in the OR unit");
-      // a doctor: the specialty must be picked
+      // a nurse needs a mobile number (Pong, 21 Nov 2026): checked as it is typed
+      const contactError = () => textOf(page, '[data-testid="staff-add-contact-error"]');
+      assert((await page.locator('[data-testid="staff-add-phone"]').getAttribute("type")) === "tel", "a number field for a nurse");
+      await page.fill('[data-testid="staff-add-phone"]', "02-123-4567");
+      assert((await contactError()).includes("ใส่เบอร์มือถือ 10"), "a landline is said at once");
+      await page.fill('[data-testid="staff-add-phone"]', "");
+      // a doctor: the specialty must be picked, and an email address given instead of a number
       await page.click('[data-testid="staff-add-type-DR"]');
+      assert((await page.locator('[data-testid="staff-add-phone"]').count()) === 0, "no number field for a doctor");
       await page.fill('[data-testid="staff-add-first"]', "  ทดลอง ");
       await page.fill('[data-testid="staff-add-last"]', "เพิ่มชื่อ");
       await page.click('[data-testid="staff-add-confirm"]');
       assert((await textOf(page, "dialog[open] [role=alert]")) === "เลือกสาขา", "a specialty is needed");
       await page.selectOption('[data-testid="staff-add-subtype"]', "ENT");
+      await page.click('[data-testid="staff-add-confirm"]');
+      assert((await contactError()) === "กรอกอีเมล", "an email address is needed");
+      await page.waitForFunction(() => document.activeElement?.dataset?.testid === "staff-add-email", null, { timeout: 2000 });
+      await page.fill('[data-testid="staff-add-email"]', "ทดลอง@gmail");
+      assert((await contactError()) === "อีเมลไม่ถูกต้อง เช่น name@gmail.com", "an address that cannot be one");
+      await page.fill('[data-testid="staff-add-email"]', " Tod.Long@Example.co.th ");
+      assert((await page.locator('[data-testid="staff-add-contact-error"]').count()) === 0, "a good address clears the message");
       await ownerShot(page, "admin-staff-add.png");
       await page.click('[data-testid="staff-add-confirm"]');
       await page.waitForSelector("dialog[open]", { state: "detached" });
@@ -2977,6 +2996,10 @@ async function main() {
         "SELECT u.type, u.subtype, u.active, a.added_by FROM users u JOIN users_added a ON a.user_id = u.id WHERE u.first_name = 'ทดลอง' AND u.last_name = 'เพิ่มชื่อ'",
       )).rows;
       assert(JSON.stringify(row) === JSON.stringify([{ type: "DR", subtype: "ENT", active: true, added_by: ADMIN_SUB }]), `saved: ${JSON.stringify(row)}`);
+      const emails = (await db.query(
+        "SELECT e.email FROM user_emails e JOIN users u ON u.id = e.user_id WHERE u.first_name = 'ทดลอง' AND u.last_name = 'เพิ่มชื่อ'",
+      )).rows;
+      assert(JSON.stringify(emails) === JSON.stringify([{ email: "tod.long@example.co.th" }]), `email saved: ${JSON.stringify(emails)}`);
       // the new name shows by itself in the list, and the heading says so
       await page.locator('[data-testid="staff-list"] li', { hasText: "ทดลอง เพิ่มชื่อ" }).waitFor();
       assert((await page.inputValue('[data-testid="staff-search"]')) === "ทดลอง เพิ่มชื่อ", "searched for the new name");
@@ -2985,6 +3008,7 @@ async function main() {
       await addButton.click();
       await page.fill('[data-testid="staff-add-first"]', "ทดลอง");
       await page.fill('[data-testid="staff-add-last"]', "เพิ่มชื่อ");
+      await page.fill('[data-testid="staff-add-phone"]', "0899990001");
       await page.click('[data-testid="staff-add-confirm"]');
       await page.locator("dialog[open] [role=alert]", { hasText: "มี ทดลอง เพิ่มชื่อ ในรายชื่ออยู่แล้ว" }).waitFor();
       await page.locator("dialog[open]").getByRole("button", { name: "ยกเลิก" }).click();
@@ -3582,8 +3606,8 @@ async function main() {
       await ownerShot(page, "board-after-upload.png");
 
       // OR 12: doctor Y's booking matched first, then HOSxP's cases nobody booked (Pong, 15 Nov 2026: bookings first,
-      // then HOSxP's order); 7000011, a general surgeon's endoscopy, is GENSX's since the scope rule went (Pong, 19 Nov
-      // 2026: "now base on surgeon name and dept only, no more scope case"). In the dressing room OR 10, HOSxP's I&D and dressing nobody booked, with no flag, and not
+      // then HOSxP's order); 7000011, a general surgeon's endoscopy, is GENSX's, as the repair has no SCOPE room (Pong, 19
+      // Nov 2026: "no more scope case"). In the dressing room OR 10, HOSxP's I&D and dressing nobody booked, with no flag, and not
       // doctor X's dressing-room booking, which HOSxP does not list ("no real patient set"). Doctor X's matched case is
       // in OR 13, where HOSxP's list places it (ORTHO), not OR 11, the mixed room the booking was in: after the upload
       // MX's list decides the room, unless the doctor picked the dressing room.

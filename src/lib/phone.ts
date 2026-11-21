@@ -1,30 +1,12 @@
 import "server-only";
+import { normalizePhone, PHONE_RE } from "./contact";
 import { allowedPhonesRaw } from "./env";
 
 /**
- * Thai mobile numbers, the sign-in identity. Stored and compared in one canonical form, "0812345678": ten digits,
- * a leading 0, then 6, 8 or 9 (the mobile ranges); db/schema.sql checks the same pattern, and scripts/phone.mjs
- * repeats PHONE_RE and normalizePhone() for the dev scripts (a unit test keeps the two identical).
+ * Thai mobile numbers, the sign-in identity. Stored and compared in one canonical form, "0812345678" (PHONE_RE). The
+ * pattern and normalizePhone() live in lib/contact.ts, which the forms share for their live checks.
  */
-export const PHONE_RE = /^0[689]\d{8}$/;
-
-/**
- * NFKC (full-width digits), Thai digits ๐-๙ to ASCII, spaces, dashes, dots and parentheses removed; accepts
- * 0XXXXXXXXX, 66XXXXXXXXX and +66XXXXXXXXX (also with the 0 kept: +660XXXXXXXXX, as on business cards). Returns the
- * canonical "0812345678", or null when it is not a Thai mobile number.
- */
-export function normalizePhone(input: unknown): string | null {
-  if (typeof input !== "string" || input.length > 40) return null;
-  let v = input
-    .normalize("NFKC")
-    .replace(/[๐-๙]/g, (d) => String(d.charCodeAt(0) - 0x0e50))
-    .replace(/[\s\-.()‐-―]/g, "");
-  if (/^\+66\d{9}$/.test(v)) v = `0${v.slice(3)}`;
-  else if (/^66\d{9}$/.test(v)) v = `0${v.slice(2)}`;
-  // "+66 (0) 81 234 5678", "+66 081-234-5678": the country code written before the national number with its 0.
-  else if (/^\+?660\d{9}$/.test(v)) v = v.replace(/^\+?66/, "");
-  return PHONE_RE.test(v) ? v : null;
-}
+export { normalizePhone, PHONE_RE };
 
 /** "0812345678" -> "66812345678", the format the SMS provider expects. */
 export function toInternational(phone: string): string {

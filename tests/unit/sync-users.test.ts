@@ -250,11 +250,11 @@ describe("scripts/sync-users.mjs against the test database", () => {
   ].join("\r\n");
 
   before(async () => {
-    await pool.query("DROP TABLE IF EXISTS tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users");
+    await pool.query("DROP TABLE IF EXISTS tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users");
   });
   after(async () => {
     rmSync(dir, { recursive: true, force: true });
-    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users RESTART IDENTITY");
+    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users RESTART IDENTITY");
     await pool.end();
   });
 
@@ -356,7 +356,7 @@ describe("scripts/sync-users.mjs against the test database", () => {
   });
 
   test("works on a users table made with the production DDL and rows loaded by someone else (their ids are kept)", async () => {
-    await pool.query("DROP TABLE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users");
+    await pool.query("DROP TABLE tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users");
     await pool.query(PRODUCTION_USERS_DDL);
     await pool.query(
       `INSERT INTO users (first_name, last_name, type, subtype) VALUES

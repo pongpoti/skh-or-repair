@@ -79,8 +79,13 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   assert.deepEqual(room("GENSX", "Lap chole", FIRST), { ok: true, roomId: "or-12", dressing: false });
   assert.deepEqual(room("ORTHO", "ORIF radius", FIRST), { ok: true, roomId: "or-13", dressing: false });
   for (const subtype of ["URO", "NEURO", "CVT", "ENT"]) assert.deepEqual(room(subtype, "x", FIRST), { ok: true, roomId: "or-11", dressing: false }, `${subtype}: the mixed room`);
-  // No scope rule (Pong, 19 Nov 2026): a general surgeon's endoscopy is in GENSX's room like the rest.
+  // The repair has no SCOPE room: a general surgeon's endoscopy is in GENSX's room like the rest (Pong, 19 Nov 2026).
   assert.deepEqual(room("GENSX", "EGD", FIRST), { ok: true, roomId: "or-12", dressing: false }, "an endoscopy in GENSX's room");
+  // In the weekly schedule it is the SCOPE room's, OR 3, as the workbook's (Pong, 21 Nov 2026: "Move scope cases to scope
+  // room using rules"), and the form shows that room as the name is typed.
+  assert.deepEqual(room("GENSX", "Colonoscopy", "2027-03-22"), { ok: true, roomId: "or-3", dressing: false }, "the SCOPE room");
+  assert.deepEqual(room("GENSX", "Lap chole", "2027-03-22"), { ok: true, roomId: "or-2", dressing: false }, "the rest of the list in GENSX's room");
+  assert.deepEqual(room("URO", "Colonoscopy", "2027-03-22"), { ok: true, roomId: "or-7", dressing: false }, "only a general surgeon's");
   assert.deepEqual(room("GENSX", "Lap chole", SECOND), { ok: true, roomId: "or-5", dressing: false });
   assert.deepEqual(room("EYE", "Phaco", SECOND), { ok: true, roomId: "or-4", dressing: false });
   // No weekly schedule (Pong, 18 Nov 2026): a day before 16 Nov has the first half's rooms too.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DeptCode } from "./allocation.ts";
-import { isDressingCase, placeCase, roomsHeldBy, UNPLACED_TEXT, type PlaceInput } from "./placement.ts";
+import { isDressingCase, isScopeCase, placeCase, roomsHeldBy, UNPLACED_TEXT, type PlaceInput } from "./placement.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import * as week from "./week.ts";
@@ -54,6 +54,65 @@ test("the weekly schedule before and after the repair (Pong, 21 Nov 2026): the g
   assert.equal(room(input("GENSX"), "2026-11-07"), "no-room", "Saturday");
 });
 
+test("a general surgeon's endoscopy goes to the SCOPE room, OR 3, in the weekly schedule (Pong, 21 Nov 2026)", () => {
+  // "Move scope cases to scope room using rules": the OR-export rules doc, rule set C.
+  const planned = (item: PlaceInput, date: string) => {
+    const placement = placeCase(item, date, DEFAULT_REPAIR_PERIODS, new Map());
+    return placement.ok ? placement.roomId : placement.reason;
+  };
+  const endoscopies = [
+    "EGD",
+    "Esophagogastroduodenoscopy [EGD]",
+    "Gastroscopy",
+    "Esophagoscopy",
+    "OGD",
+    "Colonoscope ODSสมุทรสาคร",
+    "EGD + colonoscopy",
+    "Set OR for screening colonoscopy under LA with MAC",
+    "Flexible sigmoidoscopy with APC",
+    "ERCP",
+    "ERCP +-stent",
+    "Endoscopic retrograde cholangiopancreatography",
+    "EUS with FNA",
+    // misspellings in the Jan-Oct 2026 exports
+    "Colonscope ODS",
+    "Colooscope",
+    "Sigmoidscopy",
+    "igmoidoscope under LA",
+  ];
+  for (const date of [PAST_MONDAY, "2026-11-11", AFTER_MONDAY]) {
+    for (const procedure of endoscopies) {
+      assert.equal(planned(input("GENSX", { procedure }), date), "or-3", `${procedure} ${date}`);
+      assert.ok(isScopeCase(procedure, "GENSX"), procedure);
+    }
+    assert.equal(planned(input("SCOPE", { procedure: "colonoscopy" }), date), "or-3", "a case coded SCOPE");
+    // a foreign body is taken out where the rest of general surgery's list is
+    for (const procedure of ["EGD remove FB", "Esophagoscopy with removal of foreign body", "EGD FB"]) {
+      assert.equal(planned(input("GENSX", { procedure }), date), "or-2", `${procedure} ${date}`);
+    }
+    // only a general surgeon's: another department's endoscopy stays in its own room
+    assert.equal(planned(input("EYE", { procedure: "EGD" }), date), "or-10", `EYE ${date}`);
+    assert.equal(planned(input("GENSX", { procedure: "Lap chole" }), date), "or-2", `not an endoscopy ${date}`);
+    assert.equal(planned(input("SCOPE", { procedure: "Lap chole" }), date), "or-2", `coded SCOPE, not an endoscopy ${date}`);
+    // the emergency room first, as for any emergency
+    assert.equal(planned(input("GENSX", { procedure: "EGD", emergency: true }), date), "or-8", `emergency ${date}`);
+  }
+  for (const procedure of ["Laparoscopic cholecystectomy", "Laparoscopic sigmoidectomy", "Lap colectomy", "Colostomy closure", "Cystoscopy", "Thoracoscopy", "Colposcopy", "Set OR for change gastrostomy (under fluoroscope)"]) {
+    assert.equal(isScopeCase(procedure, "GENSX"), false, procedure);
+  }
+  assert.equal(isScopeCase("Functional endoscopic sinus surgery", "ENT"), false, "an ENT surgeon's");
+  assert.equal(isScopeCase("EGD", null), false, "no department");
+  assert.equal(isScopeCase("EGD", "PEDSX"), false, "a paediatric surgeon's");
+  // The repair has no SCOPE room: the GENSX room then (Pong, 19 Nov 2026, after a colonoscopy in the mixed room).
+  assert.equal(planned(input("GENSX", { procedure: "EGD" }), "2026-12-14"), "or-12", "first half");
+  assert.equal(planned(input("GENSX", { procedure: "EGD" }), "2027-02-01"), "or-5", "second half");
+  // An admin's switch to a half's rooms has no SCOPE room either; to the weekly schedule, OR 3.
+  assert.deepEqual(placeCase(input("GENSX", { procedure: "EGD" }), PAST_MONDAY, { ...DEFAULT_REPAIR_PERIODS, mode: "half1" }, new Map()), { ok: true, roomId: "or-12" });
+  assert.deepEqual(placeCase(input("GENSX", { procedure: "EGD" }), "2026-12-14", { ...DEFAULT_REPAIR_PERIODS, mode: "normal" }, new Map()), { ok: true, roomId: "or-3" });
+  // At the weekend no room.
+  assert.equal(planned(input("GENSX", { procedure: "EGD" }), "2026-11-07"), "no-room");
+});
+
 test("chest medicine sets its cases in OR 4 on Mondays in the weekly schedule, the mixed room during the repair", () => {
   const planned = (item: PlaceInput, date: string) => {
     const placement = placeCase(item, date, DEFAULT_REPAIR_PERIODS, new Map());
@@ -74,7 +133,7 @@ test("first half: the half's rooms, NEURO and CVT emergencies in OR 12 or 13, ob
   assert.equal(room(input("NEURO", { emergency: true }), FIRST_MONDAY), "or-12", "OR 12 and 13 tie: the first");
   assert.equal(room(input("CVT", { emergency: true }), FIRST_MONDAY, { "or-12": 2, "or-13": 1 }), "or-13", "the fewest cases");
   assert.equal(room(input("NEURO"), FIRST_MONDAY), "or-11", "not an emergency: no NEURO room, so the mixed room");
-  // Pong, 19 Nov 2026: "now base on surgeon name and dept only, no more scope case"
+  // No SCOPE room during the repair: a general surgeon's endoscopy in GENSX's room (Pong, 19 Nov 2026: "no more scope case")
   for (const procedure of ["EGD", "Colonoscope", "ERCP", "ERCP +-stent", "EUS"]) {
     assert.equal(room(input("GENSX", { procedure }), FIRST_MONDAY), "or-12", `${procedure}: GENSX's room`);
   }

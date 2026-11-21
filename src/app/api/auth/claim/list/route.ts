@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
   // Doctors prove their name by an email code (/login/doctor), never by number.
   if (type === "DR") return json({ error: MSG.claimType, reason: "doctor_email", redirect: "/login/doctor" }, 400);
   try {
-    const names = await listClaimable(await db(), type);
+    const names = await listClaimable(await db(), type, grant.phone);
     return json({
       type,
       names: names.map((n) => ({

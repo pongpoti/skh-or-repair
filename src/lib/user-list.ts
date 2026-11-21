@@ -141,13 +141,17 @@ export function fullName(s: { firstName: string; lastName: string }): string {
  */
 export const HOLDS = "((u.type = 'DR') = (c.via = 'email'))";
 
-/** The active names of one type, in Thai order, each with whether it is taken. Nothing else leaves the tables. */
-export async function listClaimable(pool: Q, type: UserType): Promise<ClaimableName[]> {
+/**
+ * The active names of one type, in Thai order, each with whether it is taken. Nothing else leaves the tables. A name an
+ * admin gave another number (user_phones) reads taken for `phone`, the verified number asking.
+ */
+export async function listClaimable(pool: Q, type: UserType, phone: string): Promise<ClaimableName[]> {
   const { rows } = await pool.query<ClaimableName>(
     `SELECT u.id::text AS id, u.first_name, u.last_name, u.subtype,
-            EXISTS (SELECT 1 FROM user_claims c WHERE c.user_id = u.id AND c.undone_at IS NULL AND ${HOLDS}) AS claimed
+            EXISTS (SELECT 1 FROM user_claims c WHERE c.user_id = u.id AND c.undone_at IS NULL AND ${HOLDS})
+              OR EXISTS (SELECT 1 FROM user_phones p WHERE p.user_id = u.id AND p.phone <> $2) AS claimed
      FROM users u WHERE u.active AND u.type = $1`,
-    [type],
+    [type, phone],
   );
   return rows
     .map((r) => ({ id: r.id, first_name: r.first_name, last_name: r.last_name, subtype: r.subtype, claimed: r.claimed }))
@@ -278,6 +282,9 @@ const DAY_S = 24 * 3600;
  * name; so is a current claim of this number, LINE account or name that holds nothing (HOLDS: 'replaced'). A failed
  * attempt leaves them as they were (savepoint).
  *
+ * A name an admin added with a number (user_phones) is claimed by that number only: another number reads "taken", and
+ * that number claiming another name reads "phone_has_claim".
+ *
  * Doctors (type DR) are never claimed here: they prove their name by an email code (lib/email-otp.ts), so a doctor's
  * name reads "unavailable", also for a number that holds a claim of it made by hand (never "own_claim").
  */
@@ -325,6 +332,18 @@ export async function claimUser(
       return { status: "own_claim", user: toUser(own[0]) };
     }
 
+    // An admin gave the name a number (user_phones, lib/user-admin.ts): only that number may claim it, and that
+    // number only it.
+    const { rows: given } = await c.query<{ mine: boolean }>(
+      `SELECT p.user_id = $1 AS mine FROM user_phones p JOIN users u ON u.id = p.user_id
+       WHERE u.active AND (p.user_id = $1 OR p.phone = $2) AND NOT (p.user_id = $1 AND p.phone = $2)`,
+      [r.userId, r.phone],
+    );
+    if (given.length) {
+      await event("claim_failed");
+      return { status: given.some((g) => g.mine) ? "taken" : "phone_has_claim" };
+    }
+
     await c.query("SAVEPOINT claim_attempt");
     let claim: ClaimRow | undefined;
     try {
@@ -342,6 +361,7 @@ export async function claimUser(
       const ins = await c.query<ClaimRow>(
         `INSERT INTO user_claims (user_id, phone, line_sub, line_name, ip)
          SELECT u.id, $2, $3, $4, $5 FROM users u WHERE u.id = $1 AND u.active AND u.type <> 'DR'
+           AND NOT EXISTS (SELECT 1 FROM user_phones p WHERE p.user_id = u.id AND p.phone <> $2)
          RETURNING ${CLAIM_COLUMNS}`,
         [r.userId, r.phone, r.sub, r.lineName.slice(0, 200) || null, r.ip],
       );

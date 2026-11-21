@@ -40,7 +40,8 @@ function own(dept: DeptCode, operations: readonly string[]): DemoCase[] {
 /**
  * The cases by the room's use. The dressing room's names are all dressing names (lib/dressing.ts), so they go there by
  * the name too; the emergency room's are marked Emergency or Stat; the mixed room's are departments with no room of
- * their own during the repair (a general surgeon's endoscopies go to GENSX's room like the rest of their cases).
+ * their own during the repair (a general surgeon's endoscopies go to GENSX's room like the rest of their cases then,
+ * and to the SCOPE room in the weekly schedule).
  */
 const CASES: Partial<Record<DeptCode, readonly DemoCase[]>> = {
   GENSX: [
@@ -114,7 +115,7 @@ const CASES: Partial<Record<DeptCode, readonly DemoCase[]>> = {
     { dept: "ORTHO", operation: "Wound dressing under GA, right knee" },
   ],
   // The weekly schedule's rooms, for a day outside the repair.
-  // A room kept for endoscopies (ส่องกล้อง): a general surgeon's, so GENSX's by the department.
+  // The weekly schedule's room for endoscopies (ส่องกล้อง, OR 3): a general surgeon's, which the SCOPE rule sends there.
   SCOPE: own("GENSX", ["EGD with biopsy", "Colonoscopy with polypectomy", "ERCP with stent insertion", "EGD with variceal banding", "Flexible sigmoidoscopy", "EUS with FNA"]),
   VASCULAR: own("VASCULAR", ["AV fistula creation, left arm", "Endovenous laser ablation, right leg", "Femoral embolectomy", "Permanent catheter insertion", "Varicose vein stripping", "Carotid endarterectomy"]),
   OBGYN: own("OBGYN", ["Caesarean section", "Total abdominal hysterectomy", "Laparoscopic ovarian cystectomy", "Dilatation and curettage", "Tubal sterilization", "Myomectomy"]),
