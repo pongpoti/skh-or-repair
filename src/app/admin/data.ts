@@ -73,8 +73,9 @@ const addedOnFormat = new Intl.DateTimeFormat("th-TH", { timeZone: "Asia/Bangkok
 /**
  * Who saved the dates last and when. repair_periods.updated_by is the admin's LINE sub, which means nothing to a reader,
  * so it is named as the board names people (lib/auth/display-name.ts): the active name their LINE account currently
- * holds (user-list HOLDS), else their LINE display name. Both halves are saved in one statement, so the newest row speaks
- * for both; a row the seed wrote has no updated_by and means nobody has changed the planned dates.
+ * holds (user-list HOLDS), else their LINE display name. Both halves and the switch (schedule_mode) are saved in one
+ * statement, so the newest row speaks for all; a row the seed wrote has no updated_by and means nobody has changed the
+ * planned dates.
  */
 async function lastChange(pool: Pool): Promise<RepairView["changed"]> {
   const { rows } = await pool.query<{ updated_at: Date; updated_by: string | null; claimed: string | null; line_name: string | null }>(
@@ -82,7 +83,7 @@ async function lastChange(pool: Pool): Promise<RepairView["changed"]> {
             (SELECT u.first_name || ' ' || u.last_name FROM user_claims c JOIN users u ON u.id = c.user_id
              WHERE c.line_sub = r.updated_by AND c.undone_at IS NULL AND u.active AND ${HOLDS} LIMIT 1) AS claimed,
             (SELECT b.display_name FROM line_bindings b WHERE b.line_sub = r.updated_by) AS line_name
-     FROM repair_periods r
+     FROM (SELECT updated_at, updated_by FROM repair_periods UNION ALL SELECT updated_at, updated_by FROM schedule_mode) r
      ORDER BY r.updated_by IS NULL, r.updated_at DESC
      LIMIT 1`,
   );

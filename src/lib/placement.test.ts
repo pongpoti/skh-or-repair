@@ -3,11 +3,12 @@ import { test } from "node:test";
 import type { DeptCode } from "./allocation.ts";
 import { isDressingCase, placeCase, roomsHeldBy, UNPLACED_TEXT, type PlaceInput } from "./placement.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import * as week from "./week.ts";
 
-const REPAIR = DEFAULT_REPAIR_PERIODS;
+const REPAIR = REPAIR_FROM_JAN;
 const PAST_MONDAY = "2026-11-09"; // a day the board shows looking back: the first half's rooms, as on every day since 1 Jan 2026
-const AFTER_MONDAY = "2027-03-22"; // after the repair's last day: the second half's rooms stay
+const AFTER_MONDAY = "2027-03-22"; // after the repair's last day: the weekly schedule again
 const FIRST_MONDAY = "2026-11-16"; // first half
 const SECOND_MONDAY = "2027-02-01"; // second half
 
@@ -26,17 +27,30 @@ test("the keyword rules are the same functions lib/week.ts has always exported",
   assert.equal(week.isDressingCase, isDressingCase);
 });
 
-test("no weekly schedule (Pong, 18 Nov 2026): a past day has the first half's rooms, a day after the repair the second's", () => {
-  // Before 18 Nov 2026 these went by the weekly schedule: dressing OR 1, emergencies OR 8, SCOPE OR 3, GENSX OR 2 or 5.
+test("the weekly schedule before and after the repair (Pong, 21 Nov 2026): the go-live period and after 17 Mar 2027", () => {
+  // The planned dates: the repair from 8 Dec 2026 to 17 Mar 2027. Outside it the weekly schedule's rules: dressing OR 1,
+  // emergencies OR 8, GENSX OR 2, each department in its own room, obstetrics in the main OR.
+  const planned = (item: PlaceInput, date: string) => {
+    const placement = placeCase(item, date, DEFAULT_REPAIR_PERIODS, new Map());
+    return placement.ok ? placement.roomId : placement.reason;
+  };
+  for (const date of [PAST_MONDAY, AFTER_MONDAY]) {
+    assert.equal(planned(input("ORTHO", { procedure: "Dressing wound" }), date), "or-1", `dressing ${date}`);
+    assert.equal(planned(input("ORTHO", { emergency: true }), date), "or-8", `emergency ${date}`);
+    assert.equal(planned(input("GENSX"), date), "or-2", `GENSX ${date}`);
+    assert.equal(planned(input("CVT"), date), "or-13", `CVT, Monday of weeks 2 and 4 ${date}`);
+    assert.equal(planned(input("OBGYN"), date), "or-4", `obstetrics on the board ${date}`);
+    assert.equal(planned(input("EYE"), date), "or-10", `EYE ${date}`);
+  }
+  // From 8 Dec 2026 the first half's rooms, by themselves.
+  assert.equal(planned(input("ORTHO", { procedure: "Dressing wound" }), "2026-12-14"), "or-10");
+  assert.equal(planned(input("OBGYN"), "2026-12-14"), "obgyn-building");
+  // With the first half from 1 Jan 2026 a past day had the first half's rooms; after the repair the weekly schedule.
   assert.equal(room(input("ORTHO", { procedure: "Dressing wound" }), PAST_MONDAY), "or-10", "dressing");
-  assert.equal(room(input("ORTHO", { emergency: true }), PAST_MONDAY), "or-9", "emergency");
-  assert.equal(room(input("GENSX", { procedure: "colonoscopy" }), PAST_MONDAY), "or-12", "no SCOPE rule: a general surgeon's endoscopy in GENSX's room");
-  assert.deepEqual(roomsHeldBy("GENSX", PAST_MONDAY, REPAIR), ["or-12"]);
   assert.equal(room(input("GENSX"), PAST_MONDAY), "or-12");
   assert.equal(room(input("CVT"), PAST_MONDAY), "or-11", "no CVT room: the mixed room");
-  assert.equal(room(input("OBGYN"), PAST_MONDAY), "obgyn-building");
-  assert.equal(room(input("GENSX"), AFTER_MONDAY), "or-5");
-  assert.equal(room(input("EYE"), AFTER_MONDAY), "or-4");
+  assert.deepEqual(roomsHeldBy("GENSX", PAST_MONDAY, REPAIR), ["or-12"]);
+  assert.equal(room(input("GENSX"), AFTER_MONDAY), "or-2");
   assert.equal(room(input("GENSX"), "2026-11-07"), "no-room", "Saturday");
 });
 

@@ -53,10 +53,14 @@ function refreshPages(): void {
 }
 
 /**
- * Saves both halves' dates. lib/repair-store.ts checks them again (the form already did, with the same messages) and
+ * Saves both halves' dates and the admin's switch (which rooms the board shows). lib/repair-store.ts checks them again (the form already did, with the same messages) and
  * records the admin's LINE sub as who saved them.
  */
-export async function saveRepair(input: { half1: { from: string; to: string }; half2: { from: string; to: string } }): Promise<RepairResult> {
+export async function saveRepair(input: {
+  half1: { from: string; to: string };
+  half2: { from: string; to: string };
+  mode?: string;
+}): Promise<RepairResult> {
   const user = await signedInAdmin();
   if (!user) return NOT_ADMIN;
 
@@ -65,7 +69,7 @@ export async function saveRepair(input: { half1: { from: string; to: string }; h
     const saved = await saveRepairPeriods(pool, input, user.sub);
     if (!saved.ok) return { ok: false, error: saved.error };
     refreshPages();
-    return { ok: true, repair: await repairViewFrom(pool), message: "บันทึกแล้ว ตารางผ่าตัดใช้วันที่ใหม่ทันที" };
+    return { ok: true, repair: await repairViewFrom(pool), message: "บันทึกแล้ว ตารางผ่าตัดของทุกคนเปลี่ยนทันที" };
   } catch (error) {
     console.error("Saving the repair dates failed", error);
     return FAILED;

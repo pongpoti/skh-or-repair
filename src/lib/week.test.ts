@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WEEK_DATA } from "../data/week-data.ts";
 import { boardDayHref, boardHref, DAY_KEYS, DAY_NAMES, parseDay, shortThaiDay, thaiDate, todayIso, weekDates, workdayIndex } from "./days.ts";
-import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import { boardFor, isDressingCase, resolveSurgeon, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
 
 // These weeks (Sep and Oct 2026) fall in the first half, which runs from 1 Jan 2026, so its rooms place the cases:
 // there is no weekly schedule in this app (Pong, 18 Nov 2026: "forget normal day OR schedule"). lib/placement.test.ts
 // covers placement in both halves; the tests here are the export week's own.
-const REPAIR = DEFAULT_REPAIR_PERIODS;
+const REPAIR = REPAIR_FROM_JAN;
 
 function fixture(cases: Partial<WeekCase>[]): WeekFile {
   return {

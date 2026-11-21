@@ -23,10 +23,10 @@ import {
   type AddedCase,
   type BookingContext,
 } from "./added-cases.ts";
-import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import type { DayBoard } from "./week.ts";
 
-const REPAIR = DEFAULT_REPAIR_PERIODS;
+const REPAIR = REPAIR_FROM_JAN;
 // Friday 13 November 2026 at 10:00, the day before the ventilation repair's first half (14 Nov 2026 to 26 Jan 2027).
 const TODAY = "2026-11-13";
 const at = (hh: number, mm = 0) => hh * 60 + mm;
@@ -123,7 +123,7 @@ test("no room: obstetrics-gynaecology during the repair, an unknown department, 
     "no-room": "ไม่มีในวันที่เลือก",
     "no-dressing-room": "ไม่มีในวันที่เลือก",
   });
-  assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้", "after the repair too: no weekly schedule");
+  assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "or-6", "after the repair: the weekly schedule's obstetric room");
   assert.equal(refused(null, "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
   assert.equal(refused("", "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
   assert.equal(refused("ANES", "Lap chole", "2026-11-16"), "or-11", "a subtype the suite has no department for: the mixed room");

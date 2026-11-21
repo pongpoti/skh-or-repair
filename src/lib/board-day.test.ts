@@ -11,12 +11,14 @@ import {
   nextBoardRefresh,
   PICK_AHEAD_DAYS,
   pickedDay,
+  CALENDAR_FIRST_DAY,
   pickRange,
   relationTo,
   stepDay,
 } from "./board-day.ts";
 import { BOOK_AHEAD_DAYS } from "./added-cases.ts";
-import { DEFAULT_REPAIR_PERIODS as REPAIR } from "./repair.ts";
+import { REPAIR_FROM_JAN as REPAIR } from "./repair-fixtures.ts";
+import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { forgetHolidayFeeds, type Holiday } from "./holidays.ts";
 
 /** A moment given as Bangkok wall time. */
@@ -164,17 +166,19 @@ test("loading the board's day: BOT holidays when they come, weekdays and EXTRA_H
   assert.deepEqual((await loadUploadSlot(at("2026-12-04T15:30:00"))).target, { ok: false, reason: "no-token" });
 });
 
-test("a day picked on the board: from the first half's first day, 1 Jan 2026, to the repair's last day", () => {
+test("a day picked on the board: from 1 Jan 2026 to the repair's last day", () => {
   // Pong, 18 Nov 2026: "apply first half schedule retrospectively from Jan 1, 2026 and allow view calendar backward"
   assert.deepEqual(pickRange("2026-11-17", REPAIR), { min: "2026-01-01", max: "2027-03-17" }, "the second half included");
   assert.deepEqual(pickRange("2027-03-17", REPAIR), { min: "2026-01-01", max: "2027-03-17" }, "the repair's last day");
   // once the repair is over, as far ahead as doctors book
   assert.equal(PICK_AHEAD_DAYS, BOOK_AHEAD_DAYS);
   assert.deepEqual(pickRange("2027-03-18", REPAIR), { min: "2026-01-01", max: "2027-05-17" });
-  // an admin's later first day starts the calendar there, but never after today
+  // the planned repair from 8 Dec 2026 (Pong, 21 Nov 2026): the calendar still looks back to 1 Jan 2026, whose days
+  // have the weekly schedule
   const later = { ...REPAIR, half1: { ...REPAIR.half1, from: "2026-12-08" } };
-  assert.deepEqual(pickRange("2026-11-17", later), { min: "2026-11-17", max: "2027-03-17" });
-  assert.deepEqual(pickRange("2026-12-20", later), { min: "2026-12-08", max: "2027-03-17" });
+  assert.deepEqual(pickRange("2026-11-17", later), { min: "2026-01-01", max: "2027-03-17" });
+  assert.deepEqual(pickRange("2026-12-20", later), { min: "2026-01-01", max: "2027-03-17" });
+  assert.deepEqual(pickRange("2026-11-17", DEFAULT_REPAIR_PERIODS), { min: CALENDAR_FIRST_DAY, max: "2027-03-17" });
 });
 
 test("the address's picked day: a real workday in range, else none", () => {

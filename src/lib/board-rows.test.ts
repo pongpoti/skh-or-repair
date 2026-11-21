@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
 import { buildBoardRows, missingUploadDay, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
-import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 
 // Tuesday 17 Nov 2026, the first half of the repair: OR 9 to 13 operate, OR 1 to 8 do not. Workbook cases and bookings
 // are placed by the half's layout: GENSX in OR 12, ORTHO in OR 13, a department without a room (URO) in the mixed
 // room OR 11, dressings in OR 10 (a workbook case by its name, a booking by the doctor's choice). A booking's saved
 // room counts only when no room can be worked out (no subtype).
 const DAY = "2026-11-17";
-const REPAIR = DEFAULT_REPAIR_PERIODS;
+const REPAIR = REPAIR_FROM_JAN;
 const MX: BoardViewer = { allHn: true, userId: null };
 const NOBODY: BoardViewer = { allHn: false, userId: null };
 

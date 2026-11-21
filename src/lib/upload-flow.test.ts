@@ -7,7 +7,8 @@ import { fileProblem, megabytes } from "../app/upload/file-check.ts";
 import type { AddedCase } from "./added-cases.ts";
 import { DEPARTMENTS } from "./allocation.ts";
 import { buildBoardRows } from "./board-rows.ts";
-import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "./repair.ts";
+import type { RepairPeriods } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import {
   matchBookings,
   nextWindowChange,
@@ -34,7 +35,7 @@ const DAY_FILE = SHEET.slice(0, 18); // header + rows 1–17
 
 // The planned dates put 5 Nov 2026 in the first half, which runs from 1 Jan 2026 (Pong, 18 Nov 2026: "apply first half
 // schedule retrospectively from Jan 1, 2026"); there is no weekly schedule in this app ("forget normal day OR schedule").
-const PLANNED = DEFAULT_REPAIR_PERIODS;
+const PLANNED = REPAIR_FROM_JAN;
 const FIRST_HALF: RepairPeriods = { half1: { from: "2026-11-01", to: "2026-11-30" }, half2: { from: "2026-12-01", to: "2027-01-15" } };
 const SECOND_HALF: RepairPeriods = { half1: { from: "2026-10-01", to: "2026-10-31" }, half2: { from: "2026-11-01", to: "2026-12-31" } };
 

@@ -84,16 +84,22 @@ export function boardEyebrow(relation: BoardDayRelation): string {
 export const PICK_AHEAD_DAYS = 60;
 
 /**
- * The days the board's date can be picked from, YYYY-MM-DD. The first day is the first half's first day, 1 Jan 2026 as
- * planned (Pong, 18 Nov 2026: "apply first half schedule retrospectively from Jan 1, 2026 and allow view calendar
- * backward"; until then it was today, "current and future day only", 15 Nov 2026), or today should an admin move that
- * day later. Today stays pickable after 16:00, when the board itself has moved on to the next workday. The last day is
- * the repair's last day, so the calendar stays within it, second half included ("Calendar confine Within time range");
- * once the repair is over, PICK_AHEAD_DAYS ahead.
+ * The first day the board's calendar offers: 1 Jan 2026, the first day of the past HOSxP lists (Pong, 18 Nov 2026:
+ * "allow view calendar backward"). Those days have the normal weekly OR schedule now that the repair starts on 8 Dec
+ * 2026 (lib/repair.ts repairOn).
+ */
+export const CALENDAR_FIRST_DAY = "2026-01-01";
+
+/**
+ * The days the board's date can be picked from, YYYY-MM-DD. The first day is CALENDAR_FIRST_DAY (or the first half's
+ * first day, should an admin move it earlier still); today stays pickable after 16:00, when the board itself has moved
+ * on to the next workday. The last day is the repair's last day, so the calendar stays within it, second half included
+ * ("Calendar confine Within time range"); once the repair is over, PICK_AHEAD_DAYS ahead.
  */
 export function pickRange(today: string, periods: RepairPeriods): { min: string; max: string } {
   const end = periods.half2.to > periods.half1.to ? periods.half2.to : periods.half1.to;
-  const first = REPAIR_IN_USE && periods.half1.from < today ? periods.half1.from : today;
+  const start = REPAIR_IN_USE && periods.half1.from < CALENDAR_FIRST_DAY ? periods.half1.from : CALENDAR_FIRST_DAY;
+  const first = start < today ? start : today;
   return { min: first, max: REPAIR_IN_USE && end >= today ? end : addDays(today, PICK_AHEAD_DAYS) };
 }
 

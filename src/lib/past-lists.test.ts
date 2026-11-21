@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { pastLists, splitByDay } from "./past-lists.ts";
-import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import { processSheet } from "./upload-flow.ts";
 import { readXlsx } from "./xlsx.ts";
 
@@ -11,7 +11,7 @@ import { readXlsx } from "./xlsx.ts";
 const book = readXlsx(readFileSync(new URL("../../tests/fixtures/sample-or-export.xlsx", import.meta.url)));
 assert.ok(book.ok);
 const HEADER = book.rows[0];
-const PERIODS = DEFAULT_REPAIR_PERIODS;
+const PERIODS = REPAIR_FROM_JAN;
 
 test("splitByDay: the past booked dates, each with its rows keyed in before 16:00 the day before", () => {
   const split = splitByDay(book, "2026-11-06");
