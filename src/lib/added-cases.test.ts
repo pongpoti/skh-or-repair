@@ -87,6 +87,10 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   assert.deepEqual(room("URO", "TURP", "2026-11-11"), { ok: true, roomId: "or-11", dressing: false }, "the first half's mixed room");
   // an empty name still shows the department's room in the form
   assert.deepEqual(room("ORTHO", "", FIRST), { ok: true, roomId: "or-13", dressing: false });
+  // Chest medicine has no period of its own: OR 4 on Mondays in the weekly schedule (21 Nov 2026), no room other days.
+  assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-22"), { ok: true, roomId: "or-4", dressing: false });
+  assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-23"), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" });
+  assert.deepEqual(room("CHEST", "Bronchoscopy", FIRST), { ok: true, roomId: "or-11", dressing: false }, "the repair's mixed room");
   // the surgeon decides (Pong, 15 Nov 2026): a name that reads like a dressing stays in the department's room
   for (const name of ["D/S + VAC", "Debridement", "I&D abscess", "Wound dressing"]) {
     assert.deepEqual(room("ORTHO", name, FIRST), { ok: true, roomId: "or-13", dressing: false }, name);
