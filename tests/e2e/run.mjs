@@ -3606,8 +3606,8 @@ async function main() {
       await ownerShot(page, "board-after-upload.png");
 
       // OR 12: doctor Y's booking matched first, then HOSxP's cases nobody booked (Pong, 15 Nov 2026: bookings first,
-      // then HOSxP's order); 7000011, a general surgeon's endoscopy, is GENSX's since the scope rule went (Pong, 19 Nov
-      // 2026: "now base on surgeon name and dept only, no more scope case"). In the dressing room OR 10, HOSxP's I&D and dressing nobody booked, with no flag, and not
+      // then HOSxP's order); 7000011, a general surgeon's endoscopy, is GENSX's, as the repair has no SCOPE room (Pong, 19
+      // Nov 2026: "no more scope case"). In the dressing room OR 10, HOSxP's I&D and dressing nobody booked, with no flag, and not
       // doctor X's dressing-room booking, which HOSxP does not list ("no real patient set"). Doctor X's matched case is
       // in OR 13, where HOSxP's list places it (ORTHO), not OR 11, the mixed room the booking was in: after the upload
       // MX's list decides the room, unless the doctor picked the dressing room.

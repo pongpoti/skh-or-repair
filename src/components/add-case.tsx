@@ -343,7 +343,7 @@ export function AddCase({
     return note ? { disabled: true, note } : { disabled: false };
   };
   // The two rooms the doctor can pick that day, worked out again on each render from the day (and the name, which sends
-  // a general surgeon's endoscopy to the mixed room during the repair).
+  // a general surgeon's endoscopy to the SCOPE room, OR 3, in the weekly schedule).
   const name = cleanOperation(operation);
   const deptRoom = bookingRoom(doctor.subtype, name, date, periods, "dept");
   const dressingRoom = bookingRoom(doctor.subtype, name, date, periods, "dressing");

@@ -18,6 +18,24 @@ export function isDressingCase(procedure: string): boolean {
   return isDressingOperation(procedure);
 }
 
+/**
+ * Operation names for the SCOPE room, matched case-insensitively: the OR-export rules doc's words (rule set C: "SCOPE
+ * cases -> the SCOPE room (OR 3)"), and the misspellings the Jan-Oct 2026 exports have ("colonscope", "colooscope",
+ * "sigmoidscope", "igmoidoscope").
+ */
+const SCOPE_INCLUDE = /\begd\b|gastroscop|esophagoscop|\bogd\b|colono|colo\w{0,3}scop|sigmoido|igmoid\w{0,2}scop|\bercp\b|endoscop|\beus\b/i;
+/** ...unless they are a foreign-body removal. */
+const SCOPE_EXCLUDE = /remove\s*fb|foreign body|\bfb\b/i;
+
+/**
+ * A case for the SCOPE room (Pong, 21 Nov 2026: "Move scope cases to scope room using rules"): a general surgeon's case
+ * (the surgeon's own department by name, lib/workbook.ts surgeonDeptOf, or a case coded SCOPE) whose operation is an
+ * endoscopy (EGD, gastroscopy, colonoscopy, sigmoidoscopy, ERCP, EUS...), not a foreign-body removal.
+ */
+export function isScopeCase(procedure: string, dept: DeptCode | null): boolean {
+  return (dept === "GENSX" || dept === "SCOPE") && SCOPE_INCLUDE.test(procedure) && !SCOPE_EXCLUDE.test(procedure);
+}
+
 /** What placement needs to know about a case. */
 export type PlaceInput = {
   /** The operation name. */
@@ -79,18 +97,19 @@ const unplaced = (reason: UnplacedReason): Placement => ({ ok: false, reason });
  * Where a case goes on `date`.
  *
  * Outside the repair (the weekly schedule): dressing cases use the dressing room (OR 1), emergency cases the emergency
- * room (OR 8; obstetrics-gynaecology stays in its own room), and anything else the room its department holds that
- * day, or, for a department with no period of its own, the room it sets its cases in as a guest (chest medicine: OR 4
- * on Mondays, lib/allocation.ts GUESTS). Closed rooms take no case: with OR 8 closed an emergency case goes to its
- * department's room.
+ * room (OR 8; obstetrics-gynaecology stays in its own room), a general surgeon's endoscopy the SCOPE room (OR 3,
+ * isScopeCase), and anything else the room its department holds that day, or, for a department with no period of its
+ * own, the room it sets its cases in as a guest (chest medicine: OR 4 on Mondays, lib/allocation.ts GUESTS). The SCOPE
+ * room takes no other case. Closed rooms take no case: with OR 8 closed an emergency case goes to its department's
+ * room.
  *
  * During the repair (`periods`, lib/repair.ts), with the half's rooms: obstetrics-gynaecology is not placed at all
  * (it operates in the obstetric building); dressing cases use the dressing room; emergencies the emergency room, NEURO
  * and CVT the half's own rooms for them; departments with no room of their own the mixed-department room; anything
  * else its department's room.
  *
- * There is no SCOPE rule any more (Pong, 19 Nov 2026: "now base on surgeon name and dept only, no more scope case"):
- * a general surgeon's endoscopy goes to the GENSX room like the rest of their list.
+ * The repair has no SCOPE room, so a general surgeon's endoscopy goes to the GENSX room like the rest of their list then
+ * (Pong, 19 Nov 2026: "no more scope case", after a colonoscopy showed in the mixed room).
  *
  * A department with several rooms is pooled, so the case goes to the one with the fewest cases so far (`load`).
  */
@@ -112,7 +131,12 @@ export function placeCase(input: PlaceInput, date: string, periods: RepairPeriod
   }
 
   const mixed = () => roomsHeldBy("MIXED", date, periods);
-  // A case coded SCOPE is a general surgeon's.
+  // A general surgeon's endoscopy goes to the SCOPE room on a day that has one (OR 3 in the weekly schedule).
+  if (isScopeCase(input.procedure, input.dept)) {
+    const scope = roomsHeldBy("SCOPE", date, periods);
+    if (scope.length > 0) return placed(fewest(scope, load));
+  }
+  // Any other case coded SCOPE is a general surgeon's.
   const dept = input.dept === "SCOPE" ? "GENSX" : input.dept;
   if (!dept) return unplaced("no-department");
 

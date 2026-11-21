@@ -108,7 +108,7 @@ test("rooms follow the first half's rules inside the repair", () => {
     { dept: "OBGYN" }, // operates in the obstetric building: off the board
   ]);
   // Monday 28 Sep 2026: dressing OR 10, emergency OR 9, EYE the mixed room OR 11, ORTHO OR 13, GENSX OR 12, the
-  // general surgeon's colonoscopy too (no scope rule since Pong, 19 Nov 2026). Before 18 Nov 2026 this was the weekly
+  // general surgeon's colonoscopy too (the repair has no SCOPE room, Pong, 19 Nov 2026). Before 18 Nov 2026 this was the weekly
   // schedule's OR 1, 8, 10, 11 or 12, 3 and 2 or 5.
   assert.deepEqual(roomsOf(data), ["or-10", "or-9", "or-11", "or-13", "or-12", "or-12"]);
 });

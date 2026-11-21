@@ -151,7 +151,7 @@ test("rows 1–17 as the file for Thu 5 Nov, in the first half as planned: 10 ke
   // The answers sheet placed these by the weekly schedule, which this app no longer uses (Pong, 18 Nov 2026). In the
   // first half's rooms: GENSX to OR 12, ORTHO to OR 13, dressing to OR 10 (900003, "I&D abscess Rt thigh", is a dressing
   // case now that I&D counts, Pong 15 Nov 2026), the endoscopy (900011) to GENSX's room like any general surgeon's case
-  // (no scope rule since Pong, 19 Nov 2026), and ENT and vascular surgery, which have no room of their own, to the
+  // (the repair has no SCOPE room, Pong, 19 Nov 2026), and ENT and vascular surgery, which have no room of their own, to the
   // mixed room OR 11. 900007, "Appendectomy (on call)", was keyed in the day before, so it is booked
   // ahead and kept (Pong, 18 Nov 2026: "Just ignore 'on call' word"); 900013, vascular surgery, is no longer cut as Tha
   // Chalom's quota ("stick to the interim schedule", "Vas stay on others room if not emer").
