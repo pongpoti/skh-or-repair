@@ -5,11 +5,13 @@ import { repairOn, type RepairPeriods } from "./repair.ts";
  * board uses it outside the repair: before it starts on 8 Dec 2026 (the go-live period and the past days), after it
  * ends, and whenever an admin switches to ตารางปกติ (Pong, 21 Nov 2026; lib/repair.ts repairOn).
  *
- * Source: the new proposed OR schedule (ตารางผ่าตัดใหม่ที่นำเสนอ, Pong, 4 Nov 2026). Each room has one department
- * all day, except OR 5 on Tuesday (paediatric surgery in the morning, general surgery in the afternoon) and OR 11 on
- * Friday (vascular in the morning, nephrology in the afternoon). On Mondays OR 11 and OR 13 alternate by week of the
- * month: weeks 1, 3 and 5 CVT in OR 11 and ORTHO in OR 13, weeks 2 and 4 the other way round. Periods the schedule
- * marks as over quota (*) count as the department's like any other.
+ * Source: the new proposed OR schedule (ตารางผ่าตัดใหม่ที่นำเสนอ), first sent by Pong on 4 Nov 2026; Pong sent the
+ * latest version on 21 Nov 2026, which changed OR 5 (skh-or-schedule's change of 10 Nov). Each room has one department
+ * all day, except OR 11 on Friday (vascular in the morning, nephrology in the afternoon). Some rooms alternate by week
+ * of the month, the whole day: on Mondays weeks 1, 3 and 5 CVT in OR 11 and ORTHO in OR 13, weeks 2 and 4 the other way
+ * round; on Wednesdays OR 5 has general surgery in weeks 1, 3 and 5 and paediatric surgery in weeks 2 and 4. OR 5 on
+ * Tuesday is paediatric surgery all day. Chest medicine has no period of its own but sets its cases in OR 4 on Mondays
+ * (GUESTS). Periods the schedule marks as over quota (*) count as the department's like any other.
  */
 
 export type DeptCode =
@@ -65,7 +67,7 @@ export const DEPARTMENTS: Record<DeptCode, Department> = {
   PLASTIC: dept("PLASTIC", "ศัลยกรรมตกแต่ง", "#A85C52", "PLAST"), // skin
   ENT: dept("ENT", "โสต ศอ นาสิก", "#00838F"), // breath through nose and throat
   NEPHRO: dept("NEPHRO", "อายุรกรรมโรคไต", "#6B4A2E", "NEPHR"), // a kidney bean
-  /** Not in the schedule: the pulmonologists in the admin list. */
+  /** No period in the schedule: the pulmonologists in the admin list, who set cases in OR 4 on Mondays (GUESTS). */
   CHEST: dept("CHEST", "อายุรกรรมโรคปอด", "#5867B8"), // air and the lungs
   PEDSX: dept("PEDSX", "ศัลยกรรมเด็ก", "#C25400"), // children, cheerful
   NEURO: dept("NEURO", "ศัลยกรรมระบบประสาท", "#5E35B1"), // the brain
@@ -109,8 +111,8 @@ type WeekPlan = readonly [Slot, Slot, Slot, Slot, Slot];
 const one = (code: DeptCode): Slot => [{ dept: code }];
 const always = (code: DeptCode): WeekPlan => [one(code), one(code), one(code), one(code), one(code)];
 
-/** Monday's turns in OR 11 and OR 13: `odd` in weeks 1, 3 and 5 of the month, `even` in weeks 2 and 4. */
-const mondayTurns = (odd: DeptCode, even: DeptCode): Slot => [
+/** Turns by week of the month (Monday in OR 11 and OR 13, Wednesday in OR 5): `odd` in weeks 1, 3 and 5, `even` in 2 and 4. */
+const weekTurns = (odd: DeptCode, even: DeptCode): Slot => [
   { dept: odd, nth: [1, 3, 5] },
   { dept: even, nth: [2, 4] },
 ];
@@ -123,22 +125,38 @@ const PLAN: Record<string, RoomPlan> = {
   "or-2": whole(always("GENSX")),
   "or-3": whole(always("SCOPE")),
   "or-4": whole([one("OBGYN"), one("ENT"), one("ENT"), one("ENT"), one("ENT")]),
-  "or-5": {
-    am: [one("GENSX"), one("PEDSX"), one("PEDSX"), one("GENSX"), one("GENSX")],
-    pm: [one("GENSX"), one("GENSX"), one("PEDSX"), one("GENSX"), one("GENSX")],
-  },
+  "or-5": whole([one("GENSX"), one("PEDSX"), weekTurns("GENSX", "PEDSX"), one("GENSX"), one("GENSX")]),
   "or-6": whole(always("OBGYN")),
   "or-7": whole(always("URO")),
   "or-8": whole(always("EMER")),
   "or-9": whole([one("PLASTIC"), one("MAXILLO"), one("PLASTIC"), one("PLASTIC"), one("OBGYN")]),
   "or-10": whole(always("EYE")),
   "or-11": {
-    am: [mondayTurns("CVT", "ORTHO"), one("ORTHO"), one("ORTHO"), one("ORTHO"), one("VASCULAR")],
-    pm: [mondayTurns("CVT", "ORTHO"), one("ORTHO"), one("ORTHO"), one("ORTHO"), one("NEPHRO")],
+    am: [weekTurns("CVT", "ORTHO"), one("ORTHO"), one("ORTHO"), one("ORTHO"), one("VASCULAR")],
+    pm: [weekTurns("CVT", "ORTHO"), one("ORTHO"), one("ORTHO"), one("ORTHO"), one("NEPHRO")],
   },
   "or-12": whole([one("ORTHO"), one("NEURO"), one("ORTHO"), one("NEURO"), one("ORTHO")]),
-  "or-13": whole([mondayTurns("ORTHO", "CVT"), one("ORTHO"), one("CVT"), one("ORTHO"), one("ORTHO")]),
+  "or-13": whole([weekTurns("ORTHO", "CVT"), one("ORTHO"), one("CVT"), one("ORTHO"), one("ORTHO")]),
 };
+
+/**
+ * Departments with no period of their own that still set their cases in a room on some weekdays (0 = Monday), beside
+ * the room's owner. Pong's schedule of 21 Nov 2026: "CHEST MED เซตเคสที่ OR4 วันจันทร์ (ไม่มีคาบให้)". The weekly
+ * schedule only: the room still shows its owner, and during the repair such a department uses the mixed room.
+ */
+const GUESTS: Partial<Record<DeptCode, Readonly<Record<string, readonly number[]>>>> = {
+  CHEST: { "or-4": [0] },
+};
+
+/** The rooms that take `code`'s cases on `date` as a guest in the weekly schedule (GUESTS), in number order. */
+export function weeklyGuestRooms(code: DeptCode, date: string): string[] {
+  const day = weekdayIndex(date);
+  const rooms = GUESTS[code];
+  if (!rooms || day === null) return [];
+  return Object.entries(rooms)
+    .filter(([, days]) => days.includes(day))
+    .map(([roomId]) => roomId);
+}
 
 export type RoomAllocation = {
   /** Morning owner, or null when the room is not allocated. */

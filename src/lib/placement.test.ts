@@ -54,6 +54,19 @@ test("the weekly schedule before and after the repair (Pong, 21 Nov 2026): the g
   assert.equal(room(input("GENSX"), "2026-11-07"), "no-room", "Saturday");
 });
 
+test("chest medicine sets its cases in OR 4 on Mondays in the weekly schedule, the mixed room during the repair", () => {
+  const planned = (item: PlaceInput, date: string) => {
+    const placement = placeCase(item, date, DEFAULT_REPAIR_PERIODS, new Map());
+    return placement.ok ? placement.roomId : placement.reason;
+  };
+  for (const date of [PAST_MONDAY, AFTER_MONDAY]) assert.equal(planned(input("CHEST"), date), "or-4", date);
+  assert.equal(planned(input("CHEST"), "2026-11-10"), "no-room", "Tuesday: no room");
+  assert.equal(planned(input("CHEST", { emergency: true }), PAST_MONDAY), "or-8", "an emergency still goes to OR 8");
+  assert.equal(planned(input("CHEST", { procedure: "Dressing wound" }), PAST_MONDAY), "or-1");
+  assert.equal(room(input("CHEST"), FIRST_MONDAY), "or-11", "first half: the mixed room");
+  assert.equal(room(input("CHEST"), SECOND_MONDAY), "or-4", "second half: OR 4 is the mixed room");
+});
+
 test("first half: the half's rooms, NEURO and CVT emergencies in OR 12 or 13, obstetrics off the board", () => {
   assert.equal(room(input("ORTHO", { procedure: "Dressing wound" }), FIRST_MONDAY), "or-10", "dressing");
   assert.equal(room(input("URO", { emergency: true }), FIRST_MONDAY), "or-9", "emergency");

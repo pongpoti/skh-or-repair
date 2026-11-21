@@ -1,4 +1,4 @@
-import { allocationFor, type DeptCode } from "./allocation.ts";
+import { allocationFor, weeklyGuestRooms, type DeptCode } from "./allocation.ts";
 import { isDressingOperation } from "./dressing.ts";
 import { repairOn, type RepairPeriods } from "./repair.ts";
 import { isOpenRoom } from "./rooms.ts";
@@ -80,7 +80,9 @@ const unplaced = (reason: UnplacedReason): Placement => ({ ok: false, reason });
  *
  * Outside the repair (the weekly schedule): dressing cases use the dressing room (OR 1), emergency cases the emergency
  * room (OR 8; obstetrics-gynaecology stays in its own room), and anything else the room its department holds that
- * day. Closed rooms take no case: with OR 8 closed an emergency case goes to its department's room.
+ * day, or, for a department with no period of its own, the room it sets its cases in as a guest (chest medicine: OR 4
+ * on Mondays, lib/allocation.ts GUESTS). Closed rooms take no case: with OR 8 closed an emergency case goes to its
+ * department's room.
  *
  * During the repair (`periods`, lib/repair.ts), with the half's rooms: obstetrics-gynaecology is not placed at all
  * (it operates in the obstetric building); dressing cases use the dressing room; emergencies the emergency room, NEURO
@@ -116,6 +118,7 @@ export function placeCase(input: PlaceInput, date: string, periods: RepairPeriod
 
   // The dressing room takes dressing cases only.
   let rooms = roomsHeldBy(dept, date, periods).filter((room) => !dressing.includes(room));
+  if (rooms.length === 0 && !repair) rooms = weeklyGuestRooms(dept, date).filter((room) => isOpenRoom(room, date, periods));
   if (rooms.length === 0) rooms = mixed();
   return rooms.length > 0 ? placed(fewest(rooms, load)) : unplaced("no-room");
 }
