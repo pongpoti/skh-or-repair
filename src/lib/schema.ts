@@ -306,6 +306,17 @@ CREATE TABLE IF NOT EXISTS users_added (
   added_by  text        NOT NULL
 );
 
+-- The mobile number an admin gave with a name added on /admin (lib/user-admin.ts; Pong, 21 Nov 2026: a new name that is
+-- not a doctor's needs its number, a doctor's its email in user_emails). Only that number may claim the name by SMS
+-- (lib/user-list.ts claimUser); names without a row are claimed by any verified number, as before. One number per name
+-- and one name per number.
+CREATE TABLE IF NOT EXISTS user_phones (
+  user_id     integer     PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+  phone       text        NOT NULL UNIQUE CHECK (phone ~ '^0[689][0-9]{8}$'),
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  added_by    text        NOT NULL
+);
+
 -- HOSxP workbook uploads (lib/workbook-store.ts): MX uploads the next workday's list between 15:00 and 16:00 Bangkok
 -- time. cycle_day is the Bangkok date of the upload and target_date the workday it lists; the board shows the latest
 -- upload of its cycle (lib/board-day.ts). uploaded_by is the uploader's LINE sub. summary holds counts only (rows read,

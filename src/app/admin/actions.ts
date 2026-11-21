@@ -120,9 +120,17 @@ export async function revokeMx(userId: string): Promise<MxResult> {
 
 /**
  * Adds a name to the staff list (Pong, 17 Nov 2026: "on section all name: add user button"), or brings an inactive one
- * back with the type and subtype given (lib/user-admin.ts). The person can then claim it when they sign in.
+ * back with the type and subtype given (lib/user-admin.ts). A doctor's comes with their email address, anyone else's
+ * with their mobile number (Pong, 21 Nov 2026), checked as the form checks them. The person can then sign in with it.
  */
-export async function addStaff(input: { firstName: string; lastName: string; type: string; subtype: string }): Promise<StaffResult> {
+export async function addStaff(input: {
+  firstName: string;
+  lastName: string;
+  type: string;
+  subtype: string;
+  email?: string;
+  phone?: string;
+}): Promise<StaffResult> {
   const user = await signedInAdmin();
   if (!user) return NOT_ADMIN;
   const checked = checkNewUser(input ?? {});
@@ -133,6 +141,8 @@ export async function addStaff(input: { firstName: string; lastName: string; typ
     const pool = await db();
     const result = await addUser(pool, checked.user, user.sub);
     if (result.status === "exists") return { ok: false, error: `มี ${name} ในรายชื่ออยู่แล้ว` };
+    if (result.status === "email_taken") return { ok: false, error: "อีเมลนี้มีชื่ออื่นใช้แล้ว" };
+    if (result.status === "phone_taken") return { ok: false, error: "เบอร์นี้มีชื่ออื่นใช้แล้ว" };
     refreshPages();
     const message = result.status === "added" ? `เพิ่ม ${name} แล้ว` : `เปิดใช้งาน ${name} อีกครั้งแล้ว`;
     return { ok: true, staff: await staffFrom(pool), message, id: result.id };

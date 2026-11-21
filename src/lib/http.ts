@@ -2,14 +2,15 @@ import "server-only";
 import { NextResponse, type NextRequest } from "next/server";
 import { appUrl, phoneSignInOpen } from "./env";
 import { CLAIM_BLOCKED, CLAIM_BLOCKED_LINE, DOCTORS_ONLY } from "./claim-text";
+import { PHONE_RULE } from "./contact";
 import { isJsonRequest, isSameOrigin } from "./security";
 
 export const MSG = {
   notReady: "ระบบยังไม่พร้อม ติดต่อผู้ดูแล",
   badRequest: "ทำรายการไม่สำเร็จ ลองใหม่อีกครั้ง",
   sessionExpired: "หมดเวลา เริ่มเข้าสู่ระบบใหม่",
-  // U+00A0 keeps a number with its unit ("10 หลัก") on one line (Thai line breaking)
-  invalidPhone: "ใส่เบอร์มือถือ 10\u00A0หลัก ขึ้นต้นด้วย 06, 08 หรือ 09",
+  // the forms say the same as people type (lib/contact.ts)
+  invalidPhone: PHONE_RULE,
   // deeSMSX refused the number (reference code 99)
   smsRejected: "ส่ง SMS ไปเบอร์นี้ไม่ได้ ตรวจเบอร์อีกครั้ง",
   // deeSMSX has no credit left (102)
