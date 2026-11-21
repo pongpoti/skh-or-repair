@@ -628,7 +628,7 @@ async function main() {
   // loaded once the app has created them, as in production: loadUsers() after the servers are up).
   const db = new pg.Pool({ connectionString: DB_URL, max: 2 });
   await assertDisposableUsers((sql) => db.query(sql), "E2E_DATABASE_URL"); // users holding real data: stop before the DROP
-  await db.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+  await db.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, schedule_mode, user_claims, email_codes, user_emails, users, access_requests");
 
   const appEnv = {
     ...baseEnv(),
@@ -2559,9 +2559,15 @@ async function main() {
         await page.goto(`${APP}/`, { waitUntil: "networkidle" });
         assert((await textOf(page, '[data-testid="board-eyebrow"]')) === eyebrow, `${at}: eyebrow ${await textOf(page, '[data-testid="board-eyebrow"]')}`);
         assert((await page.getAttribute("header time", "datetime")) === date, `${at}: the board's date ${await page.getAttribute("header time", "datetime")}`);
-        // every one of these days is in the repair's first half, and nothing has been uploaded
+        // nothing has been uploaded; the November days are the go-live period with the normal weekly schedule, and
+        // 8 Dec 2026 is the repair's first day (Pong, 21 Nov 2026), switched to by itself
         assert((await textOf(page, '[data-testid="no-upload-alert"]')) === `ยังไม่มีตาราง HOSxP ของ ${label}`, `${at}: no-upload alert`);
-        assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", `${at}: the first half's repair zone`);
+        if (date < "2026-12-08") {
+          assert((await page.locator('[data-testid="repair-zone"]').count()) === 0, `${at}: no repair zone before 8 Dec 2026`);
+          assert((await page.getAttribute("#or-2 .fp-floor", "role")) === "button", `${at}: the weekly schedule's OR 2 operates`);
+        } else {
+          assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", `${at}: the first half's repair zone`);
+        }
         assert((await page.locator('[data-testid="repair-note"]').count()) === 0, `${at}: no repair note above the plan`);
         assert((await page.locator('[data-testid="upload-button"], [data-testid="account-upload-link"]').count()) === 0, "no upload link for a nurse");
       }
@@ -2570,8 +2576,9 @@ async function main() {
       setNow("2027-03-22T10:00:00+07:00");
       await page.goto(`${APP}/`, { waitUntil: "networkidle" });
       assert((await page.getAttribute("header time", "datetime")) === "2027-03-22", "Monday 22 Mar 2027");
-      // No weekly schedule after it either (Pong, 18 Nov 2026: "forget normal day OR schedule"): the second half's rooms stay.
-      assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "2", "the second half's rooms after the repair");
+      // After it the normal weekly schedule again (Pong, 21 Nov 2026).
+      assert((await page.locator('[data-testid="repair-zone"]').count()) === 0, "no repair zone after the repair");
+      assert((await page.getAttribute("#or-12 .fp-floor", "role")) === "button", "every OR operates after the repair");
       assert((await textOf(page, '[data-testid="no-upload-alert"]')) === "ยังไม่มีตาราง HOSxP ของ 22 มี.ค. 2570", "no-upload alert after the repair");
       const calls = await (await fetch(`${LINE}/__control/bot/calls`)).json();
       assert(calls.some((c) => c.year === "2026") && calls.every((c) => c.authorized), `holidays from the BOT stub with its token: ${JSON.stringify(calls)}`);
@@ -2662,7 +2669,7 @@ async function main() {
       assert(
         JSON.stringify(sections) ===
           JSON.stringify(
-            ["ช่วงปิดซ่อมห้องผ่าตัด", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ตารางย้อนหลังจาก HOSxP", "โหมดทดสอบ"].map((title) => [
+            ["ตารางผ่าตัดและช่วงปิดซ่อม", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ตารางย้อนหลังจาก HOSxP", "โหมดทดสอบ"].map((title) => [
               title,
               "false",
               false,
@@ -2684,16 +2691,19 @@ async function main() {
       assert((await page.getAttribute("#repair-periods-toggle", "aria-expanded")) === "true", "opened by its heading");
       const dates = async () =>
         Promise.all(["1-from", "1-to", "2-from", "2-to"].map((k) => dateValue(page, `repair-half-${k}`)));
-      assert(JSON.stringify(await dates()) === JSON.stringify(["2026-01-01", "2027-01-26", "2027-01-27", "2027-03-17"]), `the planned dates: ${await dates()}`);
-      assert((await textOf(page, '[data-testid="repair-half-1"]')).includes("กำลังปิดซ่อม"), "half 1 is running today");
+      assert(JSON.stringify(await dates()) === JSON.stringify(["2026-12-08", "2027-01-26", "2027-01-27", "2027-03-17"]), `the planned dates: ${await dates()}`);
+      // today (November 2026) is the go-live period: the normal schedule, no half running, the switch on อัตโนมัติ
+      assert(!(await textOf(page, '[data-testid="repair-half-1"]')).includes("กำลังปิดซ่อม"), "half 1 is not running yet");
       assert(!(await textOf(page, '[data-testid="repair-half-2"]')).includes("กำลังปิดซ่อม"), "half 2 is not");
+      assert((await textOf(page, '[data-testid="schedule-mode-today"]')) === "วันนี้ใช้ตารางปกติ", "today: the normal schedule");
+      assert(await page.isChecked('[data-testid="schedule-mode-auto"] input'), "อัตโนมัติตามวันที่ to start with");
       assert((await textOf(page, '[data-testid="repair-changed"]')) === "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข", "nobody has saved yet");
       assert(await page.isDisabled('[data-testid="repair-save"]'), "nothing to save yet");
 
       // the second half must start after the first ends: refused here (the server checks again)
       // the dates are written out and picked in Thai (Pong, 15 Nov 2026)
-      // the first half runs from 1 Jan 2026 (Pong, 18 Nov 2026: "apply first half schedule retrospectively from Jan 1, 2026")
-      assert((await textOf(page, '[data-testid="repair-half-1-from"]')).includes("วันพฤหัสบดีที่ 1 มกราคม 2569"), "the first day in Thai");
+      // the repair starts on 8 Dec 2026 and runs 100 days (Pong, 21 Nov 2026)
+      assert((await textOf(page, '[data-testid="repair-half-1-from"]')).includes("วันอังคารที่ 8 ธันวาคม 2569"), "the first day in Thai");
       await pickDate(page, "repair-half-2-from", "2027-01-20");
       // a date changed and not saved: the heading says so, and closing the section keeps it
       assert(await page.isVisible('[data-testid="repair-unsaved"]'), "ยังไม่บันทึก in the heading");
@@ -2751,7 +2761,22 @@ async function main() {
         "the zone's stripes are drawn under the rooms",
       );
 
-      // and back to the planned dates
+      // the admin's switch (Pong, 21 Nov 2026): ตารางปกติ shows the weekly schedule on every day, for everyone at once
+      await page.click('[data-testid="schedule-mode-normal"]');
+      assert(await page.isVisible('[data-testid="repair-unsaved"]'), "a switch not saved yet");
+      await page.click('[data-testid="repair-save"]');
+      await waitUntil(async () => (await db.query("SELECT mode FROM schedule_mode")).rows[0]?.mode === "normal", "the switch saved");
+      await page.waitForSelector('[data-testid="repair-mode-forced"]');
+      await board.reload({ waitUntil: "networkidle" });
+      assert((await board.locator('[data-testid="repair-zone"]').count()) === 0, "ตารางปกติ: no repair zone, inside the second half's dates too");
+      assert((await board.getAttribute("#or-12 .fp-floor", "role")) === "button", "ตารางปกติ: OR 12 operates");
+      await page.click('[data-testid="schedule-mode-auto"]');
+      await page.click('[data-testid="repair-save"]');
+      await waitUntil(async () => (await db.query("SELECT mode FROM schedule_mode")).rows[0]?.mode === "auto", "back to อัตโนมัติ");
+      await page.locator('[data-testid="repair-mode-forced"]').waitFor({ state: "detached" });
+
+      // and, for the rest of these tests, the first half from 1 Jan 2026 as planned until 21 Nov 2026, so the November
+      // days keep the repair's rooms
       await save("2026-01-01", "2027-01-26", "2027-01-27", "2027-03-17");
       await board.reload({ waitUntil: "networkidle" });
       assert((await board.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "first half again");
@@ -4195,7 +4220,7 @@ async function main() {
           assert((await textOf(page, "#coach-examples-title")) === "ดูตัวอย่างเคส elective ในเวลา", "Pong's words as the title");
           assert((await textOf(page, '[data-testid="coach-examples"] .coach-card-text')).includes("ม.ค.–ต.ค. 2569"), "January to October 2026");
           assert((await page.locator('[data-testid="coach-examples-ways"] li').count()) === 2, "swipe the plan, or the calendar");
-          assert((await textOf(page, '[data-testid="coach-examples-plan"]')).includes("ช่วงซ่อมครึ่งแรก"), "a past day shows the first half's plan");
+          assert((await textOf(page, '[data-testid="coach-examples-plan"]')).includes("ตารางผ่าตัดปกติ"), "a past day shows the normal schedule");
         },
       });
       assert(walked.indexOf("examples") > walked.indexOf("doers") && walked.indexOf("examples") < walked.indexOf("finish"), `the real days before, after the dressing room: ${walked.join(", ")}`);

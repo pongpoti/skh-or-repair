@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { AddedCase } from "./added-cases.ts";
-import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import { isDressingCase } from "./placement.ts";
 import { AUTO_DRESSING_OPERATION, DRESSING_EXAMPLES, LONG_OPERATION, practiceRoom, practiceSubtype, TUTORIAL_ME, tutorialBoard } from "./tutorial.ts";
 
-const REPAIR = DEFAULT_REPAIR_PERIODS;
+const REPAIR = REPAIR_FROM_JAN;
 const DAY = "2026-11-20"; // a Friday in the first half: OR 9 EMER, 10 D/S, 11 mixed, 12 GENSX, 13 ORTHO
 const DOCTOR = { name: "ทดลอง ใช้งาน", subtype: "GENSX" };
 const TODAY = "2026-11-19"; // the Thursday before: the made-up doctors booked on Wednesday

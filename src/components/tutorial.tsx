@@ -1456,8 +1456,8 @@ function DressingRuleCard({ onNext }: { onNext: () => void }) {
  * The real days before (Pong, 20 Nov 2026: "note to user that user can view previous real example of in-hours elective
  * case assignment (ตัวอย่างเคส elective ในเวลา) on month Jan to Oct 2026 by swiping layout or choose date from
  * calendar, the OR layout will assume to be first half of repair phase"). HOSxP's lists of January to October 2026 are
- * on the board's past days (admin import, lib/past-lists.ts: cases booked ahead, in hours), each drawn on the first
- * half's plan (lib/repair.ts repairOn).
+ * on the board's past days (admin import, lib/past-lists.ts: cases booked ahead, in hours). Since the repair starts on
+ * 8 Dec 2026 (Pong, 21 Nov 2026), those days have the normal weekly OR schedule (lib/repair.ts repairOn).
  */
 function ExamplesCard({ onNext }: { onNext: () => void }) {
   return (
@@ -1507,7 +1507,7 @@ function ExamplesCard({ onNext }: { onNext: () => void }) {
         </li>
       </ol>
       <p className="coach-card-note" data-testid="coach-examples-plan">
-        วันย้อนหลังแสดงแปลนห้องช่วงซ่อมครึ่งแรกเสมอ
+        วันย้อนหลังแสดงห้องตามตารางผ่าตัดปกติ
       </p>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">

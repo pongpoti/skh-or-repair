@@ -270,11 +270,23 @@ CREATE TABLE IF NOT EXISTS repair_periods (
   updated_by  text,
   CHECK (from_date <= to_date)
 );
-INSERT INTO repair_periods (half, from_date, to_date) VALUES (1, '2026-01-01', '2027-01-26'), (2, '2027-01-27', '2027-03-17')
+INSERT INTO repair_periods (half, from_date, to_date) VALUES (1, '2026-12-08', '2027-01-26'), (2, '2027-01-27', '2027-03-17')
 ON CONFLICT (half) DO NOTHING;
--- The first half's rooms apply back to 1 Jan 2026 (Pong, 18 Nov 2026: "apply first half schedule retrospectively from
--- Jan 1, 2026"). Moves the first day of a seed nobody has edited (the old 14 Nov 2026 start); an admin's own dates stay.
-UPDATE repair_periods SET from_date = '2026-01-01' WHERE half = 1 AND from_date = '2026-11-14' AND updated_by IS NULL;
+-- The repair starts on 8 Dec 2026 and runs 100 days, to 17 Mar 2027 (Pong, 21 Nov 2026); before it the board shows the
+-- normal weekly OR schedule. Moves the first day of a seed nobody has edited (the old 14 Nov 2026 start, then 1 Jan 2026,
+-- "apply first half schedule retrospectively", 18 Nov 2026); an admin's own dates stay.
+UPDATE repair_periods SET from_date = '2026-12-08'
+WHERE half = 1 AND from_date IN ('2026-11-14', '2026-01-01') AND updated_by IS NULL;
+
+-- The admin's switch for which rooms the board shows (lib/repair.ts ScheduleMode, Pong, 21 Nov 2026): 'auto' by the
+-- repair's dates, 'normal' the weekly OR schedule on every day, 'half1' or 'half2' that half's rooms on every day. One
+-- row; no row means 'auto'. updated_by is the LINE sub of the admin who saved it.
+CREATE TABLE IF NOT EXISTS schedule_mode (
+  id          smallint    PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  mode        text        NOT NULL CHECK (mode IN ('auto', 'normal', 'half1', 'half2')),
+  updated_at  timestamptz NOT NULL DEFAULT now(),
+  updated_by  text
+);
 
 -- MX (ผู้จัดการตาราง): the users who upload the HOSxP workbook (lib/roles.ts), granted and revoked by an admin on /admin.
 -- Revoking deletes the row. The role holds only while the user's current claim does (an inactive user loses it).

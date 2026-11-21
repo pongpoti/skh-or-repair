@@ -7,7 +7,8 @@ import { fileProblem, megabytes } from "../app/upload/file-check.ts";
 import type { AddedCase } from "./added-cases.ts";
 import { DEPARTMENTS } from "./allocation.ts";
 import { buildBoardRows } from "./board-rows.ts";
-import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "./repair.ts";
+import type { RepairPeriods } from "./repair.ts";
+import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import {
   matchBookings,
   nextWindowChange,
@@ -32,9 +33,9 @@ const HEADER = SHEET[0];
 const THURSDAY = "2026-11-05";
 const DAY_FILE = SHEET.slice(0, 18); // header + rows 1–17
 
-// The planned dates put 5 Nov 2026 in the first half, which runs from 1 Jan 2026 (Pong, 18 Nov 2026: "apply first half
-// schedule retrospectively from Jan 1, 2026"); there is no weekly schedule in this app ("forget normal day OR schedule").
-const PLANNED = DEFAULT_REPAIR_PERIODS;
+// With the first half from 1 Jan 2026 (lib/repair-fixtures.ts; the planned repair starts on 8 Dec 2026), 5 Nov 2026 is
+// in the first half.
+const PLANNED = REPAIR_FROM_JAN;
 const FIRST_HALF: RepairPeriods = { half1: { from: "2026-11-01", to: "2026-11-30" }, half2: { from: "2026-12-01", to: "2027-01-15" } };
 const SECOND_HALF: RepairPeriods = { half1: { from: "2026-10-01", to: "2026-10-31" }, half2: { from: "2026-11-01", to: "2026-12-31" } };
 
@@ -314,7 +315,7 @@ test("during the repair OB-GYN is not placed (obstetric building) and a case wit
     { reason: "obgyn-building", label: "สูติ-นรีเวช ผ่าตัดที่อาคารแม่", count: 1 },
     { reason: "no-department", label: "ไม่ทราบแผนก", count: 1 },
   ]);
-  // The planned dates give the same: there is no weekly schedule, where OB-GYN held OR 6 (Pong, 18 Nov 2026).
+  // The first half from 1 Jan 2026 gives the same: OB-GYN stays off the board, not in the weekly schedule's OR 6.
   const planned = processed(processWorkbook(xlsxOf(rows), THURSDAY, PLANNED));
   assert.deepEqual(roomOf(planned), roomOf(repair));
   assert.deepEqual(planned.summary.unplaced, repair.summary.unplaced);

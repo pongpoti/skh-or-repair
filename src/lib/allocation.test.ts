@@ -13,8 +13,8 @@ import {
 } from "./allocation.ts";
 import { ROOM_CORNER_RADIUS, ROOMS, roomBounds, roomOutline } from "./rooms.ts";
 
-// The usual weekly schedule, which the repair's board no longer uses (Pong, 18 Nov 2026: "forget normal day OR
-// schedule"; lib/repair.test.ts covers the rooms the board uses). These tests keep its data right as a reference.
+// The usual weekly schedule, which the board shows outside the repair (Pong, 21 Nov 2026; lib/repair.test.ts covers
+// when). These tests keep its data right.
 
 const MON = "2026-10-05";
 const WEEK = ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"];

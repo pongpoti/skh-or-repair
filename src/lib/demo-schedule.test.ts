@@ -7,7 +7,8 @@ import { addDays } from "./days.ts";
 import { DEMO_MIN_CASES, demoBoardRows, demoDay, demoSchedule } from "./demo-schedule.ts";
 import { isDressingOperation } from "./dressing.ts";
 import { isWorkday } from "./holidays.ts";
-import { DEFAULT_REPAIR_PERIODS, REPAIR_LAYOUTS, repairOn, type RepairPeriods } from "./repair.ts";
+import { REPAIR_LAYOUTS, repairOn, type RepairPeriods } from "./repair.ts";
+import { REPAIR_FROM_JAN as DEFAULT_REPAIR_PERIODS } from "./repair-fixtures.ts";
 import { openRooms, roomUse } from "./rooms.ts";
 
 const MX = { allHn: true, userId: null };
@@ -49,9 +50,9 @@ test("the demo puts 10 to 12 cases in every open room, on every weekday of both 
   }
 });
 
-test("on any weekday, before, between and after the halves too (no weekly schedule), every open room has 10", () => {
+test("on any weekday, before, between and after the halves too (the weekly schedule outside them), every open room has 10", () => {
   // Dates an admin may save with a gap from 5 Dec 2026 to 3 Jan 2027: the first half's rooms stay until the second
-  // starts (Pong, 18 Nov 2026: "forget normal day OR schedule"), so every day is a day of the repair.
+  // starts. Before the first half and after the second the board has the weekly schedule (Pong, 21 Nov 2026).
   const GAP: RepairPeriods = { half1: { from: "2026-11-14", to: "2026-12-04" }, half2: { from: "2027-01-04", to: "2027-03-17" } };
   const nobody = { allHn: false, userId: null };
   for (const periods of [DEFAULT_REPAIR_PERIODS, MOVED, GAP]) {
@@ -79,7 +80,7 @@ test("on any weekday, before, between and after the halves too (no weekly schedu
         assert.ok(plain.rows.every((row) => row.hn === undefined), `${date}: no HN for an ordinary viewer`);
       }
     }
-    assert.equal(outside, 0, "no day outside the repair");
+    assert.ok(outside > 0, "days outside the repair have the weekly schedule");
   }
 });
 
