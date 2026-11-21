@@ -1,10 +1,9 @@
 import { repairOn, type RepairPeriods } from "./repair.ts";
 
 /**
- * Which department owns each operating room, Monday to Friday, in the usual weekly schedule. This app is the repair's
- * board, so the board never uses it (Pong, 18 Nov 2026: "This OR repair repo, not orskh repo. So you need to forget
- * normal day OR schedule"): every day has one half of the repair's rooms (lib/repair.ts repairOn). It stays as the
- * reference for the rooms and their departments, and so that REPAIR_IN_USE could switch the repair off.
+ * Which department owns each operating room, Monday to Friday, in the usual weekly schedule (the same as orskh's). The
+ * board uses it outside the repair: before it starts on 8 Dec 2026 (the go-live period and the past days), after it
+ * ends, and whenever an admin switches to ตารางปกติ (Pong, 21 Nov 2026; lib/repair.ts repairOn).
  *
  * Source: the new proposed OR schedule (ตารางผ่าตัดใหม่ที่นำเสนอ, Pong, 4 Nov 2026). Each room has one department
  * all day, except OR 5 on Tuesday (paediatric surgery in the morning, general surgery in the afternoon) and OR 11 on
@@ -184,8 +183,8 @@ function owner(slot: Slot, nth: number): Department | null {
  * a weekend, an unknown room, or an invalid date.
  *
  * The repair's half (`periods`, lib/repair.ts) decides: a room in use holds its one department all day, in the
- * department's own colour (Pong, 14 Nov 2026), and a recovery, instrument or closed room holds none. Every day has a
- * half (repairOn), so the weekly schedule (weeklyAllocationFor) is reached only should REPAIR_IN_USE be switched off.
+ * department's own colour (Pong, 14 Nov 2026), and a recovery, instrument or closed room holds none. A day without a
+ * half (repairOn: outside the repair's dates, or the admin's ตารางปกติ) has the weekly schedule (weeklyAllocationFor).
  */
 export function allocationFor(roomId: string, date: string, periods: RepairPeriods): RoomAllocation | null {
   const plan = PLAN[roomId];
@@ -202,7 +201,7 @@ export function allocationFor(roomId: string, date: string, periods: RepairPerio
   return weeklyAllocationFor(roomId, date);
 }
 
-/** Who holds `roomId` on `date` in the usual weekly schedule, which the board no longer uses (see the top of this file). */
+/** Who holds `roomId` on `date` in the usual weekly schedule (see the top of this file). */
 export function weeklyAllocationFor(roomId: string, date: string): RoomAllocation | null {
   const plan = PLAN[roomId];
   const day = weekdayIndex(date);

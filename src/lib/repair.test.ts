@@ -235,7 +235,7 @@ test("a booking's room follows the repair: own department's room, else the mixed
   assert.equal(room(null, SECOND_DAY), null);
   // Room codes that are not departments go to the mixed room: an elective booking never takes the emergency room.
   for (const code of ["EMER", "INFECT", "MINOR", "MIXED", "UNK", "ANES"]) assert.equal(room(code, FIRST_MONDAY), "or-11", code);
-  assert.equal(room("URO", PAST_MONDAY), "or-11", "a past day: the first half's mixed room, never the weekly schedule's");
+  assert.equal(room("URO", PAST_MONDAY), "or-11", "a past day with the first half from 1 Jan 2026: the first half's mixed room");
   // never a recovery, instrument or closed room
   for (const date of [FIRST_MONDAY, SECOND_DAY]) {
     for (const subtype of Object.keys(DEPARTMENTS)) {

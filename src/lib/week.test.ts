@@ -5,8 +5,8 @@ import { boardDayHref, boardHref, DAY_KEYS, DAY_NAMES, parseDay, shortThaiDay, t
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import { boardFor, isDressingCase, resolveSurgeon, weekBoard, type WeekCase, type WeekFile } from "./week.ts";
 
-// These weeks (Sep and Oct 2026) fall in the first half, which runs from 1 Jan 2026, so its rooms place the cases:
-// there is no weekly schedule in this app (Pong, 18 Nov 2026: "forget normal day OR schedule"). lib/placement.test.ts
+// With the first half from 1 Jan 2026 (lib/repair-fixtures.ts; the planned repair starts on 8 Dec 2026) these weeks
+// (Sep and Oct 2026) fall in the first half, so its rooms place the cases. lib/placement.test.ts
 // covers placement in both halves; the tests here are the export week's own.
 const REPAIR = REPAIR_FROM_JAN;
 
@@ -97,7 +97,7 @@ test("keeps no patient fields in the case data", () => {
   }
 });
 
-test("rooms follow the first half's rules, with no weekly schedule", () => {
+test("rooms follow the first half's rules inside the repair", () => {
   const data = fixture([
     { proc: "Dressing wound", dept: "GENSX" },
     { emergency: true, dept: "ORTHO" },

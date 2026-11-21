@@ -99,7 +99,7 @@ test("ห้องทำแผล: the dressing room that day, whatever the depa
   assert.deepEqual(room("ORTHO", "ORIF radius", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "the name does not gate it");
   assert.deepEqual(room("URO", "", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true });
   assert.deepEqual(room("GENSX", "D/S", "2027-01-27"), { ok: true, roomId: "or-1", dressing: true }, "the second half");
-  assert.deepEqual(room("GENSX", "dressing", "2026-11-11"), { ok: true, roomId: "or-10", dressing: true }, "the first half's dressing room, never the weekly schedule's OR 1");
+  assert.deepEqual(room("GENSX", "dressing", "2026-11-11"), { ok: true, roomId: "or-10", dressing: true }, "the first half's dressing room (first half from 1 Jan 2026), not the weekly schedule's OR 1");
   assert.deepEqual(room(null, "Dressing", "2026-11-16"), { ok: true, roomId: "or-10", dressing: true }, "no department needed");
   assert.deepEqual(room("GENSX", "D/S", "2026-11-21"), { ok: false, reason: "no-dressing-room", error: "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น" }, "a Saturday");
 });
