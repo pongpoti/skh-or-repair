@@ -260,7 +260,7 @@ describe("verification history (database)", () => {
   const pool = createPool(TEST_DB);
 
   before(async () => {
-    await pool.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+    await pool.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
     await ensureSchema(pool);
   });
   after(() => pool.end());

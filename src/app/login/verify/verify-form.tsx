@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Notice } from "@/components/auth-shell";
+import { cleanPhoneInput, PHONE_RULE, phoneProblem } from "@/lib/contact";
 import { waitText } from "@/lib/format";
 import { TYPE_LABELS, type PhoneUserType } from "@/lib/user-labels";
 
@@ -53,18 +54,6 @@ export function cleanCode(v: string): string {
     .replace(/[๐-๙]/g, (d) => String(d.charCodeAt(0) - 0x0e50))
     .replace(/\D/g, "")
     .slice(0, 6);
-}
-
-/**
- * Thai (๐-๙) and full-width digits -> ASCII; keeps only what a phone number is typed with; max 20 characters (after
- * cleaning, so a pasted "+66 (0) 81 234 5678" is never cut short).
- */
-export function cleanPhoneInput(v: string): string {
-  return v
-    .normalize("NFKC")
-    .replace(/[๐-๙]/g, (d) => String(d.charCodeAt(0) - 0x0e50))
-    .replace(/[^\d+\- ().]/g, "")
-    .slice(0, 20);
 }
 
 /** Step counter and heading of a sign-in step. */
@@ -129,6 +118,8 @@ export function VerifyForm({ type }: { type: PhoneUserType }) {
   const [waitFor, setWaitFor] = useState("");
   // Only an error about the number itself marks the field invalid (not the daily cap or a network error).
   const [phoneInvalid, setPhoneInvalid] = useState(false);
+  // The number field was left once (or the form sent): from then on a number still too short is said to be wrong too.
+  const [phoneLeft, setPhoneLeft] = useState(false);
   const [locked, setLocked] = useState(false);
   const [restart, setRestart] = useState(false);
   const codeRef = useRef<HTMLInputElement>(null);
@@ -284,6 +275,11 @@ export function VerifyForm({ type }: { type: PhoneUserType }) {
 
   const phoneDigits = phone.replace(/\D/g, "");
   const digits = phoneDigits.length;
+  // Checked as it is typed (Pong, 21 Nov 2026), with the server's rule (lib/contact.ts): a number that cannot become a
+  // Thai mobile number is said at once, one still too short once the field was left.
+  const localProblem = phoneProblem(phone);
+  const phoneCheck = localProblem === "invalid" || (phoneLeft && localProblem === "partial") ? PHONE_RULE : null;
+  const phoneError = phoneCheck ?? error;
   // A countdown set for this very number (a refused or uncertain send) holds the button back; another number may try.
   const phoneWait = cooldown > 0 && waitFor === phoneDigits ? cooldown : 0;
 
@@ -293,6 +289,12 @@ export function VerifyForm({ type }: { type: PhoneUserType }) {
         method="post"
         onSubmit={(e) => {
           e.preventDefault();
+          // a number that is not a Thai mobile number is never sent: the field says why
+          if (localProblem) {
+            setPhoneLeft(true);
+            focusPhone();
+            return;
+          }
           void sendCode();
         }}
         noValidate
@@ -318,17 +320,18 @@ export function VerifyForm({ type }: { type: PhoneUserType }) {
             setPhone(cleanPhoneInput(e.target.value));
             setPhoneInvalid(false);
           }}
+          onBlur={() => setPhoneLeft(true)}
           placeholder="0xx-xxx-xxxx"
-          aria-describedby={error ? "phone-hint phone-error" : "phone-hint"}
-          aria-invalid={phoneInvalid || undefined}
+          aria-describedby={phoneError ? "phone-hint phone-error" : "phone-hint"}
+          aria-invalid={phoneInvalid || phoneCheck !== null || undefined}
         />
         <p id="phone-hint" className="mt-1.5 text-[0.8125rem] leading-5 text-muted">
           รับรหัส 6&nbsp;หลักทาง SMS
         </p>
-        {error ? (
+        {phoneError ? (
           <div id="phone-error" className="mt-3">
             <Notice tone="warning" role="alert">
-              {error}
+              {phoneError}
             </Notice>
           </div>
         ) : null}

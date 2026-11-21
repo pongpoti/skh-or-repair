@@ -93,7 +93,7 @@ describe("users and claims (database)", () => {
   const usersSnapshot = async () => (await pool.query("SELECT * FROM users ORDER BY id")).rows;
 
   async function load() {
-    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY");
+    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY");
     const { rows } = await pool.query<{ id: string; key: string }>(
       `INSERT INTO users (first_name, last_name, type, subtype, active) VALUES
          ('สมชาย', 'ใจดี', 'PCA', 'OR', true),
@@ -120,7 +120,7 @@ describe("users and claims (database)", () => {
     await load();
   });
   after(async () => {
-    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY");
+    await pool.query("TRUNCATE tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users, line_bindings, login_events, access_requests RESTART IDENTITY");
     await pool.end();
   });
 
@@ -128,7 +128,7 @@ describe("users and claims (database)", () => {
     await hold(ids["PCA:กมล"], "0900000201", "U-secret");
     const undone = await hold(ids["PCA:สมชาย"], "0900000203", "U-old");
     await pool.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE id = $1", [undone.rows[0].id]);
-    const list = await listClaimable(pool, "PCA");
+    const list = await listClaimable(pool, "PCA", "0899999999");
     assert.deepEqual(
       list.map((n) => [n.first_name, n.last_name, n.subtype, n.claimed]),
       [
@@ -139,7 +139,7 @@ describe("users and claims (database)", () => {
     );
     for (const n of list) assert.deepEqual(Object.keys(n).sort(), ["claimed", "first_name", "id", "last_name", "subtype"]);
     assert.ok(!JSON.stringify(list).includes("0900000201") && !JSON.stringify(list).includes("U-secret"));
-    assert.deepEqual((await listClaimable(pool, "PN")).length, 0);
+    assert.deepEqual((await listClaimable(pool, "PN", "0899999999")).length, 0);
   });
 
   test("claim: one user_claims row (users untouched); the number is then authorized and named from users", async () => {
@@ -300,7 +300,7 @@ describe("users and claims (database)", () => {
     );
     assert.deepEqual(results.map((r) => r.status).sort(), ["claimed", "taken", "taken", "taken"]);
     assert.equal((await claimUser(pool, args(ids["RN:ปราณี"], "0900000299", "U-later"))).status, "taken");
-    const listed = (await listClaimable(pool, "RN")).find((n) => n.id === ids["RN:ปราณี"]);
+    const listed = (await listClaimable(pool, "RN", "0899999999")).find((n) => n.id === ids["RN:ปราณี"]);
     assert.equal(listed?.claimed, true, "shown as taken on the claim page");
   });
 
@@ -349,7 +349,7 @@ describe("users and claims (database)", () => {
     assert.deepEqual(b.rows.map((x) => x.line_sub), ["U-other"], "every binding of that number, only that number");
     assert.equal(await userForPhone(pool, "0900000207"), null);
     // the name is free for its real owner at once
-    assert.equal((await listClaimable(pool, "PCA")).find((n) => n.id === ids["PCA:สมชาย"])?.claimed, false);
+    assert.equal((await listClaimable(pool, "PCA", "0899999999")).find((n) => n.id === ids["PCA:สมชาย"])?.claimed, false);
     // the undone number and LINE account cannot claim again for 24 h, any name
     // (which of the two: this LINE account's claim was undone, so no other number helps; or only the number's)
     assert.equal(await claimBlocked(pool, "0900000207", "U-x"), "phone");

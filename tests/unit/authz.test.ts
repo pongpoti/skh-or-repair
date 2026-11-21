@@ -74,7 +74,7 @@ async function quietly<T>(fn: () => Promise<T>): Promise<{ value: T; logged: str
 }
 
 async function clear() {
-  await (await pool()).query("TRUNCATE access_requests, tutorial_seen, cases, mx_members, users_added, user_claims, email_codes, user_emails, users");
+  await (await pool()).query("TRUNCATE access_requests, tutorial_seen, cases, mx_members, users_added, user_phones, user_claims, email_codes, user_emails, users");
 }
 
 describe("authorization: a number with a current claim on an active user (a claimed name from the list), or ALLOWED_PHONES", () => {
