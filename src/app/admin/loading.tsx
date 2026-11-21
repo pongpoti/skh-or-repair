@@ -2,7 +2,7 @@ import { AdminBar } from "@/components/admin-bar";
 
 /** The admin page's sections, in order, as their closed heading rows show them (components/admin-section.tsx). */
 const SECTIONS = [
-  { title: "ช่วงปิดซ่อมห้องผ่าตัด", summary: "w-56", action: null },
+  { title: "ตารางผ่าตัดและช่วงปิดซ่อม", summary: "w-56", action: null },
   { title: "ผู้จัดการตาราง (MX)", summary: "w-40", action: "w-[6.5rem]" },
   { title: "รายชื่อทั้งหมด", summary: "w-44", action: null },
   { title: "ตารางตัวอย่าง", summary: "w-64", action: null },

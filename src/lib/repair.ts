@@ -2,9 +2,10 @@ import type { DeptCode } from "./allocation.ts";
 
 /**
  * The air-ventilation repair layout (Pong, 14 Nov 2026, confirmed). The works run in two halves, and each room in use has
- * one fixed use every working day. This app is the repair's board only: the usual weekly OR schedule
- * (lib/allocation.ts) never applies here (Pong, 18 Nov 2026: "This OR repair repo, not orskh repo. So you need to forget
- * normal day OR schedule"), so every day has one half's rooms (repairOn).
+ * one fixed use every working day. Until the repair starts on 8 Dec 2026 (the go-live period) and after it ends, the board
+ * shows the normal weekly OR schedule (lib/allocation.ts; Pong, 21 Nov 2026: "reschedule OR layout plan to follows
+ * ช่วงเปิดใช้งานจริง", the 18 Nov "forget normal day OR schedule" no longer holds), and an admin can switch every day to
+ * one schedule (ScheduleMode, repairOn).
  *
  * - First half: OR 9 emergencies, OR 10 dressing, OR 11 mixed departments, OR 12 GENSX, OR 13 ORTHO, OR 7 and 8
  *   recovery; OR 1 to 6 and the recovery area (RR 1 and 2) are closed, inside the repair zone.
@@ -70,17 +71,44 @@ export const REPAIR_LAYOUTS: Readonly<Record<1 | 2, RepairLayout>> = {
 /** First and last day of a half, YYYY-MM-DD (Thailand), both inclusive. */
 export type RepairDates = { from: string; to: string };
 
-/** The dates of both halves, as an admin set them (lib/repair-store.ts). */
-export type RepairPeriods = { half1: RepairDates; half2: RepairDates };
+/**
+ * Which rooms the board shows, chosen by an admin on /admin for everyone (Pong, 21 Nov 2026: "Allow admin to manually
+ * switch schedule, which will affect all user display schedule"):
+ * - "auto": by the dates, the normal weekly OR schedule before the repair and after it, each half's rooms within it;
+ * - "normal": the normal weekly OR schedule on every day;
+ * - "half1" / "half2": that half's rooms on every day.
+ */
+export type ScheduleMode = "auto" | "normal" | "half1" | "half2";
+
+export const SCHEDULE_MODES: readonly ScheduleMode[] = ["auto", "normal", "half1", "half2"];
+
+/** The admin's words for each mode (the /admin switch). */
+export const SCHEDULE_MODE_TEXT: Readonly<Record<ScheduleMode, string>> = {
+  auto: "อัตโนมัติตามวันที่",
+  normal: "ตารางปกติ",
+  half1: "ปิดซ่อม ช่วงที่ 1",
+  half2: "ปิดซ่อม ช่วงที่ 2",
+};
+
+export function isScheduleMode(value: unknown): value is ScheduleMode {
+  return typeof value === "string" && (SCHEDULE_MODES as readonly string[]).includes(value);
+}
 
 /**
- * The planned dates (Pong, 14 Nov 2026): the second half follows the first. The first half's rooms apply back to 1 Jan
- * 2026, and the board's calendar goes back that far (Pong, 18 Nov 2026: "apply first half schedule retrospectively from
- * Jan 1, 2026 and allow view calendar backward"). The database is seeded with these (db/schema.sql), and the board falls
- * back to them when the database cannot be read.
+ * The dates of both halves, as an admin set them (lib/repair-store.ts), and the admin's switch (`mode`, "auto" when
+ * left out).
+ */
+export type RepairPeriods = { half1: RepairDates; half2: RepairDates; mode?: ScheduleMode };
+
+/**
+ * The planned dates (Pong, 21 Nov 2026: "the schedule will automatically reschedule to repair phase on Dec 8 plus 100
+ * days"): the repair runs 100 days from 8 Dec 2026, the first half 8 Dec 2026 – 26 Jan 2027 (50 days), the second
+ * 27 Jan – 17 Mar 2027 (50 days). Until 7 Dec 2026, the go-live period, the board shows the normal weekly OR schedule
+ * (lib/allocation.ts), back to 1 Jan 2026 in the calendar; from 18 Mar 2027 it does again. The database is seeded with
+ * these (db/schema.sql), and the board falls back to them when the database cannot be read.
  */
 export const DEFAULT_REPAIR_PERIODS: RepairPeriods = {
-  half1: { from: "2026-01-01", to: "2027-01-26" },
+  half1: { from: "2026-12-08", to: "2027-01-26" },
   half2: { from: "2027-01-27", to: "2027-03-17" },
 };
 
@@ -99,23 +127,37 @@ export const RECOVERY_USE = { name: "ห้องพักฟื้น (RR)", la
 export const INSTRUMENT_USE = { name: "ห้องเก็บเครื่องมือ", label: "เครื่องมือ" } as const;
 
 /**
- * Whether the board uses the repair layout at all. On since 14 Nov 2026, and on every day since 18 Nov 2026 (repairOn).
- * Setting it to false would bring back the weekly schedule on every date; nothing in this app needs that.
+ * Whether the board uses the repair layout at all. On since 14 Nov 2026; which days have it is up to the dates and the
+ * admin's switch (repairOn). Setting it to false would bring back the weekly schedule on every date.
  */
 export const REPAIR_IN_USE: boolean = true;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * The half of the repair whose rooms `date` (YYYY-MM-DD) has under `periods`, or null for a malformed date or when the
- * layout is not in use. There is no weekly schedule in between (Pong, 18 Nov 2026: "forget normal day OR schedule"):
- * every day before the second half starts has the first half's rooms (back to 1 Jan 2026, the first half's first day,
- * and through any gap an admin leaves between the halves), and every day from the second half's first day on has the
- * second half's, after its last day too.
+ * The half of the repair whose rooms `date` (YYYY-MM-DD) has under `periods`, or null when the board shows the normal
+ * weekly OR schedule that day (lib/allocation.ts), for a malformed date, or when the layout is not in use.
+ *
+ * By the dates ("auto"): the normal schedule before the first half's first day (the go-live period, Pong, 21 Nov 2026)
+ * and after the second half's last day; the first half's rooms from its first day until the second half starts (through
+ * any gap an admin leaves between the halves); the second half's rooms from its first day to its last. An admin's switch
+ * ("normal", "half1", "half2") overrides the dates on every day.
  */
 export function repairOn(date: string | null | undefined, periods: RepairPeriods): RepairHalf | null {
   if (!REPAIR_IN_USE || typeof date !== "string" || !ISO_DATE.test(date)) return null;
-  return date < periods.half2.from ? { ...REPAIR_LAYOUTS[1], ...periods.half1 } : { ...REPAIR_LAYOUTS[2], ...periods.half2 };
+  const first = { ...REPAIR_LAYOUTS[1], ...periods.half1 };
+  const second = { ...REPAIR_LAYOUTS[2], ...periods.half2 };
+  switch (periods.mode ?? "auto") {
+    case "normal":
+      return null;
+    case "half1":
+      return first;
+    case "half2":
+      return second;
+    default:
+      if (date < periods.half1.from || date > periods.half2.to) return null;
+      return date < periods.half2.from ? first : second;
+  }
 }
 
 /** A date as "8 ธ.ค. 2569" (no weekday), for the repair's dates. */
@@ -142,7 +184,13 @@ function isCalendarDate(v: unknown): v is string {
  * until the second starts, repairOn). Isomorphic, so the admin form shows the same message the server action gives.
  */
 export function checkRepairPeriods(input: unknown): CheckedPeriods {
-  const raw = (input ?? {}) as { half1?: { from?: unknown; to?: unknown } | null; half2?: { from?: unknown; to?: unknown } | null };
+  const raw = (input ?? {}) as {
+    half1?: { from?: unknown; to?: unknown } | null;
+    half2?: { from?: unknown; to?: unknown } | null;
+    mode?: unknown;
+  };
+  const mode = raw.mode === undefined ? "auto" : raw.mode;
+  if (!isScheduleMode(mode)) return { ok: false, error: "เลือกตารางที่ใช้ให้ถูกต้อง" };
   const dates = [raw.half1?.from, raw.half1?.to, raw.half2?.from, raw.half2?.to];
   if (dates.some((value) => typeof value !== "string" || !value.trim())) return { ok: false, error: "ใส่วันที่ให้ครบทั้ง 4 ช่อง" };
   const [from1, to1, from2, to2] = dates.map((value) => (value as string).trim());
@@ -150,5 +198,5 @@ export function checkRepairPeriods(input: unknown): CheckedPeriods {
   if (from1 > to1) return { ok: false, error: "ช่วงที่ 1: วันเริ่มอยู่หลังวันสุดท้าย" };
   if (from2 > to2) return { ok: false, error: "ช่วงที่ 2: วันเริ่มอยู่หลังวันสุดท้าย" };
   if (from2 <= to1) return { ok: false, error: "ช่วงที่ 2 ต้องเริ่มหลังช่วงที่ 1 จบ" };
-  return { ok: true, periods: { half1: { from: from1, to: to1 }, half2: { from: from2, to: to2 } } };
+  return { ok: true, periods: { half1: { from: from1, to: to1 }, half2: { from: from2, to: to2 }, mode } };
 }

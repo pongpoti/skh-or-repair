@@ -7,7 +7,17 @@ import { AdminSection } from "@/components/admin-section";
 import { Notice } from "@/components/auth-shell";
 import { InlineStatus } from "@/components/inline-status";
 import { ThaiDateField, type DayState } from "@/components/thai-date-field";
-import { checkRepairPeriods, repairOn, REPAIR_LAYOUTS, shortThaiDate, type RepairDates, type RepairPeriods } from "@/lib/repair";
+import {
+  checkRepairPeriods,
+  repairOn,
+  REPAIR_LAYOUTS,
+  SCHEDULE_MODE_TEXT,
+  SCHEDULE_MODES,
+  shortThaiDate,
+  type RepairDates,
+  type RepairPeriods,
+  type ScheduleMode,
+} from "@/lib/repair";
 
 const HALVES = [1, 2] as const;
 const KEYS = { 1: "half1", 2: "half2" } as const;
@@ -56,7 +66,27 @@ function rangeText({ from, to }: RepairDates): string {
 }
 
 function samePeriods(a: RepairPeriods, b: RepairPeriods): boolean {
-  return a.half1.from === b.half1.from && a.half1.to === b.half1.to && a.half2.from === b.half2.from && a.half2.to === b.half2.to;
+  return (
+    a.half1.from === b.half1.from &&
+    a.half1.to === b.half1.to &&
+    a.half2.from === b.half2.from &&
+    a.half2.to === b.half2.to &&
+    (a.mode ?? "auto") === (b.mode ?? "auto")
+  );
+}
+
+/** What each choice of the switch does, under its name. */
+const MODE_HINT: Readonly<Record<ScheduleMode, string>> = {
+  auto: "ตารางปกติก่อนและหลังช่วงซ่อม เปลี่ยนแปลนตามวันที่ด้านล่าง",
+  normal: "ตารางผ่าตัดประจำสัปดาห์ เปิดห้อง 1–13 ทุกวัน",
+  half1: "แปลนช่วงที่ 1 ทุกวัน ไม่ดูวันที่",
+  half2: "แปลนช่วงที่ 2 ทุกวัน ไม่ดูวันที่",
+};
+
+/** "วันนี้ใช้ตารางปกติ" or "วันนี้ใช้แปลนปิดซ่อม ช่วงที่ 1", for the switch's status line. */
+function todayText(today: string, periods: RepairPeriods): string {
+  const half = repairOn(today, periods)?.half;
+  return half ? `วันนี้ใช้แปลนปิดซ่อม ช่วงที่ ${half}` : "วันนี้ใช้ตารางปกติ";
 }
 
 /**
@@ -86,6 +116,11 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
 
   function change(half: 1 | 2, end: keyof RepairDates, value: string) {
     setDraft((current) => ({ ...current, [KEYS[half]]: { ...current[KEYS[half]], [end]: value } }));
+    setError("");
+  }
+
+  function pickMode(mode: ScheduleMode) {
+    setDraft((current) => ({ ...current, mode }));
     setError("");
   }
 
@@ -127,6 +162,11 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
   const summary = (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <span data-testid="repair-changed">{changed ? `แก้ไขล่าสุด ${changed.at} โดย ${changed.by}` : "ใช้วันที่ตามแผนเดิม ยังไม่มีผู้แก้ไข"}</span>
+      {(saved.mode ?? "auto") !== "auto" ? (
+        <span className="badge badge-warning" data-testid="repair-mode-forced">
+          ใช้{SCHEDULE_MODE_TEXT[saved.mode ?? "auto"]}ทุกวัน
+        </span>
+      ) : null}
       {dirty ? (
         <span className="badge badge-warning" data-testid="repair-unsaved">
           ยังไม่บันทึก
@@ -136,13 +176,47 @@ export function RepairPeriodsForm({ initial, onSave }: { initial: RepairView; on
   );
 
   return (
-    <AdminSection id="repair-periods" title="ช่วงปิดซ่อมห้องผ่าตัด" summary={summary} testId="repair-section">
+    <AdminSection id="repair-periods" title="ตารางผ่าตัดและช่วงปิดซ่อม" summary={summary} testId="repair-section">
       <form onSubmit={save} noValidate>
         {fallback ? (
           <div className="px-4 pt-4 sm:px-5 sm:pt-5">
             <Notice tone="warning">โหลดวันที่ไม่ได้ แสดงตามแผนเดิม ลองโหลดหน้าใหม่</Notice>
           </div>
         ) : null}
+
+        <fieldset className="px-4 pt-4 sm:px-5 sm:pt-5" data-testid="schedule-mode">
+          <legend className="text-[0.9375rem] font-bold text-ink">ตารางที่ใช้</legend>
+          <p className="text-xs text-muted" data-testid="schedule-mode-today">
+            {todayText(initial.today, saved)}
+          </p>
+          <div className="mt-2.5 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {SCHEDULE_MODES.map((mode) => {
+              const on = (draft.mode ?? "auto") === mode;
+              return (
+                <label
+                  key={mode}
+                  className={`flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors ${
+                    on ? "border-brand bg-brand-tint ring-1 ring-brand" : "border-line bg-white/70 hover:bg-white"
+                  }`}
+                  data-testid={`schedule-mode-${mode}`}
+                >
+                  <input
+                    type="radio"
+                    name="schedule-mode"
+                    value={mode}
+                    checked={on}
+                    onChange={() => pickMode(mode)}
+                    className="mt-0.5 size-4 shrink-0 accent-[var(--brand)]"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-ink">{SCHEDULE_MODE_TEXT[mode]}</span>
+                    <span className="block text-xs text-muted">{MODE_HINT[mode]}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
 
         <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-2">
           {HALVES.map((half) => {
