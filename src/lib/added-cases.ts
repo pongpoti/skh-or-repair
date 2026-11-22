@@ -218,6 +218,14 @@ const NO_ROOM_TEXT = {
  */
 export const POOLED_ROOM_NOTE = "ห้องที่จองน้อยกว่า";
 
+/**
+ * What the department's room card says on a day the doctor's department has no room in the weekly schedule, so the
+ * booking borrows another room (borrowsRoom; Pong, 22 Nov 2026): in place of the room until the doctor has a booking
+ * that day, and under it.
+ */
+export const BORROWED_ROOM_NAME = "ห้องที่จองน้อยที่สุด";
+export const BORROWED_ROOM_NOTE = "สาขาคุณไม่มีห้องในวันนั้น";
+
 /** What a room card the doctor cannot pick says under its name, by the reason (the full reason is under the cards). */
 export const NO_ROOM_NOTE: Readonly<Record<NoRoomReason, string>> = {
   "obgyn-building": "ผ่าตัดที่อาคารแม่",
@@ -268,6 +276,18 @@ export function deptRooms(subtype: string | null | undefined, operation: string,
   if (dept === "OBGYN" && repairOn(date, periods) !== null) return [];
   const candidates = candidateRooms({ procedure: operation, dept, emergency: false, choice: "dept" }, date, periods);
   return candidates.ok ? candidates.rooms : [];
+}
+
+/**
+ * Whether the doctor's department has no room of its own on `date` in the weekly schedule, so a booking borrows the
+ * open room with the fewest bookings (lib/placement.ts spareRooms; Pong, 22 Nov 2026: "Open room with fewest cases").
+ * deptRooms then gives those rooms.
+ */
+export function borrowsRoom(subtype: string | null | undefined, operation: string, date: string, periods: RepairPeriods): boolean {
+  const dept = bookingDept(subtype);
+  if (dept === "OBGYN" && repairOn(date, periods) !== null) return false;
+  const candidates = candidateRooms({ procedure: operation, dept, emergency: false, choice: "dept" }, date, periods);
+  return candidates.ok && candidates.spare === true;
 }
 
 /**

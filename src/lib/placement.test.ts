@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DeptCode } from "./allocation.ts";
-import { isDressingCase, isScopeCase, placeAll, placeCase, roomsHeldBy, UNPLACED_TEXT, type PlaceableCase, type PlaceInput } from "./placement.ts";
+import { candidateRooms, isDressingCase, isScopeCase, placeAll, placeCase, roomsHeldBy, UNPLACED_TEXT, type PlaceableCase, type PlaceInput } from "./placement.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import * as week from "./week.ts";
@@ -119,7 +119,7 @@ test("chest medicine sets its cases in OR 4 on Mondays in the weekly schedule, t
     return placement.ok ? placement.roomId : placement.reason;
   };
   for (const date of [PAST_MONDAY, AFTER_MONDAY]) assert.equal(planned(input("CHEST"), date), "or-4", date);
-  assert.equal(planned(input("CHEST"), "2026-11-10"), "no-room", "Tuesday: no room");
+  assert.equal(planned(input("CHEST"), "2026-11-10"), "or-2", "Tuesday: no room of its own, so it borrows the emptiest room");
   assert.equal(planned(input("CHEST", { emergency: true }), PAST_MONDAY), "or-8", "an emergency still goes to OR 8");
   assert.equal(planned(input("CHEST", { procedure: "Dressing wound" }), PAST_MONDAY), "or-1");
   assert.equal(room(input("CHEST"), FIRST_MONDAY), "or-11", "first half: the mixed room");
@@ -165,6 +165,37 @@ test("the reasons a case is not placed read in Thai", () => {
   assert.equal(UNPLACED_TEXT["obgyn-building"], "สูติ-นรีเวช ผ่าตัดที่อาคารแม่");
   assert.equal(UNPLACED_TEXT["no-department"], "ไม่ทราบแผนก");
   assert.equal(UNPLACED_TEXT["no-room"], "แผนกนี้ไม่มีห้องผ่าตัดในวันนั้น");
+});
+
+test("a department with no room that day borrows the open room with the fewest cases (Pong, 22 Nov 2026)", () => {
+  // Pong picked "Open room with fewest cases" after the simulated October bookings left 45 cases off the board: a
+  // vascular surgeon on a Tuesday, when the weekly schedule gives vascular surgery no room.
+  const TUESDAY = "2027-03-23";
+  const P = DEFAULT_REPAIR_PERIODS;
+  const SPARE = ["or-2", "or-4", "or-5", "or-6", "or-7", "or-9", "or-10", "or-11", "or-12", "or-13"];
+  // Every open room with a department that day but the dressing (OR 1), SCOPE (OR 3) and emergency (OR 8) rooms.
+  assert.deepEqual(candidateRooms(input("VASCULAR"), TUESDAY, P), { ok: true, rooms: SPARE, spare: true });
+  assert.deepEqual(candidateRooms(input("GENSX"), TUESDAY, P).ok && "spare" in candidateRooms(input("GENSX"), TUESDAY, P), false, "a department's own room is not borrowed");
+  const vx = (surgeon: string, more: Partial<PlaceableCase> = {}): PlaceableCase => ({ operation: "EVLA", dept: "VASCULAR", urgency: "Elective", surgeon, ...more });
+  const rooms = (cases: PlaceableCase[], date = TUESDAY) => placeAll(cases, date, P).map((placement) => (placement.ok ? placement.roomId : placement.reason));
+  // The room with the fewest cases so far.
+  const load = new Map(SPARE.map((id) => [id, id === "or-6" ? 1 : 3]));
+  assert.deepEqual(placeCase(input("VASCULAR"), TUESDAY, P, load), { ok: true, roomId: "or-6" });
+  // Each borrowing surgeon's list in one room: the longest list (A) first, in the emptiest room, then B.
+  assert.deepEqual(rooms([vx("A"), vx("B"), vx("A"), vx("A")]), ["or-2", "or-4", "or-2", "or-2"]);
+  // A booked case keeps its booking's room, and the surgeon's other cases join it.
+  assert.deepEqual(rooms([vx("A", { choice: "dept", bookedRoom: "or-9" }), vx("A")]), ["or-9", "or-9"]);
+  // A surgeon whose other case has a room of its own that day (a department keyed per case for a surgeon not on the
+  // list) keeps the borrowed one there too, rather than splitting the list.
+  const [ownRoom, borrowed] = rooms([{ ...vx("A"), dept: "GENSX" }, vx("A")]);
+  assert.ok(roomsHeldBy("GENSX", TUESDAY, P).includes(ownRoom), `GENSX's room: ${ownRoom}`);
+  assert.equal(borrowed, ownRoom);
+  assert.deepEqual(rooms([vx("A"), { ...vx("A"), dept: "GENSX" }]), [ownRoom, ownRoom], "whichever comes first in the file");
+  // Not the dressing, emergency or SCOPE case: those keep their rooms.
+  assert.deepEqual(rooms([vx("A", { operation: "Wound dressing" }), vx("A", { urgency: "Emergency" })]), ["or-1", "or-8"]);
+  // At the weekend no room; during the repair the mixed room, as before.
+  assert.equal(room(input("VASCULAR"), "2027-03-27"), "no-room", "Saturday");
+  assert.equal(room(input("VASCULAR"), FIRST_MONDAY), "or-11", "the repair's mixed room");
 });
 
 test("a department with two rooms keeps each surgeon's cases in one room (Pong, 22 Nov 2026)", () => {

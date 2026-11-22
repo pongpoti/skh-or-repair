@@ -7,6 +7,9 @@ import {
   bookedMessage,
   bookedRoom,
   bookingRoom,
+  BORROWED_ROOM_NAME,
+  BORROWED_ROOM_NOTE,
+  borrowsRoom,
   checkCase,
   cleanNote,
   cleanOperation,
@@ -96,9 +99,11 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   assert.deepEqual(room("URO", "TURP", "2026-11-11"), { ok: true, roomId: "or-11", dressing: false }, "the first half's mixed room");
   // an empty name still shows the department's room in the form
   assert.deepEqual(room("ORTHO", "", FIRST), { ok: true, roomId: "or-13", dressing: false });
-  // Chest medicine has no period of its own: OR 4 on Mondays in the weekly schedule (21 Nov 2026), no room other days.
+  // Chest medicine has no period of its own: OR 4 on Mondays in the weekly schedule (21 Nov 2026); other days it borrows
+  // the open room with the fewest bookings (22 Nov 2026), OR 2 with none yet. At the weekend no room.
   assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-22"), { ok: true, roomId: "or-4", dressing: false });
-  assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-23"), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" });
+  assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-23"), { ok: true, roomId: "or-2", dressing: false });
+  assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-27"), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" });
   assert.deepEqual(room("CHEST", "Bronchoscopy", FIRST), { ok: true, roomId: "or-11", dressing: false }, "the repair's mixed room");
   // the surgeon decides (Pong, 15 Nov 2026): a name that reads like a dressing stays in the department's room
   for (const name of ["D/S + VAC", "Debridement", "I&D abscess", "Wound dressing"]) {
@@ -396,4 +401,37 @@ test("a department with two rooms: a doctor's bookings stay in one, the first ta
   // A room that is not, or no longer, one of them: the room worked out now.
   assert.deepEqual(bookedRoom(made("7", "or-12"), P), { roomId: "or-2", dressing: false });
   assert.deepEqual(bookedRoom(made("7", "or-5", { date: "2026-12-14" }), P), { roomId: "or-12", dressing: false }, "the repair");
+});
+
+test("a department with no room that day borrows the open room with the fewest bookings (Pong, 22 Nov 2026)", () => {
+  const P = DEFAULT_REPAIR_PERIODS;
+  const TUESDAY = "2027-03-23"; // the weekly schedule: vascular surgery has no room
+  const SPARE = ["or-2", "or-4", "or-5", "or-6", "or-7", "or-9", "or-10", "or-11", "or-12", "or-13"];
+  assert.equal(borrowsRoom("VASCULAR", "EVLA", TUESDAY, P), true);
+  assert.deepEqual(deptRooms("VASCULAR", "EVLA", TUESDAY, P), SPARE, "every open room but the dressing, SCOPE and emergency rooms");
+  assert.equal(borrowsRoom("GENSX", "Lap chole", TUESDAY, P), false, "a department with its own room");
+  assert.equal(borrowsRoom("VASCULAR", "EVLA", "2026-12-14", P), false, "the repair has its mixed room");
+  assert.equal(borrowsRoom("VASCULAR", "EVLA", "2027-03-27", P), false, "the weekend");
+  assert.equal(BORROWED_ROOM_NAME, "ห้องที่จองน้อยที่สุด");
+  assert.equal(BORROWED_ROOM_NOTE, "สาขาคุณไม่มีห้องในวันนั้น");
+  // The server gives the room with the fewest bookings, any department's, then the doctor's later bookings join it.
+  const made = (surgeonId: string, roomId: string, subtype: string): AddedCase => ({
+    id: `${surgeonId}-${roomId}`,
+    date: TUESDAY,
+    roomId,
+    hn: "1234567",
+    operation: "operation",
+    shift: "in",
+    dressing: false,
+    scrubDoes: null,
+    note: "",
+    surgeonId,
+    surgeon: `หมอ ${surgeonId}`,
+    subtype,
+  });
+  const own = SPARE.filter((id) => id !== "or-9").map((id, i) => made(`o${i}`, id, "VASCULAR"));
+  assert.equal(roomAmong(SPARE, "7", TUESDAY, own, P), "or-9", "the room nobody booked");
+  assert.equal(roomAmong(SPARE, "7", TUESDAY, [...own, made("7", "or-4", "VASCULAR")], P), "or-4", "the doctor's own earlier booking");
+  // A saved borrowed room stays while it is still one of those rooms.
+  assert.deepEqual(bookedRoom(made("7", "or-9", "VASCULAR"), P), { roomId: "or-9", dressing: false });
 });
