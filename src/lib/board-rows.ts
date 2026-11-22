@@ -167,6 +167,17 @@ function choiceOf(booking: AddedCase | undefined, rooms: BookingRooms): RoomChoi
 }
 
 /**
+ * What a paired booking tells its workbook case's placement (lib/placement.ts placeAll): the doctor's choice of room,
+ * and the room the booking is in, which the case keeps in a department with several rooms that day.
+ */
+function bookedOf(booking: AddedCase | undefined, rooms: BookingRooms): { choice?: RoomChoice; bookedRoom?: string } {
+  const choice = choiceOf(booking, rooms);
+  if (!booking || !choice) return {};
+  const room = rooms.get(booking);
+  return choice === "dept" && room ? { choice, bookedRoom: room.roomId } : { choice };
+}
+
+/**
  * Each workbook case with the room choice of the booking it pairs with on `date` (as buildBoardRows pairs them), in the
  * order given; for the upload's own summary (lib/upload-flow.ts), so it counts the rooms the board shows.
  */
@@ -175,14 +186,11 @@ export function withBookedChoices<T extends WorkbookCase>(
   bookings: readonly AddedCase[],
   date: string,
   periods: RepairPeriods,
-): (T & { choice?: RoomChoice })[] {
+): (T & { choice?: RoomChoice; bookedRoom?: string })[] {
   const today = bookings.filter((item) => item.date === date);
   const rooms = new Map(today.map((booking) => [booking, bookedRoom(booking, periods)]));
   const pairs = pairCases([...cases].sort((a, b) => a.position - b.position), today, rooms);
-  return cases.map((item) => {
-    const choice = choiceOf(pairs.get(item), rooms);
-    return choice ? { ...item, choice } : { ...item };
-  });
+  return cases.map((item) => ({ ...item, ...bookedOf(pairs.get(item), rooms) }));
 }
 
 /**
@@ -230,9 +238,10 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   const pairs = pairCases(cases, today, bookingRooms);
   const taken = new Set(pairs.values());
   // A matched case is placed by the doctor's choice of room instead of its name, and by the workbook's other rules
-  // (emergencies, NEURO and CVT, the load of a department's rooms) as any other case.
+  // (emergencies, NEURO and CVT) as any other case; in a department with several rooms it keeps its booking's room, and
+  // each surgeon's cases stay in one room (placeAll).
   const placements = placeAll(
-    cases.map((item) => ({ ...item, choice: choiceOf(pairs.get(item), bookingRooms) })),
+    cases.map((item) => ({ ...item, ...bookedOf(pairs.get(item), bookingRooms) })),
     date,
     periods,
   );

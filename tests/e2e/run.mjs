@@ -2674,7 +2674,7 @@ async function main() {
       assert(
         JSON.stringify(sections) ===
           JSON.stringify(
-            ["ตารางผ่าตัดและช่วงปิดซ่อม", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ตารางย้อนหลังจาก HOSxP", "โหมดทดสอบ"].map((title) => [
+            ["ตารางผ่าตัดและช่วงปิดซ่อม", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ตารางย้อนหลังจาก HOSxP", "การจองจำลอง", "โหมดทดสอบ"].map((title) => [
               title,
               "false",
               false,
@@ -4472,8 +4472,47 @@ async function main() {
       await page.waitForSelector(".case-row");
       const rows = await page.$$eval(".case-row", (items) => items.length);
       assert(rows >= 1, `OR 12 on 5 Nov: ${rows} cases`);
+
+      // the simulated bookings (Pong, 22 Nov 2026): /admin opens them on 1 Oct 2026; on Thu 5 Nov they are made up from
+      // its imported list, find their cases in the rooms, and nothing is saved
+      const bookingsBefore = (await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n;
+      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
+      await openSection(page, "sim");
+      assert((await textOf(page, "#sim-title")) === "การจองจำลอง", "the simulation's section title");
+      assert((await page.getAttribute('[data-testid="sim-october"]', "href")) === "/?sim=1&date=2026-10-01", "it opens on 1 Oct 2026");
+      assert(((await page.locator('[data-testid="sim-october"]').boundingBox())?.height ?? 0) >= 44, "a 44px target");
+      await page.locator('[data-testid="sim-section"]').screenshot({ path: join(SCREENS, "admin-sim.png") });
+      shots.push("admin-sim.png");
+      await page.goto(`${APP}/?sim=1&date=2026-11-05`, { waitUntil: "networkidle" });
+      const simKinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
+      assert(JSON.stringify(simKinds) === JSON.stringify(["sim"]), `the simulation's badge alone: ${JSON.stringify(simKinds)}`);
+      await ownerShot(page, "board-sim.png");
+      const simRows = [];
+      for (const room of ["or-2", "or-5", "or-11", "or-12", "or-13"]) {
+        await page.goto(`${APP}/?sim=1&date=2026-11-05&room=${room}`, { waitUntil: "networkidle" });
+        simRows.push(...(await sheetRows(page)));
+        if (room === "or-12") await ownerShot(page, "board-sim-room.png");
+      }
+      assert(simRows.some(([source]) => source === "matched"), `some cases booked: ${JSON.stringify(simRows.map(([s, f]) => [s, f]))}`);
+      assert(simRows.every(([source]) => source !== "booking"), "every simulated booking finds its case");
+      assert(simRows.every(([source, flag]) => source !== "hosxp" || flag === "unbooked"), "a case nobody booked is flagged");
+      // the date picker stays in the simulation, and the logo goes back to the real board
+      await page.click('[data-testid="board-date-button"]');
+      await page.locator('[data-testid="board-date-dialog"]').waitFor({ state: "visible" });
+      await page.click('#board-date-calendar [data-date="2026-11-06"]');
+      await page.waitForURL((url) => url.searchParams.get("date") === "2026-11-06" && url.searchParams.get("sim") === "1");
+      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-06");
+      assert((await page.locator('[data-notice-id="sim"]').count()) === 1, "another day of the simulation");
+      await page.click('header a[aria-label="ORSKH.APP หน้าแรก"]');
+      await page.waitForURL((url) => url.pathname === "/" && url.search === "");
+      await page.waitForFunction(() => !document.querySelector('[data-notice-id="sim"]'));
+      assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === bookingsBefore, "no booking saved");
       assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
       await ctx.close();
+      // anyone but an admin gets the real board
+      const simNurse = await fetch(`${APP}/?sim=1&date=2026-11-05`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
+      const simHtml = await simNurse.text();
+      assert(simNurse.status === 200 && !simHtml.includes("การจองจำลอง"), `/?sim=1 for a nurse: ${simNurse.status}`);
 
       // a nurse cannot import (the action checks the admin again) and has no such section
       const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });

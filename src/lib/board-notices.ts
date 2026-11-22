@@ -13,7 +13,7 @@ export type NoticeTone = "neutral" | "alert";
 export type NoticeIcon = "no-table" | "flask";
 
 export type BoardNotice = {
-  id: "demo" | "no-upload";
+  id: "demo" | "sim" | "no-upload";
   tone: NoticeTone;
   icon: NoticeIcon;
   /** The whole message in one line: the badge's text when it is alone, and the bubble's title. */
@@ -67,6 +67,20 @@ export const DEMO_NOTICE: BoardNotice = {
   short: "ตารางตัวอย่าง",
   detail: "เคสสมมติ ไม่ได้บันทึก ไม่กระทบการจองจริง แตะโลโก้เพื่อกลับตารางจริง",
   testId: "demo-notice",
+};
+
+/**
+ * The first badge of the simulated bookings (lib/sim-bookings.ts), an admin's /?sim=1: the day's real HOSxP list with
+ * made-up bookings, so they are never taken for the doctors' own.
+ */
+export const SIM_NOTICE: BoardNotice = {
+  id: "sim",
+  tone: "neutral",
+  icon: "flask",
+  text: "การจองจำลอง · จองสมมติจากเคส HOSxP จริง",
+  short: "การจองจำลอง",
+  detail: "การจองสมมติจากรายการ HOSxP ของวันนั้น ไม่ได้บันทึก ไม่กระทบการจองจริง แตะโลโก้เพื่อกลับตารางจริง",
+  testId: "sim-notice",
 };
 
 /** A badge's text: the whole message when it is alone in the strip, its short form when there are several. */

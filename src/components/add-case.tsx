@@ -16,12 +16,14 @@ import {
   checkCase,
   cleanOperation,
   closedDayNote,
+  deptRooms,
   DRESSING_ROOM_NAME,
   earliestText,
   MAX_NOTE,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
+  POOLED_ROOM_NOTE,
   SCRUB_NO,
   SCRUB_QUESTION,
   SCRUB_YES,
@@ -345,7 +347,19 @@ export function AddCase({
   // The two rooms the doctor can pick that day, worked out again on each render from the day (and the name, which sends
   // a general surgeon's endoscopy to the SCOPE room, OR 3, in the weekly schedule).
   const name = cleanOperation(operation);
-  const deptRoom = bookingRoom(doctor.subtype, name, date, periods, "dept");
+  // A department with several rooms that day keeps a surgeon's list in one (lib/added-cases.ts roomAmong): the room of
+  // the doctor's own booking there; with none yet, the server gives the one with fewer bookings, so the card names both.
+  const pooled = deptRooms(doctor.subtype, name, date, periods);
+  const ownRoom =
+    pooled.length > 1
+      ? (mine
+          .filter((item) => item.date === date)
+          .map((item) => bookedRoom(item, periods))
+          .find((item) => !item.dressing && pooled.includes(item.roomId))?.roomId ?? null)
+      : null;
+  const deptPlaced = bookingRoom(doctor.subtype, name, date, periods, "dept");
+  const deptRoom = deptPlaced.ok && ownRoom ? { ...deptPlaced, roomId: ownRoom } : deptPlaced;
+  const deptChoices = pooled.length > 1 && !ownRoom ? pooled : null;
   const dressingRoom = bookingRoom(doctor.subtype, name, date, periods, "dressing");
   const room = choice === "dressing" ? dressingRoom : deptRoom;
   const allocation = deptRoom.ok ? allocationFor(deptRoom.roomId, date, periods) : null;
@@ -521,7 +535,10 @@ export function AddCase({
                     )}
                   </span>
                 ) : null}
-                <span className="text-[0.9375rem] font-bold">{deptRoom.ok ? label(deptRoom.roomId) : "ห้องของสาขา"}</span>
+                <span className="text-[0.9375rem] font-bold" data-testid="case-room-dept-name">
+                  {deptRoom.ok ? (deptChoices ? deptChoices.map(label).join(" / ") : label(deptRoom.roomId)) : "ห้องของสาขา"}
+                </span>
+                {deptRoom.ok && deptChoices ? <span className="text-xs text-muted">{POOLED_ROOM_NOTE}</span> : null}
                 {!allocation && !deptRoom.ok ? <span className="text-xs">{NO_ROOM_NOTE[deptRoom.reason]}</span> : null}
               </label>
               <label className={`${OPTION} min-h-16`}>

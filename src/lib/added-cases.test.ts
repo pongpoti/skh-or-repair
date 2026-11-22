@@ -11,6 +11,7 @@ import {
   cleanNote,
   cleanOperation,
   closedDayNote,
+  deptRooms,
   earliestBookingDay,
   earliestText,
   bookableFrom,
@@ -19,10 +20,13 @@ import {
   MAX_OPERATION,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
+  POOLED_ROOM_NOTE,
+  roomAmong,
   withAddedCases,
   type AddedCase,
   type BookingContext,
 } from "./added-cases.ts";
+import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import type { DayBoard } from "./week.ts";
 
@@ -346,4 +350,50 @@ test("when a booking was made reads in Bangkok time, the Thai short month and ye
   assert.equal(bookedAtText("2026-11-15T17:05:09.000Z"), "16 พ.ย. 69, 00:05");
   assert.equal(bookedAtText("2027-01-02T01:07:00.000Z"), "2 ม.ค. 70, 08:07");
   assert.equal(bookedAtText("not a time"), "", "nothing to show");
+});
+
+test("a department with two rooms: a doctor's bookings stay in one, the first takes the room with fewer (Pong, 22 Nov 2026)", () => {
+  // Monday 23 Nov 2026, the weekly schedule: GENSX holds OR 2 and OR 5.
+  const MONDAY = "2026-11-23";
+  const P = DEFAULT_REPAIR_PERIODS;
+  assert.deepEqual(deptRooms("GENSX", "Lap chole", MONDAY, P), ["or-2", "or-5"]);
+  assert.deepEqual(deptRooms("GENSX", "EGD", MONDAY, P), ["or-3"], "an endoscopy has the SCOPE room only");
+  assert.deepEqual(deptRooms("EYE", "Phaco", MONDAY, P), ["or-10"]);
+  assert.deepEqual(deptRooms("GENSX", "Lap chole", "2026-12-14", P), ["or-12"], "the repair: one room");
+  assert.deepEqual(deptRooms("OBGYN", "TAH", "2026-12-14", P), [], "obstetrics off the board in the repair");
+  assert.deepEqual(deptRooms(null, "x", MONDAY, P), []);
+  assert.equal(POOLED_ROOM_NOTE, "ห้องที่จองน้อยกว่า");
+
+  const made = (surgeonId: string, roomId: string, more: Partial<AddedCase> = {}): AddedCase => ({
+    id: `${surgeonId}-${roomId}`,
+    date: MONDAY,
+    roomId,
+    hn: "1234567",
+    operation: "Lap chole",
+    shift: "in",
+    dressing: false,
+    scrubDoes: null,
+    note: "",
+    surgeonId,
+    surgeon: `หมอ ${surgeonId}`,
+    subtype: "GENSX",
+    ...more,
+  });
+  const pool = ["or-2", "or-5"];
+  assert.equal(roomAmong(pool, "7", MONDAY, [], P), "or-2", "nobody booked yet: the first room");
+  assert.equal(roomAmong(pool, "7", MONDAY, [made("8", "or-2")], P), "or-5", "another doctor in OR 2: the emptier OR 5");
+  assert.equal(roomAmong(pool, "7", MONDAY, [made("8", "or-2"), made("7", "or-2")], P), "or-2", "the doctor's own earlier booking");
+  assert.equal(roomAmong(pool, "7", MONDAY, [made("8", "or-5"), made("9", "or-5"), made("10", "or-2")], P), "or-2");
+  // Dressing-room bookings, other days and other rooms do not count.
+  assert.equal(
+    roomAmong(pool, "7", MONDAY, [made("8", "or-1", { dressing: true, operation: "Dressing" }), made("9", "or-2", { date: "2026-11-24" }), made("10", "or-3", { operation: "EGD" })], P),
+    "or-2",
+  );
+
+  // A saved booking stays in the room it was given while that is one of the department's rooms that day.
+  assert.deepEqual(bookedRoom(made("7", "or-5"), P), { roomId: "or-5", dressing: false });
+  assert.deepEqual(bookedRoom(made("7", "or-2"), P), { roomId: "or-2", dressing: false });
+  // A room that is not, or no longer, one of them: the room worked out now.
+  assert.deepEqual(bookedRoom(made("7", "or-12"), P), { roomId: "or-2", dressing: false });
+  assert.deepEqual(bookedRoom(made("7", "or-5", { date: "2026-12-14" }), P), { roomId: "or-12", dressing: false }, "the repair");
 });

@@ -2,7 +2,7 @@ import type { DeptCode } from "./allocation.ts";
 import { addDays, thaiDate, workdayIndex } from "./days.ts";
 import { checkHn } from "./hn.ts";
 import { holidayIn, nextWorkdayIn, type Holiday } from "./holidays.ts";
-import { placeCase, roomsHeldBy, type RoomChoice } from "./placement.ts";
+import { candidateRooms, placeCase, roomsHeldBy, type RoomChoice } from "./placement.ts";
 import { REPAIR_LAYOUTS, repairOn, type RepairPeriods } from "./repair.ts";
 import { getRoom, roomLabel, roomUse } from "./rooms.ts";
 import type { Operation, Shift } from "./schedule.ts";
@@ -212,6 +212,12 @@ const NO_ROOM_TEXT = {
   "no-dressing-room": "ไม่มีห้องทำแผลในวันที่เลือก เลือกวันอื่น",
 } as const;
 
+/**
+ * What the department's room card says under its rooms on a day the department holds several and the doctor has no
+ * booking there yet: the booking takes the one with fewer bookings (roomAmong), and the saved message names it.
+ */
+export const POOLED_ROOM_NOTE = "ห้องที่จองน้อยกว่า";
+
 /** What a room card the doctor cannot pick says under its name, by the reason (the full reason is under the cards). */
 export const NO_ROOM_NOTE: Readonly<Record<NoRoomReason, string>> = {
   "obgyn-building": "ผ่าตัดที่อาคารแม่",
@@ -253,6 +259,35 @@ export function bookingRoom(subtype: string | null | undefined, operation: strin
 }
 
 /**
+ * The department rooms a booking may take on `date`: the pool bookingRoom chooses from for "dept", in number order. More
+ * than one on a day the department holds several rooms (GENSX in OR 2 and OR 5 on a Monday of the weekly schedule);
+ * empty when it has none.
+ */
+export function deptRooms(subtype: string | null | undefined, operation: string, date: string, periods: RepairPeriods): string[] {
+  const dept = bookingDept(subtype);
+  if (dept === "OBGYN" && repairOn(date, periods) !== null) return [];
+  const candidates = candidateRooms({ procedure: operation, dept, emergency: false, choice: "dept" }, date, periods);
+  return candidates.ok ? candidates.rooms : [];
+}
+
+/**
+ * Which of a department's rooms (`rooms`, deptRooms) a doctor's new booking takes on `date`, among the day's bookings
+ * (`day`, every doctor's, as lib/cases.ts listCasesOn gives them): the room of the doctor's own earlier booking there,
+ * so one surgeon's list stays in one room, else the one with the fewest bookings (on a tie the first in number order).
+ * Pong, 22 Nov 2026: "How to deal with matching cases of dept that has 2 OR rooms ?"
+ */
+export function roomAmong(rooms: readonly string[], surgeonId: string, date: string, day: readonly AddedCase[], periods: RepairPeriods): string {
+  const placedNow = day
+    .filter((booking) => booking.date === date)
+    .map((booking) => ({ booking, room: bookedRoom(booking, periods) }))
+    .filter(({ room }) => !room.dressing && rooms.includes(room.roomId));
+  const own = placedNow.find(({ booking }) => booking.surgeonId === surgeonId);
+  if (own) return own.room.roomId;
+  const count = (room: string) => placedNow.filter((item) => item.room.roomId === room).length;
+  return rooms.reduce((best, room) => (count(room) < count(best) ? room : best));
+}
+
+/**
  * The rooms that are the dressing room under some layout: OR 1 in the weekly schedule (lib/allocation.ts) and the
  * dressing room of each half of the repair.
  */
@@ -282,8 +317,9 @@ export function bookedChoice(booking: Pick<AddedCase, "dressing" | "date" | "roo
 /**
  * Where a saved booking is now. The app works out the room for the doctor's choice, so it is worked out again whenever
  * it is read, like the workbook's cases: an admin may move the repair's dates, or correct the doctor's department,
- * after the booking was made. The room saved with the booking counts only when no room can be worked out now (the
- * doctor's department has none that day).
+ * after the booking was made. The room saved with the booking counts when it is still one of the department's rooms
+ * that day (a department with several rooms: the one roomAmong gave it, which the doctor saw), and when no room can be
+ * worked out now (the doctor's department has none that day).
  */
 export function bookedRoom(
   booking: Pick<AddedCase, "subtype" | "operation" | "date" | "roomId" | "dressing">,
@@ -291,7 +327,11 @@ export function bookedRoom(
 ): { roomId: string; dressing: boolean } {
   const choice = bookedChoice(booking, periods);
   const room = bookingRoom(booking.subtype, booking.operation ?? "", booking.date, periods, choice);
-  return room.ok ? { roomId: room.roomId, dressing: room.dressing } : { roomId: booking.roomId, dressing: choice === "dressing" };
+  if (!room.ok) return { roomId: booking.roomId, dressing: choice === "dressing" };
+  if (!room.dressing && room.roomId !== booking.roomId && deptRooms(booking.subtype, booking.operation ?? "", booking.date, periods).includes(booking.roomId)) {
+    return { roomId: booking.roomId, dressing: false };
+  }
+  return { roomId: room.roomId, dressing: room.dressing };
 }
 
 /**

@@ -27,9 +27,12 @@ export const metadata: Metadata = { title: "จัดการระบบ · OR
 
 const HALF_NAME = { 1: "ครึ่งแรก", 2: "ครึ่งหลัง" } as const;
 
+/** The first day the simulated bookings open on (Pong asked for October 2026). */
+const SIM_START = "2026-10-01";
+
 /**
  * The admin page: the repair's dates, the MX members (who upload the HOSxP workbook), everyone on the staff list, the
- * demo schedule, the import of past days' HOSxP lists and the test notices. Every section starts closed, its buttons greyed out until it is opened (Pong,
+ * demo schedule, the import of past days' HOSxP lists, the simulated bookings and the test notices. Every section starts closed, its buttons greyed out until it is opened (Pong,
  * 16 Nov 2026; components/admin-section.tsx). Each section shows a notice when its data cannot be read, so the others
  * still open.
  */
@@ -98,6 +101,22 @@ export default async function AdminPage() {
           </AdminSection>
           {/* Past days' HOSxP lists for the board's calendar (Pong, 19 Nov 2026: "No case shown on Jan, why ?"). */}
           <PastListsSection initial={past} rules={{ maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE }} onImport={importPastLists} />
+          {/* Simulated bookings on the imported lists (Pong, 22 Nov 2026: "Try create booking case of each day on Oct 2026
+              using similar hosxp cases"): the board's /?sim=1, from 1 Oct 2026 (lib/sim-bookings.ts). */}
+          <AdminSection
+            id="sim"
+            title="การจองจำลอง"
+            summary="จองสมมติจากรายการ HOSxP ที่นำเข้า ดูการจับคู่และการจัดห้อง ไม่บันทึก และไม่แตะการจองจริง เห็นเฉพาะผู้ดูแลระบบ"
+            testId="sim-section"
+          >
+            <div className="flex flex-col gap-2 p-4 sm:p-5">
+              <Link href={`/?sim=1&date=${SIM_START}`} className="btn btn-secondary flex-col gap-0.5 self-start py-2.5" data-testid="sim-october">
+                <span>ต.ค. 2569</span>
+                <span className="text-xs font-medium">เริ่ม {shortThaiDate(SIM_START)}</span>
+              </Link>
+              <p className="text-sm text-ink-2">เลือกวันอื่นในปฏิทิน หรือปัดแผนผัง ก็ยังเป็นการจองจำลอง แตะโลโก้เพื่อกลับตารางจริง</p>
+            </div>
+          </AdminSection>
           <TestModeSection href="/?notices=all" />
         </div>
       </main>
