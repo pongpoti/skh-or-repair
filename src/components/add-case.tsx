@@ -13,6 +13,9 @@ import {
   bookableFrom,
   bookedRoom,
   bookingRoom,
+  BORROWED_ROOM_NAME,
+  BORROWED_ROOM_NOTE,
+  borrowsRoom,
   checkCase,
   cleanOperation,
   closedDayNote,
@@ -360,9 +363,11 @@ export function AddCase({
   const deptPlaced = bookingRoom(doctor.subtype, name, date, periods, "dept");
   const deptRoom = deptPlaced.ok && ownRoom ? { ...deptPlaced, roomId: ownRoom } : deptPlaced;
   const deptChoices = pooled.length > 1 && !ownRoom ? pooled : null;
+  // A department with no room that day borrows the open room with the fewest bookings (Pong, 22 Nov 2026).
+  const borrowed = borrowsRoom(doctor.subtype, name, date, periods);
   const dressingRoom = bookingRoom(doctor.subtype, name, date, periods, "dressing");
   const room = choice === "dressing" ? dressingRoom : deptRoom;
-  const allocation = deptRoom.ok ? allocationFor(deptRoom.roomId, date, periods) : null;
+  const allocation = deptRoom.ok && !(borrowed && deptChoices) ? allocationFor(deptRoom.roomId, date, periods) : null;
   const label = (roomId: string) => {
     const found = getRoom(roomId);
     return found ? roomLabel(found) : roomId;
@@ -536,9 +541,21 @@ export function AddCase({
                   </span>
                 ) : null}
                 <span className="text-[0.9375rem] font-bold" data-testid="case-room-dept-name">
-                  {deptRoom.ok ? (deptChoices ? deptChoices.map(label).join(" / ") : label(deptRoom.roomId)) : "ห้องของสาขา"}
+                  {deptRoom.ok
+                    ? deptChoices
+                      ? borrowed
+                        ? BORROWED_ROOM_NAME
+                        : deptChoices.map(label).join(" / ")
+                      : label(deptRoom.roomId)
+                    : "ห้องของสาขา"}
                 </span>
-                {deptRoom.ok && deptChoices ? <span className="text-xs text-muted">{POOLED_ROOM_NOTE}</span> : null}
+                {deptRoom.ok && borrowed ? (
+                  <span className="text-xs text-muted" data-testid="case-room-borrowed">
+                    {BORROWED_ROOM_NOTE}
+                  </span>
+                ) : deptRoom.ok && deptChoices ? (
+                  <span className="text-xs text-muted">{POOLED_ROOM_NOTE}</span>
+                ) : null}
                 {!allocation && !deptRoom.ok ? <span className="text-xs">{NO_ROOM_NOTE[deptRoom.reason]}</span> : null}
               </label>
               <label className={`${OPTION} min-h-16`}>

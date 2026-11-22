@@ -98,3 +98,12 @@ test("simulated bookings: nothing for a day with no list, a case with no HN, sur
     assert.deepEqual(simulatedBookings([{ ...item, ...more }], DAY, P), [], JSON.stringify(more));
   }
 });
+
+test("simulated bookings: a surgeon books as one department, the first case's, as a doctor has one", () => {
+  // A surgeon not on the surgeon list keeps each case's own แผนก: here GENSX first, then VASCULAR.
+  const cases: WorkbookCase[] = day(12).map((item, i) => ({ ...item, surgeon: "นพ. ห้า ทดสอบ", dept: i === 0 ? "GENSX" : "VASCULAR", operation: "EVLA", urgency: "Elective" }));
+  const made = simulatedBookings(cases, DAY, P);
+  assert.ok(made.length > 1);
+  assert.deepEqual([...new Set(made.map((booking) => booking.subtype))], ["GENSX"]);
+  assert.equal(new Set(made.map((booking) => booking.roomId)).size, 1, "one room");
+});

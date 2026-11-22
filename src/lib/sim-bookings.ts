@@ -48,7 +48,12 @@ function surgeonKey(surgeon: string): string {
 export function simulatedBookings(cases: readonly WorkbookCase[], date: string, periods: RepairPeriods): AddedCase[] {
   type Draft = Omit<AddedCase, "roomId"> & { bookedAt: string };
   const drafts: Draft[] = [];
-  for (const item of [...cases].sort((a, b) => a.position - b.position)) {
+  const ordered = [...cases].sort((a, b) => a.position - b.position);
+  // A doctor has one department: a surgeon whose cases are keyed to several (one not on the surgeon list, whose cases
+  // keep their own แผนก) books them all as the department of their first case of the day.
+  const deptOf = new Map<string, string>();
+  for (const item of ordered) if (item.dept && !deptOf.has(surgeonKey(item.surgeon))) deptOf.set(surgeonKey(item.surgeon), item.dept);
+  for (const item of ordered) {
     const hn = normalizeHn(item.hn);
     const operation = cleanOperation(item.operation).slice(0, MAX_OPERATION);
     const surgeon = surgeonKey(item.surgeon);
@@ -67,7 +72,7 @@ export function simulatedBookings(cases: readonly WorkbookCase[], date: string, 
       note: "",
       surgeonId: `sim-${seed(surgeon)}`,
       surgeon: withoutTitle(surgeon),
-      subtype: item.dept,
+      subtype: deptOf.get(surgeon) ?? item.dept,
       bookedAt: bookedAtFor(date, seed(`${item.caseId}|${date}|at`)),
     });
   }
