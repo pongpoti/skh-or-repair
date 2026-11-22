@@ -91,7 +91,7 @@ function fewest(rooms: readonly string[], load: ReadonlyMap<string, number>): st
 }
 
 const placed = (roomId: string): Placement => ({ ok: true, roomId });
-const unplaced = (reason: UnplacedReason): Placement => ({ ok: false, reason });
+const unplaced = (reason: UnplacedReason): { ok: false; reason: UnplacedReason } => ({ ok: false, reason });
 
 /**
  * Where a case goes on `date`.
@@ -111,30 +111,40 @@ const unplaced = (reason: UnplacedReason): Placement => ({ ok: false, reason });
  * The repair has no SCOPE room, so a general surgeon's endoscopy goes to the GENSX room like the rest of their list then
  * (Pong, 19 Nov 2026: "no more scope case", after a colonoscopy showed in the mixed room).
  *
- * A department with several rooms is pooled, so the case goes to the one with the fewest cases so far (`load`).
+ * A department with several rooms is pooled: placeCase puts the case in the one with the fewest cases so far (`load`),
+ * candidateRooms gives the whole pool, and placeAll keeps each surgeon's cases in one of them.
  */
 export function placeCase(input: PlaceInput, date: string, periods: RepairPeriods, load: ReadonlyMap<string, number>): Placement {
+  const candidates = candidateRooms(input, date, periods);
+  return candidates.ok ? placed(fewest(candidates.rooms, load)) : candidates;
+}
+
+/** The rooms a case may go to: one, or a department's pool of several, in number order. */
+export type Candidates = { ok: true; rooms: string[] } | { ok: false; reason: UnplacedReason };
+
+/** The rooms placeCase chooses from for `input` on `date` (its rules are there), or why the case has none. */
+export function candidateRooms(input: PlaceInput, date: string, periods: RepairPeriods): Candidates {
   const repair = repairOn(date, periods);
   if (repair && input.dept === "OBGYN") return unplaced("obgyn-building");
+  const pool = (rooms: string[]): Candidates => ({ ok: true, rooms });
 
   const dressing = roomsHeldBy("INFECT", date, periods);
   const toDressing = input.choice ? input.choice === "dressing" : isDressingCase(input.procedure);
-  if (toDressing && dressing.length > 0) return placed(dressing[0]);
+  if (toDressing && dressing.length > 0) return pool([dressing[0]]);
 
   if (input.emergency) {
     if (repair && (input.dept === "NEURO" || input.dept === "CVT")) {
       const own = repair.emergencyRooms.filter((room) => isOpenRoom(room, date, periods));
-      if (own.length > 0) return placed(fewest(own, load));
+      if (own.length > 0) return pool(own);
     }
     const emergency = roomsHeldBy("EMER", date, periods);
-    if (input.dept !== "OBGYN" && emergency.length > 0) return placed(emergency[0]);
+    if (input.dept !== "OBGYN" && emergency.length > 0) return pool([emergency[0]]);
   }
 
-  const mixed = () => roomsHeldBy("MIXED", date, periods);
   // A general surgeon's endoscopy goes to the SCOPE room on a day that has one (OR 3 in the weekly schedule).
   if (isScopeCase(input.procedure, input.dept)) {
     const scope = roomsHeldBy("SCOPE", date, periods);
-    if (scope.length > 0) return placed(fewest(scope, load));
+    if (scope.length > 0) return pool(scope);
   }
   // Any other case coded SCOPE is a general surgeon's.
   const dept = input.dept === "SCOPE" ? "GENSX" : input.dept;
@@ -143,8 +153,8 @@ export function placeCase(input: PlaceInput, date: string, periods: RepairPeriod
   // The dressing room takes dressing cases only.
   let rooms = roomsHeldBy(dept, date, periods).filter((room) => !dressing.includes(room));
   if (rooms.length === 0 && !repair) rooms = weeklyGuestRooms(dept, date).filter((room) => isOpenRoom(room, date, periods));
-  if (rooms.length === 0) rooms = mixed();
-  return rooms.length > 0 ? placed(fewest(rooms, load)) : unplaced("no-room");
+  if (rooms.length === 0) rooms = roomsHeldBy("MIXED", date, periods);
+  return rooms.length > 0 ? pool(rooms) : unplaced("no-room");
 }
 
 /** The export's urgency labels (ความเร่งด่วน) that mark an emergency. */
@@ -158,28 +168,82 @@ export type PlaceableCase = {
   dept: DeptCode | null;
   /** The urgency label as the export has it (Elective, Urgency, Stat, Emergency), or null. */
   urgency: string | null;
+  /** The surgeon as the file names them, so a department with several rooms keeps each surgeon's cases in one. */
+  surgeon?: string;
   /** The room chosen by the surgeon of a booking that matches the case (lib/board-rows.ts), which wins over the name. */
   choice?: RoomChoice;
+  /** The room that booking is in (lib/added-cases.ts bookedRoom), which the case keeps when it is one of its pool. */
+  bookedRoom?: string;
 };
 
 /**
- * Places a file's cases on `date` in the order given (the file's order), so a department with several rooms fills the
- * emptiest first. The rooms depend only on the cases, the day and which half of the repair (or none) the day falls
- * in, so placing the same cases again gives the same rooms. That is what lets the board place an upload again when it
- * is read: an admin may move the repair's dates after MX uploaded, and the cases must then go to the rooms in use
- * under the new dates rather than stay in rooms that are now closed.
+ * Places a file's cases on `date`. A case with one room to go to takes it. A department with several rooms that day
+ * (GENSX in OR 2 and OR 5 on a Monday of the weekly schedule) keeps each surgeon's cases in one of them (Pong, 22 Nov
+ * 2026, "How to deal with matching cases of dept that has 2 OR rooms ?"; before, the cases were spread one by one and
+ * split half the surgeons' lists between the rooms):
+ *
+ * 1. a case matched to a booking stays in the booking's room, which the doctor saw when booking (lib/added-cases.ts:
+ *    a doctor's first booking of the day takes the room with fewer bookings, and the later ones join it);
+ * 2. the surgeon's other cases join the room of their first booked case in the file;
+ * 3. a surgeon with no booking takes the room with the fewest cases so far, the surgeons with the most cases first (on
+ *    a tie, the one who comes first in the file, and the first room in number order).
+ *
+ * A case with no surgeon's name counts as its own surgeon. The rooms depend only on the cases, their bookings, the day
+ * and which half of the repair (or none) the day falls in, so placing the same cases again gives the same rooms. That
+ * is what lets the board place an upload again when it is read: an admin may move the repair's dates after MX
+ * uploaded, and the cases must then go to the rooms in use under the new dates rather than stay in rooms that are now
+ * closed.
  */
 export function placeAll(cases: readonly PlaceableCase[], date: string, periods: RepairPeriods): Placement[] {
   const load = new Map<string, number>();
-  return cases.map((item) => {
-    const input = {
-      procedure: item.operation,
-      dept: item.dept,
-      emergency: isEmergencyUrgency(item.urgency),
-      choice: item.choice,
-    };
-    const placement = placeCase(input, date, periods, load);
-    if (placement.ok) load.set(placement.roomId, (load.get(placement.roomId) ?? 0) + 1);
-    return placement;
+  const put = (room: string, count = 1) => load.set(room, (load.get(room) ?? 0) + count);
+  const result: Placement[] = cases.map(() => unplaced("no-room"));
+  /** The cases of one surgeon with one pool of rooms, in file order. */
+  type Group = { rooms: string[]; members: number[]; room: string | null };
+  const groups = new Map<string, Group>();
+  cases.forEach((item, index) => {
+    const input = { procedure: item.operation, dept: item.dept, emergency: isEmergencyUrgency(item.urgency), choice: item.choice };
+    const candidates = candidateRooms(input, date, periods);
+    if (!candidates.ok) {
+      result[index] = candidates;
+      return;
+    }
+    const { rooms } = candidates;
+    if (rooms.length === 1) {
+      result[index] = placed(rooms[0]);
+      put(rooms[0]);
+      return;
+    }
+    const surgeon = item.surgeon?.trim().replace(/\s+/g, " ") || `#${index}`;
+    const key = `${rooms.join(",")}|${surgeon}`;
+    const group = groups.get(key) ?? { rooms, members: [], room: null };
+    groups.set(key, group);
+    // 1. A booked case keeps its booking's room; the first one gives the surgeon's other cases theirs.
+    if (item.bookedRoom && rooms.includes(item.bookedRoom)) {
+      result[index] = placed(item.bookedRoom);
+      put(item.bookedRoom);
+      group.room ??= item.bookedRoom;
+    } else {
+      group.members.push(index);
+    }
   });
+  // 2. The surgeon's other cases join their booked room.
+  const free: Group[] = [];
+  for (const group of groups.values()) {
+    if (group.members.length === 0) continue;
+    if (group.room === null) {
+      free.push(group);
+      continue;
+    }
+    for (const index of group.members) result[index] = placed(group.room);
+    put(group.room, group.members.length);
+  }
+  // 3. The surgeons with no booking, the longest list first, each in the room with the fewest cases so far.
+  free.sort((a, b) => b.members.length - a.members.length || a.members[0] - b.members[0]);
+  for (const group of free) {
+    const room = fewest(group.rooms, load);
+    for (const index of group.members) result[index] = placed(room);
+    put(room, group.members.length);
+  }
+  return result;
 }

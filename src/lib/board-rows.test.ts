@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
 import { buildBoardRows, missingUploadDay, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
+import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 
 // Tuesday 17 Nov 2026, the first half of the repair: OR 9 to 13 operate, OR 1 to 8 do not. Workbook cases and bookings
@@ -446,4 +447,40 @@ test("the no-upload alert names the board's day whenever it has no upload, in th
   assert.equal(missingUploadDay({ date: "2027-03-22", uploaded: false }, true), null);
   // No board (a closed day in the preview).
   assert.equal(missingUploadDay(null, false), null);
+});
+
+test("a department with two rooms: bookings stay where the doctor saw them, and each surgeon's HOSxP cases join them", () => {
+  // Monday 23 Nov 2026, the weekly schedule: GENSX holds OR 2 and OR 5. Pong, 22 Nov 2026: "How to deal with matching
+  // cases of dept that has 2 OR rooms ?"
+  const MONDAY = "2026-11-23";
+  const on = (workbook: WorkbookCase[] | null, bookings: AddedCase[]) =>
+    buildBoardRows({ date: MONDAY, periods: DEFAULT_REPAIR_PERIODS, workbook, bookings, viewer: MX });
+  // Doctor 8 booked first and got OR 2; doctor 7 then got the emptier OR 5 (lib/added-cases.ts roomAmong).
+  const first = booking({ date: MONDAY, roomId: "or-2", hn: "1111111", surgeonId: "8", surgeon: "หมอ แปด", operation: "Lap chole" });
+  const second = booking({ date: MONDAY, roomId: "or-5", hn: "2222222", surgeonId: "7", surgeon: "หมอ เจ็ด", operation: "Hernia" });
+  const before = on(null, [first, second]);
+  assert.deepEqual(
+    before.rows.map((row) => [row.id, row.roomId]),
+    [
+      [`bk-${first.id}`, "or-2"],
+      [`bk-${second.id}`, "or-5"],
+    ],
+  );
+  // After the upload each booked case keeps its room, the surgeon's other cases join it, and a surgeon nobody booked
+  // for goes to the emptier room.
+  const seven = "นพ. เจ็ด ศัลย์";
+  const eight = "นพ. แปด ศัลย์";
+  const after = on(
+    [
+      wb({ hn: "3333333", surgeon: seven, operation: "Lap appendectomy" }),
+      wb({ hn: "2222222", surgeon: seven, operation: "Herniorrhaphy" }),
+      wb({ hn: "1111111", surgeon: eight, operation: "Lap chole" }),
+      wb({ hn: "4444444", surgeon: "นพ. เก้า ศัลย์", operation: "Excision" }),
+      wb({ hn: "5555555", surgeon: seven, operation: "Thyroidectomy" }),
+    ],
+    [first, second],
+  );
+  const where = Object.fromEntries(after.rows.map((row) => [row.procedure, row.roomId]));
+  assert.deepEqual(where, { "Lap appendectomy": "or-5", Herniorrhaphy: "or-5", "Lap chole": "or-2", Excision: "or-2", Thyroidectomy: "or-5" });
+  assert.equal(after.matched, 2);
 });

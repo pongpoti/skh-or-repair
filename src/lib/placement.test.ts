@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { DeptCode } from "./allocation.ts";
-import { isDressingCase, isScopeCase, placeCase, roomsHeldBy, UNPLACED_TEXT, type PlaceInput } from "./placement.ts";
+import { isDressingCase, isScopeCase, placeAll, placeCase, roomsHeldBy, UNPLACED_TEXT, type PlaceableCase, type PlaceInput } from "./placement.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import * as week from "./week.ts";
@@ -165,4 +165,45 @@ test("the reasons a case is not placed read in Thai", () => {
   assert.equal(UNPLACED_TEXT["obgyn-building"], "สูติ-นรีเวช ผ่าตัดที่อาคารแม่");
   assert.equal(UNPLACED_TEXT["no-department"], "ไม่ทราบแผนก");
   assert.equal(UNPLACED_TEXT["no-room"], "แผนกนี้ไม่มีห้องผ่าตัดในวันนั้น");
+});
+
+test("a department with two rooms keeps each surgeon's cases in one room (Pong, 22 Nov 2026)", () => {
+  // Monday 23 Nov 2026, the weekly schedule: GENSX holds OR 2 and OR 5.
+  const MONDAY = "2026-11-23";
+  assert.deepEqual(roomsHeldBy("GENSX", MONDAY, DEFAULT_REPAIR_PERIODS), ["or-2", "or-5"]);
+  const gx = (surgeon: string, more: Partial<PlaceableCase> = {}): PlaceableCase => ({ operation: "Lap chole", dept: "GENSX", urgency: "Elective", surgeon, ...more });
+  const rooms = (cases: PlaceableCase[], date = MONDAY) =>
+    placeAll(cases, date, DEFAULT_REPAIR_PERIODS).map((placement) => (placement.ok ? placement.roomId : placement.reason));
+
+  // In file order A, B, A, C, A, B: A has the longest list and takes OR 2, B then the emptier OR 5, C joins B's OR 5.
+  // Spread one by one, as before, A's three cases went to OR 2, OR 2 and OR 5.
+  assert.deepEqual(rooms([gx("A"), gx("B"), gx("A"), gx("C"), gx("A"), gx("B")]), ["or-2", "or-5", "or-2", "or-5", "or-2", "or-5"]);
+  // The same surgeon however the file spaces the name.
+  assert.deepEqual(rooms([gx("นพ. ก  ข"), gx("นพ. ก ข "), gx("นพ. ค ง")]), ["or-2", "or-2", "or-5"]);
+  // On a tie, the surgeon who comes first in the file, in the first room.
+  assert.deepEqual(rooms([gx("B"), gx("A"), gx("A"), gx("B")]), ["or-2", "or-5", "or-5", "or-2"]);
+  // A case with no surgeon's name counts as its own surgeon.
+  assert.deepEqual(rooms([gx(""), gx(""), gx("")]), ["or-2", "or-5", "or-2"]);
+
+  // A booked case keeps its booking's room, and the surgeon's other cases join it; the others fill the emptier room.
+  assert.deepEqual(rooms([gx("A"), gx("B"), gx("A", { choice: "dept", bookedRoom: "or-5" }), gx("A"), gx("B")]), ["or-5", "or-2", "or-5", "or-5", "or-2"]);
+  // Two bookings in different rooms (made before this rule) each keep theirs; the rest follow the first in the file.
+  assert.deepEqual(
+    rooms([gx("A", { choice: "dept", bookedRoom: "or-5" }), gx("A", { choice: "dept", bookedRoom: "or-2" }), gx("A")]),
+    ["or-5", "or-2", "or-5"],
+  );
+  // A booking's room that is not one of the department's rooms that day does not count.
+  assert.deepEqual(rooms([gx("A", { choice: "dept", bookedRoom: "or-12" }), gx("B"), gx("B")]), ["or-5", "or-2", "or-2"]);
+
+  // Other rules first: an emergency to OR 8, an endoscopy to OR 3, a dressing to OR 1, and a department with one room
+  // that day (EYE, OR 10) is not pooled.
+  assert.deepEqual(
+    rooms([gx("A", { urgency: "Emergency" }), gx("A", { operation: "EGD" }), gx("A", { operation: "Wound dressing" }), gx("A"), { operation: "Phaco", dept: "EYE", urgency: null, surgeon: "A" }]),
+    ["or-8", "or-3", "or-1", "or-2", "or-10"],
+  );
+  // ORTHO's two rooms (OR 11 and OR 12 on this 4th Monday) the same way.
+  const ortho = (surgeon: string): PlaceableCase => ({ operation: "ORIF", dept: "ORTHO", urgency: "Elective", surgeon });
+  assert.deepEqual(rooms([ortho("X"), ortho("Y"), ortho("X")]), ["or-11", "or-12", "or-11"]);
+  // During the repair a department has one room: nothing changes.
+  assert.deepEqual(rooms([gx("A"), gx("B"), gx("A")], "2026-12-14"), ["or-12", "or-12", "or-12"]);
 });

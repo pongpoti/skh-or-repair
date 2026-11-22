@@ -1,9 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { addDays, BOOK_AHEAD_DAYS, bookedMessage, checkCase, earliestBookingDay, type AddedCase } from "@/lib/added-cases";
+import { addDays, BOOK_AHEAD_DAYS, bookedMessage, checkCase, deptRooms, earliestBookingDay, roomAmong, type AddedCase } from "@/lib/added-cases";
 import { getUser } from "@/lib/auth/server";
-import { addedToday, DAILY_ADD_LIMIT, doctorFor, insertCase, listCasesBy, removeCase } from "@/lib/cases";
+import { addedToday, DAILY_ADD_LIMIT, doctorFor, insertCase, listCasesBy, listCasesOn, removeCase } from "@/lib/cases";
 import { bangkokParts, now, today as todayInBangkok } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
@@ -67,6 +67,10 @@ export async function addCase(input: unknown): Promise<CaseResult> {
     if ((await addedToday(pool, doctor.id)) >= DAILY_ADD_LIMIT) {
       return { ok: false, error: `จองได้ไม่เกิน ${DAILY_ADD_LIMIT} รายการต่อวัน` };
     }
+
+    // A department with several rooms that day: the room of the doctor's own booking there, else the emptier one.
+    const rooms = value.dressing ? [] : deptRooms(doctor.subtype, value.operation, value.date, periods);
+    if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, await listCasesOn(pool, value.date), periods);
 
     await insertCase(pool, doctor.id, user.sub, value);
     revalidatePath("/");
