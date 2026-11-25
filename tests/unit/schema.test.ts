@@ -256,8 +256,9 @@ describe("database schema", () => {
     await pool.query("INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub) VALUES ('2026-11-02', 'or-3', 'TKA', 1, 'U1')");
     await ensureSchema(pool);
     await ensureSchema(pool);
-    const { rows } = await pool.query("SELECT operation, hn FROM cases");
-    assert.deepEqual(rows, [{ operation: "TKA", hn: null }]);
+    const { rows } = await pool.query("SELECT operation, hn, queued_at = created_at AS queued, edited_at FROM cases");
+    // the queue time of a booking made before edits is when it was made (Pong, 25 Nov 2026)
+    assert.deepEqual(rows, [{ operation: "TKA", hn: null, queued: true, edited_at: null }]);
     const insert = (operation: string | null, hn: string | null) =>
       pool.query("INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub, hn) VALUES ('2026-11-17', 'or-12', $1, 1, 'U1', $2)", [
         operation,

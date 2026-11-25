@@ -1,7 +1,7 @@
 import "./_setup";
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
-import { addedToday, doctorFor, insertCase, listCasesBy, listCasesOn, removeCase } from "@/lib/cases";
+import { addedToday, doctorFor, insertCase, listCasesBy, listCasesOn, ownCase, removeCase, restoreCase, UNDO_MINUTES, updateCase, updateNote } from "@/lib/cases";
 import { createPool, ensureSchema } from "@/lib/db";
 import { TEST_DB } from "./_setup";
 
@@ -60,7 +60,7 @@ describe("added cases (database)", () => {
     );
     assert.deepEqual((await listCasesBy(pool, doctor, "2026-11-04")).map((item) => item.operation), ["ORIF", "TKA"]);
     assert.deepEqual((await listCasesBy(pool, doctor, "2026-11-05")).map((item) => item.operation), ["TKA"]);
-    // When each was booked (the board's "วันเวลาที่จองคิว"): the row's created_at, oldest first.
+    // When each was booked (the board's "วันเวลาที่จองคิว"): its queue time, the row's created_at until it moves.
     const created = await pool.query<{ at: Date }>("SELECT created_at AS at FROM cases WHERE id = ANY($1::bigint[]) ORDER BY id", [[a, b]]);
     assert.deepEqual(day.map((item) => item.bookedAt), created.rows.map((row) => row.at.toISOString()));
     assert.ok((day[0].bookedAt ?? "") <= (day[1].bookedAt ?? ""), "oldest first");
@@ -143,6 +143,105 @@ describe("added cases (database)", () => {
         JSON.stringify(hn),
       );
     }
+  });
+
+  // Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete and other functions".
+  test("a doctor's edit of their own booking is saved in place; a new day, room or patient takes the back of the queue", async () => {
+    const base = { date: "2026-12-01", roomId: "or-12", hn: "11", operation: "Lap chole", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const first = await insertCase(pool, other, "U3", { ...base, hn: "21" });
+    const mine = await insertCase(pool, doctor, "U1", { ...base, hn: "22", note: "ขอ C-arm" });
+    const last = await insertCase(pool, other, "U3", { ...base, hn: "23" });
+    // queue times a minute apart, as bookings made one after another
+    await pool.query("UPDATE cases SET queued_at = created_at - make_interval(mins => $2) WHERE id = $1", [first, 3]);
+    await pool.query("UPDATE cases SET queued_at = created_at - make_interval(mins => $2) WHERE id = $1", [mine, 2]);
+    await pool.query("UPDATE cases SET queued_at = created_at - make_interval(mins => $2) WHERE id = $1", [last, 1]);
+    const order = async () => (await listCasesOn(pool, "2026-12-01")).map((item) => item.id);
+    assert.deepEqual(await order(), [first, mine, last]);
+
+    assert.equal((await ownCase(pool, mine, doctor))?.note, "ขอ C-arm");
+    assert.equal(await ownCase(pool, mine, other), null, "another doctor's");
+    assert.equal(await ownCase(pool, "999999", doctor), null);
+
+    // the note and the name: saved, its place kept, edited_at set
+    const before = (await ownCase(pool, mine, doctor))!;
+    assert.equal(before.editedAt, undefined, "never edited");
+    assert.equal(await updateCase(pool, mine, doctor, { ...base, hn: "22", operation: "Lap chole + IOC", note: "" }, false), true);
+    const noted = (await ownCase(pool, mine, doctor))!;
+    assert.deepEqual([noted.operation, noted.note, noted.bookedAt], ["Lap chole + IOC", "", before.bookedAt]);
+    assert.ok(noted.editedAt, "edited_at is set");
+    assert.equal((await pool.query("SELECT note FROM cases WHERE id = $1", [mine])).rows[0].note, null, "no note is NULL");
+    assert.deepEqual(await order(), [first, mine, last]);
+
+    // another patient: the back of the queue
+    assert.equal(await updateCase(pool, mine, doctor, { ...base, hn: "24" }, true), true);
+    assert.deepEqual(await order(), [first, last, mine]);
+    const requeued = (await ownCase(pool, mine, doctor))!;
+    assert.ok((requeued.bookedAt ?? "") > (before.bookedAt ?? ""), "a later queue time, which the row shows");
+    const created = await pool.query<{ created: Date; queued: Date }>("SELECT created_at AS created, queued_at AS queued FROM cases WHERE id = $1", [mine]);
+    assert.ok(created.rows[0].queued > created.rows[0].created, "the time it was made stays");
+
+    // a move to another day and the dressing room, with the scrub answer; the shift stays
+    await pool.query("UPDATE cases SET shift = 'out' WHERE id = $1", [mine]);
+    assert.equal(await updateCase(pool, mine, doctor, { ...base, date: "2026-12-02", roomId: "or-10", hn: "24", dressing: true, scrubDoes: false, shift: "in" }, true), true);
+    assert.deepEqual(await order(), [first, last]);
+    const moved = (await listCasesOn(pool, "2026-12-02")).find((item) => item.id === mine)!;
+    assert.deepEqual([moved.roomId, moved.dressing, moved.scrubDoes, moved.shift], ["or-10", true, false, "out"]);
+    // a scrub answer with the department's room is not kept
+    assert.equal(await updateCase(pool, mine, doctor, { ...base, date: "2026-12-02", hn: "24", scrubDoes: true }, true), true);
+    assert.deepEqual(((await ownCase(pool, mine, doctor))!).scrubDoes, null);
+    // a closed day's note edit of a booking from before HNs were required keeps it without one
+    await pool.query("UPDATE cases SET hn = NULL WHERE id = $1", [mine]);
+    assert.equal(await updateCase(pool, mine, doctor, { ...base, date: "2026-12-02", hn: "", note: "x" }, false), true);
+    assert.equal(((await ownCase(pool, mine, doctor))!).hn, null);
+
+    // not theirs, or cancelled meanwhile: nothing changes
+    assert.equal(await updateCase(pool, first, doctor, { ...base, hn: "21", note: "hijack" }, false), false);
+    assert.equal(((await ownCase(pool, first, other))!).note, "");
+    assert.equal(await removeCase(pool, mine, doctor), true);
+    assert.equal(await updateCase(pool, mine, doctor, { ...base, hn: "24" }, false), false);
+    assert.equal(await ownCase(pool, mine, doctor), null, "a cancelled booking is no longer theirs to edit");
+  });
+
+  test("a closed day's edit saves the note alone: a booking from before the room choice keeps its NULL choice and its place", async () => {
+    const { rows } = await pool.query<{ id: string }>(
+      "INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub) VALUES ('2026-12-05', 'or-10', 'D/S', $1, 'U1') RETURNING id::text AS id",
+      [doctor],
+    );
+    const id = rows[0].id;
+    const before = (await ownCase(pool, id, doctor))!;
+    assert.deepEqual([before.dressing, before.scrubDoes, before.hn], [null, null, null]);
+    assert.equal(await updateNote(pool, id, doctor, "NPO หลังเที่ยงคืน"), true);
+    const after = (await ownCase(pool, id, doctor))!;
+    assert.deepEqual([after.note, after.dressing, after.scrubDoes, after.roomId, after.bookedAt], ["NPO หลังเที่ยงคืน", null, null, "or-10", before.bookedAt]);
+    assert.ok(after.editedAt);
+    assert.equal(await updateNote(pool, id, doctor, ""), true);
+    assert.equal((await pool.query("SELECT note FROM cases WHERE id = $1", [id])).rows[0].note, null, "no note is NULL");
+    assert.equal(await updateNote(pool, id, other, "x"), false, "another doctor's");
+  });
+
+  test("a cancel can be undone for a few minutes, in its old place in the queue, while its day has not gone", async () => {
+    const base = { date: "2026-12-03", roomId: "or-12", hn: "31", operation: "Hernia", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const a = await insertCase(pool, doctor, "U1", base);
+    const b = await insertCase(pool, other, "U3", { ...base, hn: "32" });
+    await pool.query("UPDATE cases SET queued_at = created_at - interval '5 minutes' WHERE id = $1", [a]);
+    assert.equal(UNDO_MINUTES, 10);
+
+    assert.equal(await restoreCase(pool, a, doctor, "2026-11-25"), false, "not cancelled");
+    assert.equal(await removeCase(pool, a, doctor), true);
+    assert.deepEqual((await listCasesOn(pool, "2026-12-03")).map((item) => item.id), [b]);
+    assert.equal(await restoreCase(pool, a, other, "2026-11-25"), false, "another doctor's");
+    assert.equal(await restoreCase(pool, a, doctor, "2026-11-25"), true);
+    assert.deepEqual((await listCasesOn(pool, "2026-12-03")).map((item) => item.id), [a, b], "back first, as it was booked first");
+    assert.equal(await restoreCase(pool, a, doctor, "2026-11-25"), false, "once");
+
+    // too late: more than UNDO_MINUTES since the cancel
+    assert.equal(await removeCase(pool, a, doctor), true);
+    await pool.query("UPDATE cases SET removed_at = now() - make_interval(mins => $2) WHERE id = $1", [a, UNDO_MINUTES + 1]);
+    assert.equal(await restoreCase(pool, a, doctor, "2026-11-25"), false);
+    // its day has gone
+    await pool.query("UPDATE cases SET removed_at = now() WHERE id = $1", [a]);
+    assert.equal(await restoreCase(pool, a, doctor, "2026-12-04"), false);
+    assert.equal(await restoreCase(pool, a, doctor, "2026-12-03"), true, "its own day still counts");
   });
 
   test("the table refuses closed-format rooms, empty or long names and other shifts", async () => {

@@ -3,14 +3,14 @@ import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
 import { TopBar } from "@/components/top-bar";
-import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickRange, type BoardDay } from "@/lib/board-day";
+import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
 import { everyNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { demoBoardRows } from "@/lib/demo-schedule";
 import { addDays, parseDay, todayIso, weekDates } from "@/lib/days";
 import { holidaysBetween } from "@/lib/holidays";
 import { currentRepairPeriods } from "@/lib/repair-store";
-import { previewAddCase, previewMine, previewRemoveCase } from "./actions";
+import { previewAddCase, previewEditCase, previewMine, previewRemoveCase, previewRestoreCase } from "./actions";
 import { SAMPLE_DOCTOR_ID, sampleCases } from "./sample";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +20,11 @@ const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})
 const CLOCK = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 /** The board's day for a date given outright: that date is today and the board's day, at 09:00 or `time`. */
-function fixedDay(date: string, time: string | undefined): BoardDay {
+function fixedDay(date: string, time: string | undefined, today: string | undefined): BoardDay {
   const clock = time ? CLOCK.exec(time) : null;
   const minutes = clock ? Number(clock[1]) * 60 + Number(clock[2]) : 9 * 60;
-  return { today: date, minutes, cycleDay: addDays(date, -1), boardDate: date, relation: "today" };
+  const from = today && ISO_DATE.test(today) && today < date ? today : date;
+  return { today: from, minutes, cycleDay: addDays(date, -1), boardDate: date, relation: relationTo(date, from) };
 }
 
 /**
@@ -43,7 +44,9 @@ function fixedDay(date: string, time: string | undefined): BoardDay {
  * - ?failed=1 shows the board as when its cases cannot be read (no badge since 16 Nov 2026); ?notices=all puts every
  *   kind of notice in the strip, now the one ยังไม่มีตาราง HOSxP badge.
  * - ?book=1 adds the booking form as the sample doctor of ?dept= (a department code, GENSX unless given) sees it;
- *   ?time=15:30 with ?date= sets the clock that picks the first day that can be booked. Bookings stay in memory.
+ *   ?time=15:30 with ?date= sets the clock that picks the first day that can be booked, and ?today= (a day before ?date=)
+ *   the day it is, so the board's day can still be booked (its own bookings' จัดการ then edits it all). Bookings stay in
+ *   memory.
  */
 export default async function PreviewPage({
   searchParams,
@@ -63,6 +66,7 @@ export default async function PreviewPage({
     book?: string;
     dept?: string;
     time?: string;
+    today?: string;
     demo?: string;
   }>;
 }) {
@@ -74,20 +78,32 @@ export default async function PreviewPage({
     params.date && ISO_DATE.test(params.date) ? params.date : weekday !== null ? weekDates(todayIso())[weekday] : null;
   const at = params.at && ISO_TIME.test(params.at) ? new Date(params.at) : new Date();
   const [day, periods] = await Promise.all([
-    date ? fixedDay(date, params.time) : loadBoardDay(at),
+    date ? fixedDay(date, params.time, params.today) : loadBoardDay(at),
     // The repair's dates from the database, or the planned ones when there is none.
     currentRepairPeriods(),
   ]);
   const holiday = params.holiday?.trim() || null;
 
   const sample = params.sample ? sampleCases(day.boardDate, periods) : { workbook: [], bookings: [] };
+  // With the booking form, the sample doctor's own bookings live with the form's (in memory, preview/actions.ts), so their
+  // rows' actions (จัดการ) edit, move and cancel them; each day's made-up ones are taken in once, under ids of their own.
+  const mine = params.book
+    ? await previewMine(
+        sample.bookings
+          .filter((item) => item.surgeonId === SAMPLE_DOCTOR_ID)
+          .map((item) => ({ ...item, id: `${day.boardDate.replaceAll("-", "")}${item.id}` })),
+      )
+    : [];
+  const bookings = params.book
+    ? [...sample.bookings.filter((item) => item.surgeonId !== SAMPLE_DOCTOR_ID), ...mine].sort((a, b) => (a.bookedAt ?? "").localeCompare(b.bookedAt ?? ""))
+    : sample.bookings;
   const built = params.demo
     ? demoBoardRows(day.boardDate, periods, { allHn: true, userId: null })
     : buildBoardRows({
         date: day.boardDate,
         periods,
         workbook: params.sample && params.upload !== "0" ? sample.workbook : null,
-        bookings: sample.bookings,
+        bookings,
         viewer: { allHn: Boolean(params.mx), userId: params.mx ? null : SAMPLE_DOCTOR_ID },
       });
   const board: BoardView | null = holiday
@@ -100,15 +116,18 @@ export default async function PreviewPage({
     const name = "ตัวอย่าง หนึ่ง";
     const subtype = params.dept?.trim() || "GENSX";
     const earliest = earliestBookingDay(day.today, day.minutes, holidays);
+    const context = { today: day.today, earliest, periods, subtype, holidays, name };
     adding = {
       doctor: { name, subtype },
       today: day.today,
       earliest,
       holidays,
       unlisted,
-      mine: await previewMine(),
-      onAdd: previewAddCase.bind(null, { today: day.today, earliest, periods, subtype, holidays, name }),
+      mine,
+      onAdd: previewAddCase.bind(null, context),
+      onEdit: previewEditCase.bind(null, context),
       onRemove: previewRemoveCase,
+      onRestore: previewRestoreCase,
     };
   }
 

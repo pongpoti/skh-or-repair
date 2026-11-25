@@ -526,6 +526,7 @@ export function ThaiDateField({
   testId,
   today,
   unlisted,
+  openSignal = null,
 }: {
   /** For the parent's <label htmlFor>, which names the field. */
   id: string;
@@ -546,11 +547,21 @@ export function ThaiDateField({
   today?: string;
   /** The years the BOT gave no holidays for, named under their months (ThaiCalendar). */
   unlisted?: readonly number[];
+  /** Opens the calendar when it becomes a new object (the form opened to move a booking to another day). */
+  openSignal?: object | null;
 }): JSX.Element {
   const fieldRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   // Whether the keyboard opened the calendar, which moves the focus into it.
   const [byKey, setByKey] = useState(false);
+  const [prevSignal, setPrevSignal] = useState(openSignal);
+  if (prevSignal !== openSignal) {
+    setPrevSignal(openSignal);
+    if (openSignal) {
+      setByKey(false);
+      setOpen(true);
+    }
+  }
 
   const panelId = `${id}-calendar`;
   const valueId = `${id}-value`;

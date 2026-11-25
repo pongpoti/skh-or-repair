@@ -31,11 +31,12 @@ interface CaseRow {
   last_name: string;
   subtype: string | null;
   booked_at: Date;
+  edited_at: Date | null;
 }
 
 const COLUMNS =
   "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.operation, c.shift, c.dressing, c.scrub_does, c.note, " +
-  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.created_at AS booked_at";
+  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.queued_at AS booked_at, c.edited_at";
 
 function toCase(r: CaseRow): AddedCase {
   return {
@@ -54,7 +55,10 @@ function toCase(r: CaseRow): AddedCase {
     surgeonId: r.surgeon_id,
     surgeon: fullName({ firstName: r.first_name, lastName: r.last_name }),
     subtype: r.subtype,
+    // The booking's place in its room's queue (db/schema.sql queued_at): when it was made, or moved to its day, room or
+    // patient.
     bookedAt: r.booked_at.toISOString(),
+    ...(r.edited_at ? { editedAt: r.edited_at.toISOString() } : {}),
   };
 }
 
@@ -67,21 +71,21 @@ export async function doctorFor(pool: Q, who: string | SessionIdentity): Promise
   return user?.type === "DR" ? user : null;
 }
 
-/** Every case on one day, oldest first. */
+/** Every case on one day, in queue order (the earliest queue time first). */
 export async function listCasesOn(pool: Q, date: string): Promise<AddedCase[]> {
   const { rows } = await pool.query<CaseRow>(
     `SELECT ${COLUMNS} FROM cases c JOIN users u ON u.id = c.surgeon_id
-     WHERE c.op_date = $1 AND c.removed_at IS NULL ORDER BY c.created_at, c.id`,
+     WHERE c.op_date = $1 AND c.removed_at IS NULL ORDER BY c.queued_at, c.id`,
     [date],
   );
   return rows.map(toCase);
 }
 
-/** One doctor's cases from `from` (YYYY-MM-DD) on, by day, then in the order they were added. */
+/** One doctor's cases from `from` (YYYY-MM-DD) on, by day, then in queue order. */
 export async function listCasesBy(pool: Q, surgeonId: string, from: string): Promise<AddedCase[]> {
   const { rows } = await pool.query<CaseRow>(
     `SELECT ${COLUMNS} FROM cases c JOIN users u ON u.id = c.surgeon_id
-     WHERE c.surgeon_id = $1 AND c.op_date >= $2 AND c.removed_at IS NULL ORDER BY c.op_date, c.created_at, c.id`,
+     WHERE c.surgeon_id = $1 AND c.op_date >= $2 AND c.removed_at IS NULL ORDER BY c.op_date, c.queued_at, c.id`,
     [surgeonId, from],
   );
   return rows.map(toCase);
@@ -118,6 +122,72 @@ export async function insertCase(pool: Q, surgeonId: string, lineSub: string, in
     ],
   );
   return rows[0].id;
+}
+
+/** One of this doctor's cases that is still booked, or null (another doctor's, removed, or no such case). */
+export async function ownCase(pool: Q, id: string, surgeonId: string): Promise<AddedCase | null> {
+  const { rows } = await pool.query<CaseRow>(
+    `SELECT ${COLUMNS} FROM cases c JOIN users u ON u.id = c.surgeon_id WHERE c.id = $1 AND c.surgeon_id = $2 AND c.removed_at IS NULL`,
+    [id, surgeonId],
+  );
+  return rows.length ? toCase(rows[0]) : null;
+}
+
+/**
+ * Saves a doctor's edit of their own case in place (lib/added-cases.ts checkCase and bookingChange): the day, room, HN,
+ * operation, room choice, scrub answer and note, with edited_at. `requeue` puts it at the back of its room's queue
+ * (queued_at now): a new day, room choice or patient counts as a new booking. The shift and the time it was made stay.
+ * Returns false when it is not theirs or was removed meanwhile.
+ */
+export async function updateCase(pool: Q, id: string, surgeonId: string, input: CaseInput, requeue: boolean): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE cases SET op_date = $3, room_id = $4, hn = $5, operation = $6, dressing = $7, scrub_does = $8, note = $9,
+       edited_at = now(), queued_at = CASE WHEN $10 THEN now() ELSE queued_at END
+     WHERE id = $1 AND surgeon_id = $2 AND removed_at IS NULL`,
+    [
+      id,
+      surgeonId,
+      input.date,
+      input.roomId,
+      // A closed day's note edit of a booking from before HNs were required keeps it without one.
+      input.hn || null,
+      input.operation || null,
+      input.dressing,
+      input.dressing ? input.scrubDoes : null,
+      input.note || null,
+      requeue,
+    ],
+  );
+  return rowCount === 1;
+}
+
+/**
+ * Saves only the note of one of this doctor's cases, with edited_at: the edit of a booking whose day is closed (lib/added-
+ * cases.ts bookingState), which leaves its day, room, HN, name and room choice as the day's list has them (a booking
+ * from before the form asked keeps its NULL room choice). Returns false when it is not theirs or was removed meanwhile.
+ */
+export async function updateNote(pool: Q, id: string, surgeonId: string, note: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    "UPDATE cases SET note = $3, edited_at = now() WHERE id = $1 AND surgeon_id = $2 AND removed_at IS NULL",
+    [id, surgeonId, note || null],
+  );
+  return rowCount === 1;
+}
+
+/** How long after a cancel the doctor can book the case back in its old place (restoreCase), in minutes. */
+export const UNDO_MINUTES = 10;
+
+/**
+ * Books back one of this doctor's cases they cancelled less than UNDO_MINUTES ago, on a day that has not gone (`today`
+ * on), in its old place in the queue (queued_at is untouched by a cancel). Returns false otherwise.
+ */
+export async function restoreCase(pool: Q, id: string, surgeonId: string, today: string): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `UPDATE cases SET removed_at = NULL
+     WHERE id = $1 AND surgeon_id = $2 AND removed_at IS NOT NULL AND removed_at > now() - make_interval(mins => $3) AND op_date >= $4`,
+    [id, surgeonId, UNDO_MINUTES, today],
+  );
+  return rowCount === 1;
 }
 
 /** Removes one of this doctor's cases. Returns false when it is not theirs or was already removed. */

@@ -1,11 +1,11 @@
 import type { DeptCode } from "./allocation.ts";
 import { addDays, thaiDate, workdayIndex } from "./days.ts";
-import { checkHn } from "./hn.ts";
+import { checkHn, normalizeHn } from "./hn.ts";
 import { holidayIn, nextWorkdayIn, type Holiday } from "./holidays.ts";
 import { candidateRooms, placeCase, roomsHeldBy, type RoomChoice } from "./placement.ts";
 import { REPAIR_LAYOUTS, repairOn, type RepairPeriods } from "./repair.ts";
 import { getRoom, roomLabel, roomUse } from "./rooms.ts";
-import type { Operation, Shift } from "./schedule.ts";
+import type { CaseStatus, Operation, Shift } from "./schedule.ts";
 import { isSpecialtyCode } from "./specialties.ts";
 import { subtypeLabel } from "./user-labels.ts";
 import type { DayBoard } from "./week.ts";
@@ -92,8 +92,13 @@ export type AddedCase = Omit<CaseInput, "hn" | "dressing"> & {
   surgeon: string;
   /** The surgeon's subtype code (users.subtype), e.g. ORTHO. */
   subtype: string | null;
-  /** When the doctor made the booking (cases.created_at), an ISO time; left out by the made-up previews. */
+  /**
+   * The booking's place in its room's queue (cases.queued_at), an ISO time: when the doctor made it, or moved it to its
+   * day, room or patient (bookingChange); left out by the made-up previews.
+   */
   bookedAt?: string;
+  /** The doctor's last edit of it (cases.edited_at), an ISO time; left out when it was never edited. */
+  editedAt?: string;
 };
 
 const BOOKED_AT = new Intl.DateTimeFormat("th-TH-u-ca-buddhist", {
@@ -363,6 +368,104 @@ export function bookedMessage(value: Pick<CaseInput, "roomId" | "date">): string
   return `จอง ${room ? roomLabel(room) : value.roomId} ${thaiDate(value.date, "short")} แล้ว`;
 }
 
+/**
+ * Where a doctor's own booking stands for the row's actions, by its day: "open" while the day can still be booked (it can
+ * be edited and moved), "closed" from 15:00 the day before (the day's HOSxP list is MX's: only the note can change, and
+ * the case can still move to an open day or be cancelled), "past" once the day has gone (nothing changes).
+ */
+export type BookingState = "open" | "closed" | "past";
+export function bookingState(date: string, today: string, earliest: string): BookingState {
+  if (date < today) return "past";
+  return date < earliest ? "closed" : "open";
+}
+
+/** What a closed day's edit says when anything but the note changed. */
+export const NOTE_ONLY_TEXT = "ปิดรับแก้ไขแล้ว แก้ได้เฉพาะหมายเหตุ";
+/** Pong's queue rule for edits, as the actions say it (bookingChange). */
+export const REQUEUE_TEXT = "เปลี่ยนวัน ห้อง หรือ HN จะต่อท้ายคิว";
+
+/**
+ * What an edit changes (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete"). `requeue`: a
+ * new day, another room (the doctor's other choice of room, or a name that sends the case elsewhere, as an endoscopy to
+ * the SCOPE room) or another patient (HN) counts as a new booking, at the back of its room's queue ("จองก่อน ได้คิวก่อน"),
+ * so an early booking cannot hold a place for another case; fixing the operation's name, the note or the scrub answer
+ * keeps the place. The room is compared with where the booking is now (bookedRoom), so an admin's move of the repair's
+ * dates is no change of the doctor's. `moved`: the room or the day changed. `changed`: anything is saved at all.
+ */
+export function bookingChange(
+  before: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "note" | "subtype">,
+  after: CaseInput,
+  periods: RepairPeriods,
+): { changed: boolean; requeue: boolean; moved: boolean } {
+  const now = bookedRoom(before, periods);
+  const moved = after.date !== before.date || after.roomId !== now.roomId || after.dressing !== now.dressing;
+  // A booking from before HNs were required that gets one is no new patient.
+  const requeue = moved || (before.hn !== null && after.hn !== before.hn);
+  const changed =
+    requeue ||
+    after.hn !== (before.hn ?? "") ||
+    after.roomId !== before.roomId ||
+    after.operation !== before.operation ||
+    after.note !== before.note ||
+    (after.dressing && after.scrubDoes !== before.scrubDoes);
+  return { changed, requeue, moved };
+}
+
+/**
+ * What the form says once an edit is saved: the new room and day when it moved to another day, the new room when only
+ * the room changed, and that it went to the back of the queue when it did.
+ */
+export function editedMessage(value: Pick<CaseInput, "roomId" | "date">, before: Pick<AddedCase, "date">, change: { requeue: boolean; moved: boolean }): string {
+  const room = getRoom(value.roomId);
+  const name = room ? roomLabel(room) : value.roomId;
+  if (value.date !== before.date) return `เลื่อนไป ${name} ${thaiDate(value.date, "short")} แล้ว`;
+  if (change.moved) return `ย้ายไป ${name} แล้ว ต่อท้ายคิว`;
+  return change.requeue ? "บันทึกแล้ว ต่อท้ายคิว" : "บันทึกแล้ว";
+}
+
+/**
+ * Whether saving the form's edit puts the booking at the back of the queue, as the form says before saving (bookingChange
+ * is the server's answer, once the room is worked out): a new day, a new HN (not one filling a booking that had none), or
+ * another room: the other choice, or a name that sends the case elsewhere (an endoscopy to the SCOPE room in the weekly
+ * schedule). On its own day a booking keeps a room that is still one of its department's (app/(board)/actions.ts editCase).
+ */
+export function editRequeues(
+  before: Pick<AddedCase, "date" | "roomId" | "hn" | "dressing" | "scrubDoes" | "operation" | "subtype">,
+  after: { date: string; hn: string; operation: string; choice: RoomChoice },
+  subtype: string | null,
+  periods: RepairPeriods,
+): boolean {
+  if (after.date !== before.date) return true;
+  if (before.hn !== null && normalizeHn(after.hn) !== before.hn) return true;
+  const now = bookedRoom(before, periods);
+  if (after.choice === "dressing") return !now.dressing;
+  if (now.dressing) return true;
+  const operation = cleanOperation(after.operation);
+  if (deptRooms(subtype, operation, after.date, periods).includes(now.roomId)) return false;
+  const room = bookingRoom(subtype, operation, after.date, periods, "dept");
+  return room.ok && room.roomId !== now.roomId;
+}
+
+/**
+ * The day at whose 15:00 a booking on `date` closes for edits (bookingState), from `today` on: the first day on which
+ * the 15:00 cut-off (earliestBookingDay) passes it. Asked while the booking is open, so on `today` that 15:00 is still
+ * ahead. Weekends and holidays count as the cut-off does (a Monday's booking closes on Friday at 15:00, and its weekend
+ * mornings open it again until 15:00), so the sheet always names the next moment it closes. Null past `date`.
+ */
+export function editClosesOn(date: string, today: string, holidays: readonly Holiday[] = []): string | null {
+  for (let day = today; day < date; day = addDays(day, 1)) {
+    if (earliestBookingDay(day, BOOKING_CUTOFF_MINUTES, holidays) > date) return day;
+  }
+  return null;
+}
+
+/**
+ * HOSxP statuses that say a case is under way or over: its booking can then only be booked again (the row's actions;
+ * editCase and deleteCase refuse the rest).
+ */
+export const UNDER_WAY: ReadonlySet<CaseStatus> = new Set<CaseStatus>(["in-progress", "done", "recovery"]);
+export const STARTED_TEXT = "เคสนี้เริ่มแล้ว แก้ไขไม่ได้";
+
 /** What checking a booking needs to know besides the form's fields. */
 export type BookingContext = {
   /** Today in Thailand, YYYY-MM-DD. */
@@ -374,6 +477,11 @@ export type BookingContext = {
   subtype: string | null;
   /** The Bank of Thailand's holidays, HOSPITAL_HOLIDAYS and EXTRA_HOLIDAYS, from today to 60 days ahead. */
   holidays: readonly Holiday[];
+  /**
+   * The doctor's own booking being edited, when the input is its new state (editCase): its own day needs none of a new
+   * booking's day checks, and once that day is closed (bookingState) only the note may change.
+   */
+  editing?: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "subtype">;
 };
 
 /**
@@ -384,16 +492,36 @@ export type BookingContext = {
  * server's answer is the one that counts.
  */
 export function checkCase(input: unknown, context: BookingContext): CheckedCase {
-  const { today, earliest, periods, subtype, holidays } = context;
+  const { today, earliest, periods, subtype, holidays, editing } = context;
   const raw = (input ?? {}) as Record<string, unknown>;
   const refuse = (field: CaseField | undefined, error: string, more: { earliest?: string } = {}): CheckedCase => ({ ok: false, error, field, ...more });
   const date = raw.date;
   if (!isIsoDate(date)) return refuse("date", "เลือกวันที่ผ่าตัด");
-  if (date < earliest) return refuse("date", earliestText(today, earliest, holidays), { earliest });
-  if (date > addDays(today, BOOK_AHEAD_DAYS)) return refuse("date", `จองล่วงหน้าได้ไม่เกิน ${BOOK_AHEAD_DAYS} วัน`);
-  if (workdayIndex(date) === null) return refuse("date", "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
-  const holiday = holidayIn(holidays, date);
-  if (holiday) return refuse("date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
+  // An edit that keeps its booking's day: the day was checked when it was booked. Its day closed meanwhile (15:00 the day
+  // before passed): only the note may change, as MX has the day's list.
+  const keepsDay = editing !== undefined && date === editing.date;
+  const closed = keepsDay && date < earliest;
+  if (!keepsDay) {
+    if (date < earliest) return refuse("date", earliestText(today, earliest, holidays), { earliest });
+    if (date > addDays(today, BOOK_AHEAD_DAYS)) return refuse("date", `จองล่วงหน้าได้ไม่เกิน ${BOOK_AHEAD_DAYS} วัน`);
+    if (workdayIndex(date) === null) return refuse("date", "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
+    const holiday = holidayIn(holidays, date);
+    if (holiday) return refuse("date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
+  }
+
+  if (closed && editing) {
+    // Only the note: the HN, the operation and the room choice must be the booking's own, as the form leaves them (locked;
+    // a booking from before they were required may have no HN or name). The room stays where the day's list has it.
+    const kept = changedField(raw, editing, periods);
+    if (kept) return refuse(kept, NOTE_ONLY_TEXT);
+    const note = checkNote(raw.note);
+    if (!note.ok) return refuse("note", note.error);
+    const room = bookedRoom(editing, periods);
+    return {
+      ok: true,
+      value: { date, roomId: room.roomId, hn: editing.hn ?? "", operation: editing.operation, shift: "in", dressing: room.dressing, scrubDoes: room.dressing ? editing.scrubDoes : null, note: note.note },
+    };
+  }
 
   const hn = checkHn(raw.hn);
   if (!hn.ok) return refuse("hn", hn.error);
@@ -420,10 +548,42 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   if (!room.ok) return refuse(room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
 
   // Last, as in the form.
-  if (raw.note !== undefined && raw.note !== null && typeof raw.note !== "string") return refuse("note", "หมายเหตุไม่ถูกต้อง");
-  const note = cleanNote(typeof raw.note === "string" ? raw.note : "");
-  if (note.length > MAX_NOTE) return refuse("note", `หมายเหตุยาวเกิน ${MAX_NOTE} ตัวอักษร`);
-  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note } };
+  const note = checkNote(raw.note);
+  if (!note.ok) return refuse("note", note.error);
+  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note: note.note } };
+}
+
+function checkNote(raw: unknown): { ok: true; note: string } | { ok: false; error: string } {
+  if (raw !== undefined && raw !== null && typeof raw !== "string") return { ok: false, error: "หมายเหตุไม่ถูกต้อง" };
+  const note = cleanNote(typeof raw === "string" ? raw : "");
+  return note.length > MAX_NOTE ? { ok: false, error: `หมายเหตุยาวเกิน ${MAX_NOTE} ตัวอักษร` } : { ok: true, note };
+}
+
+/**
+ * Whether the form's HN is the booking's own: normalised the same way, or checked (a booking saved under an older rule,
+ * such as eight digits, comes back as it was and still counts as unchanged).
+ */
+function sameHn(raw: unknown, own: string | null): boolean {
+  if (own === null || (typeof raw !== "string" && typeof raw !== "number")) return false;
+  if (normalizeHn(raw) === normalizeHn(own)) return true;
+  const checked = checkHn(raw);
+  return checked.ok && checked.hn === own;
+}
+
+/**
+ * The first of the HN, the operation and the room choice (with its scrub answer) that the form's input changed from the
+ * booking being edited, or null when it changed none: a closed day's edit may change only the note. An empty HN or name
+ * is the same as a booking's missing one.
+ */
+function changedField(raw: Record<string, unknown>, editing: NonNullable<BookingContext["editing"]>, periods: RepairPeriods): CaseField | null {
+  const blank = raw.hn === undefined || raw.hn === null || raw.hn === "";
+  if (blank ? editing.hn !== null : !sameHn(raw.hn, editing.hn)) return "hn";
+  const operation = cleanOperation(typeof raw.operation === "string" ? raw.operation : "");
+  if (operation !== editing.operation) return "operation";
+  const choice = raw.room ?? "dept";
+  if (choice !== bookedChoice(editing, periods)) return "room";
+  if (choice === "dressing" && (raw.scrubDoes ?? null) !== editing.scrubDoes) return "room";
+  return null;
 }
 
 /**

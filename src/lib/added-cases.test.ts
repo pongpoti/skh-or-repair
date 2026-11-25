@@ -6,7 +6,9 @@ import {
   bookedChoice,
   bookedMessage,
   bookedRoom,
+  bookingChange,
   bookingRoom,
+  bookingState,
   BORROWED_ROOM_NAME,
   BORROWED_ROOM_NOTE,
   borrowsRoom,
@@ -17,18 +19,23 @@ import {
   deptRooms,
   earliestBookingDay,
   earliestText,
+  editClosesOn,
+  editedMessage,
+  editRequeues,
   bookableFrom,
   BOOKING_CUTOFF_RULE,
   MAX_NOTE,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
+  NOTE_ONLY_TEXT,
   POOLED_ROOM_NOTE,
   roomAmong,
   withAddedCases,
   type AddedCase,
   type BookingContext,
 } from "./added-cases.ts";
+import { displayHn } from "./hn.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import type { DayBoard } from "./week.ts";
@@ -434,4 +441,201 @@ test("a department with no room that day borrows the open room with the fewest b
   assert.equal(roomAmong(SPARE, "7", TUESDAY, [...own, made("7", "or-4", "VASCULAR")], P), "or-4", "the doctor's own earlier booking");
   // A saved borrowed room stays while it is still one of those rooms.
   assert.deepEqual(bookedRoom(made("7", "or-9", "VASCULAR"), P), { roomId: "or-9", dressing: false });
+});
+
+// Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete and other functions".
+const own = (more: Partial<AddedCase> = {}): AddedCase => ({
+  id: "41",
+  date: "2026-11-17",
+  roomId: "or-12",
+  hn: "12345",
+  operation: "Lap chole",
+  shift: "in",
+  dressing: false,
+  scrubDoes: null,
+  note: "ขอ C-arm",
+  surgeonId: "7",
+  surgeon: "x",
+  subtype: "GENSX",
+  ...more,
+});
+/** The form's input for a booking as it is (what the edit form opens with). */
+const asInput = (booking: AddedCase) => ({
+  date: booking.date,
+  hn: booking.hn ? displayHn(booking.hn) : "",
+  operation: booking.operation,
+  room: bookedChoice(booking, REPAIR),
+  scrubDoes: booking.scrubDoes,
+  note: booking.note,
+});
+
+test("a booking's state for its row's actions: open until 15:00 the day before, then closed, past once its day has gone", () => {
+  // Monday 16 Nov 2026: before 15:00 the first day is Tuesday, from 15:00 Wednesday
+  assert.equal(bookingState("2026-11-17", "2026-11-16", "2026-11-17"), "open");
+  assert.equal(bookingState("2026-11-17", "2026-11-16", "2026-11-18"), "closed", "Monday 15:00: Tuesday's list is MX's");
+  assert.equal(bookingState("2026-11-16", "2026-11-16", "2026-11-17"), "closed", "its own day, until it has gone");
+  assert.equal(bookingState("2026-11-13", "2026-11-16", "2026-11-17"), "past");
+  assert.equal(bookingState("2026-12-01", "2026-11-16", "2026-11-18"), "open");
+});
+
+test("an edit on its own open day: every field as a new booking, without the day's checks (it was checked when booked)", () => {
+  const booking = own({ date: "2026-11-17" });
+  const editing = { ...booking };
+  const context = { today: "2026-11-16", earliest: "2026-11-17", editing };
+  const edited = check({ ...asInput(booking), hn: "0099999", operation: "Hernia", note: "" }, context);
+  assert.deepEqual(edited, {
+    ok: true,
+    value: { date: "2026-11-17", roomId: "or-12", hn: "99999", operation: "Hernia", shift: "in", dressing: false, scrubDoes: null, note: "" },
+  });
+  // the fields are still required there
+  const blank = check({ ...asInput(booking), operation: " " }, context);
+  assert.deepEqual(blank.ok ? null : [blank.field, blank.error], ["operation", "ใส่ชื่อการผ่าตัด"]);
+  // a holiday declared on its day after it was booked does not stop the edit; a new booking there is refused
+  const holiday = [{ date: "2026-11-17", name: "วันหยุดพิเศษ" }];
+  assert.equal(check(asInput(booking), { ...context, holidays: holiday }).ok, true);
+  assert.equal(check(asInput(booking), { today: "2026-11-16", earliest: "2026-11-17", holidays: holiday }).ok, false);
+  // its other room: the dressing room, with the scrub answer
+  const dressing = check({ ...asInput(booking), room: "dressing", scrubDoes: false }, context);
+  assert.ok(dressing.ok);
+  assert.deepEqual([dressing.value.roomId, dressing.value.dressing, dressing.value.scrubDoes], ["or-10", true, false]);
+});
+
+test("a move to another day is checked as a new booking's day; a closed booking can still move to an open day", () => {
+  const booking = own({ date: "2026-11-17" });
+  // Monday 16 Nov 2026 after 15:00: Tuesday is closed, Wednesday the first open day
+  const context = { today: "2026-11-16", earliest: "2026-11-18", editing: booking };
+  const moved = check({ ...asInput(booking), date: "2026-11-19" }, context);
+  assert.ok(moved.ok);
+  assert.deepEqual([moved.value.date, moved.value.roomId], ["2026-11-19", "or-12"]);
+  for (const [date, field] of [
+    ["2026-11-16", "date"],
+    ["2026-11-21", "date"],
+  ]) {
+    const refused = check({ ...asInput(booking), date }, context);
+    assert.equal(refused.ok ? null : refused.field, field, date);
+  }
+  const early = check({ ...asInput(booking), date: "2026-11-16" }, context);
+  assert.ok(!early.ok);
+  assert.equal(early.earliest, "2026-11-18", "a day before the first open one says which is");
+  // and the fields are free again on the new day
+  const other = check({ ...asInput(booking), date: "2026-11-19", hn: "0055555" }, context);
+  assert.equal(other.ok, true);
+});
+
+test("an edit on its own closed day changes only the note: the HN, the name and the room stay as the day's list has them", () => {
+  const booking = own({ date: "2026-11-17", dressing: true, roomId: "or-10", scrubDoes: true });
+  const context = { today: "2026-11-16", earliest: "2026-11-18", editing: booking };
+  const noted = check({ ...asInput(booking), note: "  NPO หลังเที่ยงคืน " }, context);
+  assert.deepEqual(noted, {
+    ok: true,
+    value: { date: "2026-11-17", roomId: "or-10", hn: "12345", operation: "Lap chole", shift: "in", dressing: true, scrubDoes: true, note: "NPO หลังเที่ยงคืน" },
+  });
+  const refused = (input: Record<string, unknown>) => {
+    const checked = check({ ...asInput(booking), ...input }, context);
+    return checked.ok ? "ok" : [checked.field, checked.error];
+  };
+  assert.deepEqual(refused({ hn: "0099999" }), ["hn", NOTE_ONLY_TEXT]);
+  assert.deepEqual(refused({ hn: "" }), ["hn", NOTE_ONLY_TEXT]);
+  assert.deepEqual(refused({ operation: "Hernia" }), ["operation", NOTE_ONLY_TEXT]);
+  assert.deepEqual(refused({ room: "dept", scrubDoes: null }), ["room", NOTE_ONLY_TEXT]);
+  assert.deepEqual(refused({ scrubDoes: false }), ["room", NOTE_ONLY_TEXT]);
+  assert.deepEqual(refused({ hn: "0012345", operation: " Lap  chole " }), "ok", "the same HN and name, as typed");
+  assert.deepEqual(refused({ note: "ก".repeat(MAX_NOTE + 1) }), ["note", "หมายเหตุยาวเกิน 500 ตัวอักษร"]);
+  assert.deepEqual(refused({ note: 5 }), ["note", "หมายเหตุไม่ถูกต้อง"]);
+  // a booking from before the HN and the name were required keeps them missing, and its note changes
+  const old = own({ date: "2026-11-17", hn: null, operation: "", dressing: null, roomId: "or-12" });
+  const oldNoted = check({ ...asInput(old), note: "ขอเตียง ICU" }, { ...context, editing: old });
+  assert.deepEqual(oldNoted, {
+    ok: true,
+    value: { date: "2026-11-17", roomId: "or-12", hn: "", operation: "", shift: "in", dressing: false, scrubDoes: null, note: "ขอเตียง ICU" },
+  });
+  // on an open day it needs them, as a new booking does
+  const opened = check({ ...asInput(old), note: "x" }, { today: "2026-11-16", earliest: "2026-11-17", editing: old });
+  assert.deepEqual(opened.ok ? null : opened.field, "hn");
+});
+
+test("a closed day's note edit keeps what an older rule saved: an HN past today's 7 digits, a dressing room with no scrub answer", () => {
+  const context = { today: "2026-11-16", earliest: "2026-11-18" };
+  // HNs of up to 15 letters and digits were taken before 15 Nov 2026; the form sends them back as they were
+  for (const hn of ["12345678", "AN1234"]) {
+    const old = own({ hn });
+    const noted = check({ ...asInput(old), note: "NPO" }, { ...context, editing: old });
+    assert.ok(noted.ok, hn);
+    assert.equal(noted.value.hn, hn);
+  }
+  // a dressing-room booking from before the form asked (dressing and scrub answer NULL): the note alone is saved
+  // (app/(board)/actions.ts updateNote), the room choice as the day's list has it
+  const dressing = own({ roomId: "or-10", dressing: null, scrubDoes: null });
+  const noted = check({ ...asInput(dressing), note: "NPO" }, { ...context, editing: dressing });
+  assert.ok(noted.ok);
+  assert.deepEqual([noted.value.roomId, noted.value.note], ["or-10", "NPO"]);
+});
+
+test("what an edit changes: a new day, room or patient goes to the back of the queue; the name, the note or the scrub answer keep its place", () => {
+  const booking = own();
+  const input = (more: Record<string, unknown>) => {
+    const checked = check({ ...asInput(booking), ...more }, { today: "2026-11-16", earliest: "2026-11-17", editing: booking });
+    assert.ok(checked.ok, JSON.stringify(more));
+    return bookingChange(booking, checked.value, REPAIR);
+  };
+  assert.deepEqual(input({}), { changed: false, requeue: false, moved: false }, "nothing changed");
+  assert.deepEqual(input({ note: "NPO" }), { changed: true, requeue: false, moved: false });
+  assert.deepEqual(input({ note: "" }), { changed: true, requeue: false, moved: false });
+  assert.deepEqual(input({ operation: "Lap chole + IOC" }), { changed: true, requeue: false, moved: false });
+  assert.deepEqual(input({ hn: "0099999" }), { changed: true, requeue: true, moved: false });
+  assert.deepEqual(input({ date: "2026-11-18" }), { changed: true, requeue: true, moved: true });
+  assert.deepEqual(input({ room: "dressing", scrubDoes: true }), { changed: true, requeue: true, moved: true });
+  // in the dressing room, the scrub answer alone keeps the place
+  const dressing = own({ roomId: "or-10", dressing: true, scrubDoes: true });
+  const scrub = check({ ...asInput(dressing), scrubDoes: false }, { today: "2026-11-16", earliest: "2026-11-17", editing: dressing });
+  assert.ok(scrub.ok);
+  assert.deepEqual(bookingChange(dressing, scrub.value, REPAIR), { changed: true, requeue: false, moved: false });
+  // a booking from before HNs were required that gets one: no new patient
+  const old = own({ hn: null });
+  const filled = check({ ...asInput(old), hn: "0012345" }, { today: "2026-11-16", earliest: "2026-11-17", editing: old });
+  assert.ok(filled.ok);
+  assert.deepEqual(bookingChange(old, filled.value, REPAIR), { changed: true, requeue: false, moved: false });
+  // saved in a room an admin's change of the repair's dates moved: the room it is in now counts, no move of the doctor's
+  const halves = { half1: { from: "2026-11-14", to: "2026-11-13" }, half2: { from: "2026-11-16", to: "2027-03-17" } };
+  const shifted = own({ roomId: "or-10", dressing: true, scrubDoes: false });
+  const same = { ...asInput(shifted), date: shifted.date, roomId: bookedRoom(shifted, halves).roomId, hn: "12345", shift: "in" as const, dressing: true, scrubDoes: false };
+  assert.deepEqual(bookingChange(shifted, same, halves), { changed: true, requeue: false, moved: false }, "saved again in today's dressing room");
+});
+
+test("an edit's saved message: the new room and day after a move, the new room, or that it went to the back of the queue", () => {
+  const before = { date: "2026-11-17" };
+  assert.equal(editedMessage({ roomId: "or-12", date: "2026-11-19" }, before, { requeue: true, moved: true }), "เลื่อนไป OR 12 วันพฤหัสบดีที่ 19 พ.ย. 2569 แล้ว");
+  assert.equal(editedMessage({ roomId: "or-10", date: "2026-11-17" }, before, { requeue: true, moved: true }), "ย้ายไป OR 10 แล้ว ต่อท้ายคิว");
+  assert.equal(editedMessage({ roomId: "or-12", date: "2026-11-17" }, before, { requeue: true, moved: false }), "บันทึกแล้ว ต่อท้ายคิว");
+  assert.equal(editedMessage({ roomId: "or-12", date: "2026-11-17" }, before, { requeue: false, moved: false }), "บันทึกแล้ว");
+});
+
+test("the form's word that a save goes to the back of the queue follows the server's: the day, the HN, or the room, a name's too", () => {
+  const booking = own({ date: "2026-12-02", roomId: "or-5", operation: "Lap chole" });
+  const P = DEFAULT_REPAIR_PERIODS; // the weekly schedule until 8 Dec 2026: GENSX holds OR 2 and OR 5, endoscopies OR 3
+  const after = (more: Partial<{ date: string; hn: string; operation: string; choice: "dept" | "dressing" }>) =>
+    editRequeues(booking, { date: "2026-12-02", hn: "0012345", operation: "Lap chole", choice: "dept", ...more }, "GENSX", P);
+  assert.equal(after({}), false, "nothing that moves it");
+  assert.equal(after({ operation: "Lap chole + IOC" }), false, "a name that keeps its room: OR 5 is still GENSX's");
+  assert.equal(after({ operation: "EGD" }), true, "a name that sends it to OR 3");
+  assert.equal(after({ hn: "0099999" }), true);
+  assert.equal(after({ hn: "12345" }), false, "the same HN, typed without its zeros");
+  assert.equal(after({ date: "2026-12-03" }), true);
+  assert.equal(after({ choice: "dressing" }), true);
+  assert.equal(editRequeues(own({ hn: null }), { date: "2026-11-17", hn: "0012345", operation: "Lap chole", choice: "dept" }, "GENSX", REPAIR), false, "an HN filled in");
+  const dressing = own({ roomId: "or-10", dressing: true, scrubDoes: true });
+  assert.equal(editRequeues(dressing, { date: "2026-11-17", hn: "0012345", operation: "x", choice: "dressing" }, "GENSX", REPAIR), false);
+  assert.equal(editRequeues(dressing, { date: "2026-11-17", hn: "0012345", operation: "x", choice: "dept" }, "GENSX", REPAIR), true);
+});
+
+test("the sheet names the next 15:00 that closes a booking, as the booking cut-off does (weekends and holidays stepped over)", () => {
+  assert.equal(editClosesOn("2026-12-03", "2026-12-01"), "2026-12-02", "Thursday's: Wednesday");
+  assert.equal(editClosesOn("2026-12-03", "2026-12-02"), "2026-12-02", "on that Wednesday morning: the same day");
+  // a Monday's booking: Friday at 15:00, and each weekend morning opens it again until 15:00 (earliestBookingDay)
+  assert.equal(editClosesOn("2026-11-30", "2026-11-27"), "2026-11-27");
+  assert.equal(editClosesOn("2026-11-30", "2026-11-28"), "2026-11-28");
+  assert.equal(editClosesOn("2026-11-30", "2026-11-29"), "2026-11-29");
+  // the Tuesday after a Monday holiday: the Friday before
+  assert.equal(editClosesOn("2026-12-08", "2026-12-04", DECEMBER), "2026-12-04");
+  assert.equal(editClosesOn("2026-12-08", "2026-12-08"), null, "its own day: nothing ahead");
 });

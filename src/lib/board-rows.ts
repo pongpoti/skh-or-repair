@@ -1,4 +1,4 @@
-import { NO_OPERATION_LABEL, bookedAtText, bookedRoom, type AddedCase } from "./added-cases.ts";
+import { NO_OPERATION_LABEL, UNDER_WAY, bookedAtText, bookedRoom, type AddedCase } from "./added-cases.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
 import { isDressingCase, placeAll, roomsHeldBy, type RoomChoice } from "./placement.ts";
@@ -37,6 +37,11 @@ export type BoardRow = Operation & {
   patientName?: string;
   /** The doctor who booked the room (booking and matched rows). */
   bookedBy?: string;
+  /**
+   * The booking's id (cases.id), only on the viewer's own bookings (booking and matched rows the viewer booked): the row
+   * then offers its doctor the booking's actions (components/booking-actions.tsx: edit, move, book again, cancel).
+   */
+  bookingId?: string;
   /** When the booking was made, as the row says it: "15 พ.ย. 69, 23:43" (Bangkok time; booking and matched rows). */
   bookedAt?: string;
   /**
@@ -102,7 +107,7 @@ export type BoardRowsInput = {
   periods: RepairPeriods;
   /** The cases of the cycle's latest upload, or null when MX has not uploaded for the cycle. */
   workbook: readonly WorkbookCase[] | null;
-  /** The doctors' bookings, oldest first (as lib/cases.ts lists them); only those on `date` count. */
+  /** The doctors' bookings in queue order (as lib/cases.ts lists them); only those on `date` count. */
   bookings: readonly AddedCase[];
   viewer: BoardViewer;
 };
@@ -227,7 +232,8 @@ function departmentName(dept: DeptCode | null): string | null {
  *
  * In each room the booked cases come first, the earliest booking first, then the cases nobody booked in the
  * workbook's order (Pong, 15 Nov 2026: "first priority is booking case: sort by prior set; second priority is HOSxP
- * sequence from workbook"). `bookings` come oldest first (lib/cases.ts), so their order is the booking order.
+ * sequence from workbook"). `bookings` come in queue order (lib/cases.ts: the queue time, when a booking was made or
+ * last moved to its day, room or patient), so their order is the booking order.
  */
 export function buildBoardRows({ date, periods, workbook, bookings, viewer }: BoardRowsInput): BoardRows {
   const uploaded = workbook !== null;
@@ -254,7 +260,9 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
 
   const open = (roomId: string | null): roomId is string => roomId !== null && roomUse(roomId, date, periods) === "open";
   // The doctor who made a booking sees its HN; MX and admins see every HN.
-  const seesHn = (booking: AddedCase) => viewer.allHn || (viewer.userId !== null && booking.surgeonId === viewer.userId);
+  const ownBooking = (booking: AddedCase) => viewer.userId !== null && booking.surgeonId === viewer.userId;
+  const seesHn = (booking: AddedCase) => viewer.allHn || ownBooking(booking);
+  const ownId = (booking: AddedCase): { bookingId?: string } => (ownBooking(booking) ? { bookingId: booking.id } : {});
   // The booked rows by the booking's place in `today` (the booking order), then the unbooked ones in file order.
   const booked: { at: number; row: Omit<BoardRow, "order"> }[] = [];
   const unbooked: Omit<BoardRow, "order">[] = [];
@@ -292,6 +300,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
           ...(seesHn(booking) && hn ? { hn } : {}),
           ...(seesHn(booking) && item.patientName ? { patientName: item.patientName } : {}),
           bookedBy: booking.surgeon,
+          ...ownId(booking),
           ...when(booking),
           ...noteOf(booking),
           ...doneByIn(roomId, dressingRooms, booking),
@@ -335,6 +344,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       flag: uploaded ? "not-in-hosxp" : null,
       ...(seesHn(booking) && booking.hn ? { hn: booking.hn } : {}),
       bookedBy: booking.surgeon,
+      ...ownId(booking),
       ...when(booking),
       ...noteOf(booking),
       ...doneByIn(roomId, dressingRooms, booking),
@@ -373,4 +383,15 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
  */
 export function missingUploadDay(board: { date: string; uploaded: boolean } | null, casesUnavailable: boolean): string | null {
   return board && !board.uploaded && !casesUnavailable ? board.date : null;
+}
+
+/**
+ * Whether the doctor's booking `bookingId` is on a row HOSxP says is under way or over (UNDER_WAY), on its day's board as
+ * `input` builds it: the server's check before an edit or a cancel (app/(board)/actions.ts), the same rule the row's
+ * actions show.
+ */
+export function bookingUnderWay(input: Omit<BoardRowsInput, "viewer">, bookingId: string, surgeonId: string): boolean {
+  const built = buildBoardRows({ ...input, viewer: { allHn: false, userId: surgeonId } });
+  const row = [...built.rows, ...built.unmatched].find((item) => item.bookingId === bookingId);
+  return row !== undefined && UNDER_WAY.has(row.status);
 }
