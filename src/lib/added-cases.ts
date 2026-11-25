@@ -466,6 +466,22 @@ export function editClosesOn(date: string, today: string, holidays: readonly Hol
 export const UNDER_WAY: ReadonlySet<CaseStatus> = new Set<CaseStatus>(["in-progress", "done", "recovery"]);
 export const STARTED_TEXT = "เคสนี้เริ่มแล้ว แก้ไขไม่ได้";
 
+/**
+ * Booking again (จองซ้ำวันอื่น) on a day this doctor has already booked the same patient into the same room: one more tap
+ * on จองห้อง after a save, or the form's day left as it opened. Another room the same day is a new booking's to make.
+ */
+export const SAME_DAY_TEXT = "วันนั้นจองผู้ป่วยคนนี้แล้ว เลือกวันอื่น";
+
+/** Whether `mine` already holds a booking of this HN in this room choice on this day (SAME_DAY_TEXT). */
+export function bookedAlready(
+  mine: readonly AddedCase[],
+  input: { date: string; hn: string; choice: RoomChoice },
+  periods: RepairPeriods,
+): boolean {
+  const hn = normalizeHn(input.hn);
+  return mine.some((item) => item.date === input.date && item.hn !== null && normalizeHn(item.hn) === hn && bookedChoice(item, periods) === input.choice);
+}
+
 /** What checking a booking needs to know besides the form's fields. */
 export type BookingContext = {
   /** Today in Thailand, YYYY-MM-DD. */

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   addDays,
+  bookedAlready,
   bookedAtText,
   bookedChoice,
   bookedMessage,
@@ -638,4 +639,32 @@ test("the sheet names the next 15:00 that closes a booking, as the booking cut-o
   // the Tuesday after a Monday holiday: the Friday before
   assert.equal(editClosesOn("2026-12-08", "2026-12-04", DECEMBER), "2026-12-04");
   assert.equal(editClosesOn("2026-12-08", "2026-12-08"), null, "its own day: nothing ahead");
+});
+
+test("booking again refuses a day that already has the patient in that room choice; another room or day is a new booking", () => {
+  const mine = (more: Partial<AddedCase>): AddedCase => ({
+    id: "1",
+    date: "2026-11-16",
+    roomId: "or-10",
+    hn: "0012345",
+    operation: "D/S",
+    shift: "in",
+    dressing: true,
+    scrubDoes: true,
+    note: "",
+    surgeonId: "7",
+    surgeon: "x",
+    subtype: "GENSX",
+    ...more,
+  });
+  const list = [mine({}), mine({ id: "2", date: "2026-11-17", roomId: "or-12", dressing: false, scrubDoes: null })];
+  assert.equal(bookedAlready(list, { date: "2026-11-16", hn: "0012345", choice: "dressing" }, REPAIR), true, "the same day, patient and room");
+  assert.equal(bookedAlready(list, { date: "2026-11-16", hn: "12345", choice: "dressing" }, REPAIR), true, "the HN as typed, without its zeros");
+  assert.equal(bookedAlready(list, { date: "2026-11-16", hn: "0012345", choice: "dept" }, REPAIR), false, "the department's room the same day");
+  assert.equal(bookedAlready(list, { date: "2026-11-18", hn: "0012345", choice: "dressing" }, REPAIR), false, "the next day of a series");
+  assert.equal(bookedAlready(list, { date: "2026-11-16", hn: "0099999", choice: "dressing" }, REPAIR), false, "another patient");
+  assert.equal(bookedAlready(list, { date: "2026-11-17", hn: "0012345", choice: "dept" }, REPAIR), true, "a department room booking");
+  assert.equal(bookedAlready([mine({ hn: null })], { date: "2026-11-16", hn: "", choice: "dressing" }, REPAIR), false, "an older booking with no HN matches nothing");
+  // an older dressing booking (no room choice saved) counts by the room it was saved in
+  assert.equal(bookedAlready([mine({ dressing: null, scrubDoes: null })], { date: "2026-11-16", hn: "0012345", choice: "dressing" }, REPAIR), true);
 });

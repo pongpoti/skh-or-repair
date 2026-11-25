@@ -12,6 +12,7 @@ import {
   BOOK_AHEAD_DAYS,
   BOOKING_CUTOFF_PHRASES,
   bookableFrom,
+  bookedAlready,
   bookedChoice,
   bookedRoom,
   bookingRoom,
@@ -35,6 +36,7 @@ import {
   SCRUB_NO,
   SCRUB_QUESTION,
   SCRUB_YES,
+  SAME_DAY_TEXT,
   scrubTag,
   type AddedCase,
   type CaseField,
@@ -241,7 +243,8 @@ export function AddCase({
 
   /**
    * Fills the form for a request: empty on the first day that can be booked for a new booking; the booking itself for an
-   * edit; its patient, room choice and note on the first day that can be booked to book again.
+   * edit; its patient, room choice and note on the first day that can be booked to book again, or the next open day when
+   * that is the booking's own (booking again is for another day).
    */
   function begin(next: CaseRequest) {
     const from = next.mode === "new" ? null : next.booking;
@@ -249,7 +252,13 @@ export function AddCase({
     setMode(next.mode);
     setMoving(next.mode === "edit" && next.focus === "date");
     setEditing(next.mode === "edit" ? next.booking : null);
-    setDate(next.mode === "edit" ? next.booking.date : first);
+    let start = first;
+    if (next.mode === "again" && next.booking.date === first) {
+      const end = addDays(today, BOOK_AHEAD_DAYS);
+      do start = addDays(start, 1);
+      while (start < end && closedDayNote(start, holidays));
+    }
+    setDate(next.mode === "edit" ? next.booking.date : start);
     setHn(from?.hn ? displayHn(from.hn) : "");
     setOperation(from?.operation ?? "");
     setNote(from?.note ?? "");
@@ -297,11 +306,22 @@ export function AddCase({
   }
 
   // The doctor's choice of room. The dressing room asks the scrub question at once, in a dialog over the form.
+  // Whether the open scrub question came from picking ห้องทำแผล (leaving it unanswered then goes back to the department's
+  // room) rather than from answering it for a booking that already has the dressing room (which keeps it).
+  const scrubFromPick = useRef(false);
+
   function pickRoom(next: RoomChoice) {
     setChoice(next);
     edited("room");
-    if (next === "dressing") scrubRef.current?.showModal();
-    else setScrubDoes(null);
+    if (next === "dressing") {
+      scrubFromPick.current = true;
+      scrubRef.current?.showModal();
+    } else setScrubDoes(null);
+  }
+
+  function askScrub() {
+    scrubFromPick.current = false;
+    scrubRef.current?.showModal();
   }
 
   function answerScrub(answer: boolean) {
@@ -315,7 +335,7 @@ export function AddCase({
   // Closed without an answer (ย้อนกลับ, Escape, the phone's back gesture): a dressing room without one is no choice,
   // so the department's room is picked again. An answer given before stays when the doctor only looked again.
   function leaveScrub() {
-    if (scrubDoes === null) setChoice("dept");
+    if (scrubDoes === null && scrubFromPick.current) setChoice("dept");
   }
 
   function apply(result: CaseResult, from: "save" | "remove") {
@@ -372,6 +392,11 @@ export function AddCase({
     });
     if (!checked.ok) {
       refuse(checked.error, checked.field);
+      return;
+    }
+    // Booking again keeps the form filled for the next day of a series, so a second tap would book the same day twice.
+    if (mode === "again" && bookedAlready(mine, { date, hn, choice }, periods)) {
+      refuse(SAME_DAY_TEXT, "date");
       return;
     }
     setInvalid(null);
@@ -689,19 +714,21 @@ export function AddCase({
                   <span className="text-xs text-muted" data-testid="case-room-why">
                     {SCRUB_QUESTION} <span className="font-semibold text-ink">{scrubDoes ? SCRUB_YES : SCRUB_NO}</span>
                   </span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost min-h-11 px-2 text-sm"
-                    onClick={() => scrubRef.current?.showModal()}
-                    data-testid="case-scrub-change"
-                  >
+                  <button type="button" className="btn btn-ghost min-h-11 px-2 text-sm" onClick={askScrub} data-testid="case-scrub-change">
                     เปลี่ยนคำตอบ
                   </button>
                 </>
               ) : choice === "dressing" ? (
-                <span className="text-xs text-muted" data-testid="case-room-why">
-                  ตอบคำถาม {SCRUB_QUESTION}
-                </span>
+                // A booking from before the form asked has the dressing room without an answer: the room is already
+                // picked, so a tap on it asks nothing, and this asks instead.
+                <>
+                  <span className="text-xs text-muted" data-testid="case-room-why">
+                    ตอบคำถาม {SCRUB_QUESTION}
+                  </span>
+                  <button type="button" className="btn btn-ghost min-h-11 px-2 text-sm" onClick={askScrub} data-testid="case-scrub-answer">
+                    ตอบ
+                  </button>
+                </>
               ) : null}
             </div>
           </fieldset>

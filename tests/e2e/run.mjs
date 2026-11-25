@@ -4240,8 +4240,51 @@ async function main() {
       await page.click('[data-testid="case-submit"]');
       await saved("จอง OR 12 วันศุกร์ที่ 4 ธ.ค. 2569 แล้ว");
       assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7100002", "kept for the next day of a series");
+      // a second tap books nothing more: the patient is on Friday in that room already
+      await page.click('[data-testid="case-submit"]');
+      await page.waitForFunction(
+        (text) => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === text,
+        "วันนั้นจองผู้ป่วยคนนี้แล้ว เลือกวันอื่น",
+      );
       const friday = await db.query("SELECT hn FROM cases WHERE surgeon_id = $1 AND op_date = '2026-12-04' AND removed_at IS NULL ORDER BY queued_at", [dr]);
       assert(JSON.stringify(friday.rows.map((r) => r.hn)) === JSON.stringify(["7100009", "7100002"]), `Friday's queue: ${JSON.stringify(friday.rows)}`);
+      await closeForm();
+      // booking again from a booking on the first day that can be booked starts on the next open day, not its own
+      await insert("2026-12-02", "7100005", "Excision", null, 30);
+      await page.goto(`${APP}/?date=2026-12-02&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      await openSheet("7100005");
+      await page.click('[data-testid="booking-again"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert((await dateValue(page, "case-date")) === "2026-12-03", `another day: ${await dateValue(page, "case-date")}`);
+      await closeForm();
+
+      // an older dressing-room booking (no scrub answer) on an open day: the form asks for the answer, then saves it in place
+      const unanswered = (
+        await db.query(
+          "INSERT INTO cases (op_date, room_id, hn, operation, surgeon_id, line_sub) VALUES ('2026-12-03', 'or-10', '7100006', 'D/S', $1, $2) RETURNING id::text AS id, queued_at",
+          [dr, RP.drY.sub],
+        )
+      ).rows[0];
+      await page.goto(`${APP}/?date=2026-12-03&room=or-10`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      await openSheet("7100006");
+      await page.click('[data-testid="booking-edit"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert(await page.isChecked('[data-testid="case-room-dressing"]'), "its dressing room");
+      assert(!(await page.isVisible('[data-testid="case-requeue"]')), "no queue warning");
+      await page.fill('[data-testid="case-note"]', "แผลกดทับ");
+      await page.click('[data-testid="case-submit"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.includes("ตอบก่อนว่า"));
+      await page.click('[data-testid="case-scrub-answer"]');
+      await page.waitForSelector('[data-testid="scrub-dialog"][open]');
+      await page.click('[data-testid="scrub-yes"]');
+      assert(await page.isChecked('[data-testid="case-room-dressing"]'), "still the dressing room");
+      await page.click('[data-testid="case-submit"]');
+      await saved("บันทึกแล้ว");
+      const answered = (await db.query("SELECT dressing, scrub_does, note, queued_at FROM cases WHERE id = $1", [unanswered.id])).rows[0];
+      assert(answered.dressing === true && answered.scrub_does === true && answered.note === "แผลกดทับ", JSON.stringify(answered));
+      assert(answered.queued_at.toISOString() === unanswered.queued_at.toISOString(), "its place in the queue kept");
       await closeForm();
 
       // today's booking: closed (MX has the list); only the note changes, or the case moves to an open day
