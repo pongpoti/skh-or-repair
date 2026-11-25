@@ -2,7 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { BookingSheet, ManageIcon, type OwnBookings } from "@/components/booking-actions";
 import { CaseIcon } from "@/components/case-source";
+import { bookingState, type AddedCase } from "@/lib/added-cases";
 import type { BoardRow } from "@/lib/board-rows";
 import { displayHn } from "@/lib/hn";
 import { getRoom, roomLabel } from "@/lib/rooms";
@@ -90,10 +92,14 @@ export function isCaseBubbleOpen(): boolean {
  * see them, the surgeon and the booking's time. ปิด, the cross, Escape or a tap outside the card closes it. A row
  * without a note shows no button.
  *
+ * On the doctor's own bookings (`own`, the rows with a bookingId that are in their list from today on), a จัดการ button
+ * last in that line opens what they can do with the booking (components/booking-actions.tsx; Pong, 25 Nov 2026: "on DR
+ * case row : allow surgeon to edit, move date, delete and other functions"). A booking whose day has gone has none.
+ *
  * The parent gives each room its own list (a key), so nothing opened carries over to another room. A room with no case
  * gets the list too, which then says ไม่มีรายการ: an open note stays open when a refresh empties its room.
  */
-export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
+export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; own?: OwnBookings | null }) {
   const listRef = useRef<HTMLOListElement>(null);
   // The rows whose operation name does not fit on its line, measured in the browser, and those unfolded.
   const [cut, setCut] = useState<ReadonlySet<string>>(NO_IDS);
@@ -107,6 +113,19 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
   const noteShown = noteRow ? (cases.find((item) => item.id === noteRow.id) ?? noteRow) : null;
   // The button that opened it, which gets the focus back should the browser leave it nowhere when the dialog closes.
   const noteFrom = useRef<HTMLElement | null>(null);
+  // The doctor's own booking whose actions are open (BookingSheet): the row and the booking as they were, shown as they
+  // are now while they last (a refresh after an edit, a cancel or another device's change can take them away).
+  const manageRef = useRef<HTMLDialogElement>(null);
+  const [managed, setManaged] = useState<{ row: BoardRow; booking: AddedCase; opened: number } | null>(null);
+  const manageFrom = useRef<HTMLElement | null>(null);
+  const managedRow = managed ? (cases.find((item) => item.bookingId === managed.booking.id) ?? null) : null;
+  const managedBooking = managed ? (own?.mine.find((item) => item.id === managed.booking.id) ?? managed.booking) : null;
+  /** The doctor's booking behind a row, when they can still do something with it (its day has not gone). */
+  const ownBooking = (row: BoardRow): AddedCase | null => {
+    if (!own || !row.bookingId) return null;
+    const booking = own.mine.find((item) => item.id === row.bookingId);
+    return booking && bookingState(booking.date, own.today, own.earliest) !== "past" ? booking : null;
+  };
 
   // A refresh can take the row away: its bubble goes too.
   if (tip !== null && !cases.some((item) => item.id === tip)) setTip(null);
@@ -193,6 +212,24 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
     if (!noteRef.current?.open) noteRef.current?.showModal();
   }
 
+  function openManage(row: BoardRow, booking: AddedCase, from: HTMLElement) {
+    manageFrom.current = from;
+    flushSync(() => {
+      setTip(null);
+      setManaged((current) => ({ row, booking, opened: (current?.opened ?? 0) + 1 }));
+    });
+    if (!manageRef.current?.open) manageRef.current?.showModal();
+  }
+
+  function manageClosed() {
+    const from = manageFrom.current;
+    manageFrom.current = null;
+    // An action that opened the booking form has the focus there already.
+    if (document.activeElement !== null && document.activeElement !== document.body) return;
+    const heading = manageRef.current?.closest("[data-room-view]")?.querySelector<HTMLElement>("h2[tabindex='-1']");
+    (from?.isConnected ? from : heading)?.focus({ preventScroll: true });
+  }
+
   function noteClosed() {
     setNoteRow(null);
     const from = noteFrom.current;
@@ -228,6 +265,7 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
     <ol ref={listRef} hidden={cases.length === 0} className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
       {cases.map((item) => {
         const cancelled = item.status === "cancelled";
+        const booking = ownBooking(item);
         const isCut = cut.has(item.id);
         const open = isCut && unfolded.has(item.id);
         const text = (
@@ -291,7 +329,7 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
                   วันเวลาที่จองคิว : {item.bookedAt}
                 </p>
               ) : null}
-              {item.shift === "out" || item.note ? (
+              {item.shift === "out" || item.note || booking ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   {item.shift === "out" ? <span className="badge badge-warning">นอกเวลา</span> : null}
                   {item.note ? (
@@ -304,6 +342,19 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
                     >
                       <NoteIcon size={15} />
                       หมายเหตุ
+                    </button>
+                  ) : null}
+                  {booking ? (
+                    <button
+                      type="button"
+                      className="case-note case-manage"
+                      aria-haspopup="dialog"
+                      aria-label={`จัดการการจอง ลำดับ ${item.order} ${item.procedure}`}
+                      onClick={(event) => openManage(item, booking, event.currentTarget)}
+                      data-testid="row-manage"
+                    >
+                      <ManageIcon size={15} />
+                      จัดการ
                     </button>
                   ) : null}
                 </div>
@@ -324,6 +375,16 @@ export function CaseList({ cases }: { cases: readonly BoardRow[] }) {
       })}
     </ol>
     <NoteDialog dialogRef={noteRef} row={noteShown} onClosed={noteClosed} />
+    {own ? (
+      <BookingSheet
+        dialogRef={manageRef}
+        row={managedRow ?? managed?.row ?? null}
+        booking={managedBooking}
+        own={own}
+        opened={managed?.opened ?? 0}
+        onClosed={manageClosed}
+      />
+    ) : null}
     </>
   );
 }

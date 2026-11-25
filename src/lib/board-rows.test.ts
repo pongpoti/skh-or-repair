@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
-import { buildBoardRows, missingUploadDay, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
+import { bookingUnderWay, buildBoardRows, missingUploadDay, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 
@@ -365,6 +365,38 @@ test("the HN reaches only MX and admins (every row) and the doctor who booked (t
   const anyone = all(NOBODY);
   assert.ok(anyone.every((row) => !("hn" in row)), "no hn key at all");
   assert.doesNotMatch(JSON.stringify(anyone), /"(99|100|101|102|103)"/, "no HN anywhere in what the client gets");
+});
+
+// Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete and other functions".
+test("the booking's id (for its actions) reaches only the doctor who booked it, on their booked and matched rows", () => {
+  const mine = booking({ hn: "100", surgeonId: "7" });
+  const mineMatched = booking({ hn: "101", surgeonId: "7" });
+  const theirs = booking({ hn: "102", surgeonId: "8" });
+  const workbook = [wb({ hn: "0099" }), wb({ hn: "101" })];
+  const ids = (viewer: BoardViewer) => {
+    const built = build(workbook, [mine, mineMatched, theirs], viewer);
+    return Object.fromEntries([...built.rows, ...built.unmatched].map((row) => [row.id, row.bookingId ?? null]));
+  };
+  assert.deepEqual(Object.values(ids({ allHn: false, userId: "7" })).filter(Boolean).sort(), [mine.id, mineMatched.id].sort());
+  assert.deepEqual(ids({ allHn: false, userId: "7" })[`mt-${mineMatched.id}`], mineMatched.id, "matched: the booking's id, not HOSxP's");
+  for (const viewer of [MX, NOBODY, { allHn: false, userId: "8" }]) {
+    const seen = Object.values(ids(viewer)).filter(Boolean);
+    assert.deepEqual(seen, viewer.userId === "8" ? [theirs.id] : [], JSON.stringify(viewer));
+  }
+});
+
+test("a booking HOSxP says is under way or over is found on its row: in progress, done or in recovery, not scheduled or delayed", () => {
+  const mine = booking({ hn: "300", surgeonId: "7" });
+  const input = (status: WorkbookCase["status"] | null) => ({
+    date: DAY,
+    periods: REPAIR,
+    workbook: status === null ? null : [wb({ hn: "300", status })],
+    bookings: [mine],
+  });
+  for (const status of ["in-progress", "done", "recovery"] as const) assert.equal(bookingUnderWay(input(status), mine.id, "7"), true, status);
+  for (const status of ["scheduled", "delayed", "cancelled"] as const) assert.equal(bookingUnderWay(input(status), mine.id, "7"), false, status);
+  assert.equal(bookingUnderWay(input(null), mine.id, "7"), false, "no upload");
+  assert.equal(bookingUnderWay(input("done"), mine.id, "8"), false, "another doctor's");
 });
 
 test("the patient's name follows the HN: MX and admins on every row, the doctor who booked on their own matched case", () => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { flushSync } from "react-dom";
 import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
 import { HnField } from "@/components/hn-field";
@@ -11,6 +12,8 @@ import {
   BOOK_AHEAD_DAYS,
   BOOKING_CUTOFF_PHRASES,
   bookableFrom,
+  bookedAlready,
+  bookedChoice,
   bookedRoom,
   bookingRoom,
   BORROWED_ROOM_NAME,
@@ -22,14 +25,18 @@ import {
   deptRooms,
   DRESSING_ROOM_NAME,
   earliestText,
+  editRequeues,
   MAX_NOTE,
   MAX_OPERATION,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
+  NOTE_ONLY_TEXT,
   POOLED_ROOM_NOTE,
+  REQUEUE_TEXT,
   SCRUB_NO,
   SCRUB_QUESTION,
   SCRUB_YES,
+  SAME_DAY_TEXT,
   scrubTag,
   type AddedCase,
   type CaseField,
@@ -37,7 +44,7 @@ import {
 } from "@/lib/added-cases";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate } from "@/lib/days";
-import { displayHn } from "@/lib/hn";
+import { displayHn, normalizeHn } from "@/lib/hn";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, roomLabel, roomUse } from "@/lib/rooms";
@@ -59,6 +66,16 @@ const ANSWER =
   "flex min-h-14 items-center justify-center rounded-xl border border-line-strong bg-white px-2 py-3 text-center text-[0.9375rem] font-semibold text-ink transition-colors hover:border-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-pressed:border-brand aria-pressed:bg-brand-tint aria-pressed:shadow-[inset_0_0_0_1px_var(--brand)]";
 
 export type Doctor = { name: string; subtype: string | null };
+
+/**
+ * How the booking form opens: a new booking (จองห้อง), or from the actions on one of the doctor's own bookings
+ * (components/booking-actions.tsx): "edit" on that booking, its calendar open for a move (`focus: "date"`); "again", a
+ * new booking of the same patient, room choice and note on another day.
+ */
+export type CaseRequest =
+  | { mode: "new" }
+  | { mode: "edit"; booking: AddedCase; focus: "details" | "date" }
+  | { mode: "again"; booking: AddedCase };
 
 function DeptTag({ dept }: { dept: Department | null }) {
   // A little larger than it was, 12px and 13px from 400px wide (Pong, 15 Nov 2026: "slight increase txt size of dept
@@ -90,7 +107,16 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
  * closing it unanswered puts the choice back on the department's room. Last, an optional note to the OR team (หมายเหตุ;
  * Pong, 17 Nov 2026), which everyone who opens the board sees on the booking's row, so the form says so and asks for
  * no patient's name or HN in it. The surgeon is always the signed-in doctor.
- * Below it, the doctor's own bookings from today on, with their HN and note, each one cancellable. `request` opens it.
+ * Below it, the doctor's own bookings from today on, with their HN and note, each one editable and cancellable. `request`
+ * opens it.
+ *
+ * The same form edits one of the doctor's own bookings (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move
+ * date, delete and other functions"), filled with it: แก้ไขการจอง, saved with บันทึก (app/(board)/actions.ts editCase). Its
+ * day can move to any day that can be booked. Once 15:00 the day before its day has passed, only the note can change
+ * there (the HN, the operation and the room are locked, and say so), unless the doctor moves it to an open day. A change
+ * of day, room or HN puts the case at the back of the queue, which the form says under the note while it would. Booking
+ * again (จองซ้ำวันอื่น) is a new booking filled with the same patient, room choice and note; it stays filled after a save,
+ * so a series of days takes one tap each.
  */
 export function AddCase({
   request,
@@ -103,10 +129,11 @@ export function AddCase({
   periods,
   initialMine,
   onAdd,
+  onEdit,
   onRemove,
 }: {
-  /** Set to a new object to open the dialog. */
-  request: object | null;
+  /** Set to a new object to open the dialog (CaseRequest). */
+  request: CaseRequest | null;
   onClosed: () => void;
   doctor: Doctor;
   /** Today in Thailand, YYYY-MM-DD. */
@@ -121,6 +148,7 @@ export function AddCase({
   periods: RepairPeriods;
   initialMine: readonly AddedCase[];
   onAdd: (input: unknown) => Promise<CaseResult>;
+  onEdit: (id: string, input: unknown) => Promise<CaseResult>;
   onRemove: (id: string) => Promise<CaseResult>;
 }) {
   const router = useRouter();
@@ -157,6 +185,13 @@ export function AddCase({
   const [mine, setMine] = useState<AddedCase[]>(() => [...initialMine]);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // What the form is doing: a new booking, an edit of `editing` (as last saved), or booking a patient again.
+  const [mode, setMode] = useState<CaseRequest["mode"]>("new");
+  // An edit opened to move the booking (เลื่อนวัน), which the title says.
+  const [moving, setMoving] = useState(false);
+  const [editing, setEditing] = useState<AddedCase | null>(null);
+  // Opens the calendar (a move): a new object each time.
+  const [calendarOpen, setCalendarOpen] = useState<object | null>(null);
 
   // The server's list wins whenever the page reloads (another device may have added or removed a case).
   const [prevInitial, setPrevInitial] = useState(initialMine);
@@ -165,12 +200,39 @@ export function AddCase({
     setMine([...initialMine]);
   }
 
+  // An edit's own day, which needs no day checks and may be closed already (only the note changes there then).
+  const keepsDay = mode === "edit" && editing !== null && date === editing.date;
+  const locked = keepsDay && date < first;
+  // Back on its closed day after picking another, or closed by 15:00 while open: the locked fields show the booking's
+  // own again, and 15:00 says so when it took back what the doctor had typed.
+  const [prevLocked, setPrevLocked] = useState(locked);
+  const [prevLockFirst, setPrevLockFirst] = useState(first);
+  if (prevLocked !== locked || prevLockFirst !== first) {
+    setPrevLocked(locked);
+    setPrevLockFirst(first);
+    if (locked && !prevLocked && editing) {
+      const picked = bookedChoice(editing, periods);
+      const own = editing.hn ? displayHn(editing.hn) : "";
+      const typed = normalizeHn(hn) !== normalizeHn(own) || operation.trim() !== editing.operation || choice !== picked;
+      setHn(own);
+      setOperation(editing.operation);
+      setChoice(picked);
+      setScrubDoes(picked === "dressing" && typeof editing.scrubDoes === "boolean" ? editing.scrubDoes : null);
+      if (typed && prevLockFirst !== first) {
+        setAbout("save");
+        setInvalid(null);
+        setError(`${NOTE_ONLY_TEXT} HN การผ่าตัด และห้องกลับเป็นแบบเดิม`);
+        setDone("");
+      }
+    }
+  }
+
   // At 15:00 the page refreshes with a later first day (components/board-refresh.tsx). A picked day that can no longer
-  // be booked moves on to it, and the form says why.
+  // be booked moves on to it, and the form says why; an edit's own day stays (it is now closed).
   const [prevFirst, setPrevFirst] = useState(first);
   if (prevFirst !== first) {
     setPrevFirst(first);
-    if (date < first) {
+    if (date < first && !keepsDay) {
       setDate(first);
       setAbout("save");
       setInvalid("date");
@@ -179,22 +241,40 @@ export function AddCase({
     }
   }
 
-  // Opening starts a fresh form on the first day that can be booked.
+  /**
+   * Fills the form for a request: empty on the first day that can be booked for a new booking; the booking itself for an
+   * edit; its patient, room choice and note on the first day that can be booked to book again, or the next open day when
+   * that is the booking's own (booking again is for another day).
+   */
+  function begin(next: CaseRequest) {
+    const from = next.mode === "new" ? null : next.booking;
+    const picked: RoomChoice = from ? bookedChoice(from, periods) : "dept";
+    setMode(next.mode);
+    setMoving(next.mode === "edit" && next.focus === "date");
+    setEditing(next.mode === "edit" ? next.booking : null);
+    let start = first;
+    if (next.mode === "again" && next.booking.date === first) {
+      const end = addDays(today, BOOK_AHEAD_DAYS);
+      do start = addDays(start, 1);
+      while (start < end && closedDayNote(start, holidays));
+    }
+    setDate(next.mode === "edit" ? next.booking.date : start);
+    setHn(from?.hn ? displayHn(from.hn) : "");
+    setOperation(from?.operation ?? "");
+    setNote(from?.note ?? "");
+    setChoice(picked);
+    setScrubDoes(picked === "dressing" && typeof from?.scrubDoes === "boolean" ? from.scrubDoes : null);
+    setInvalid(null);
+    setError("");
+    setDone("");
+    setConfirming(null);
+    setCalendarOpen(next.mode === "edit" && next.focus === "date" ? {} : null);
+  }
+
   const [prevRequest, setPrevRequest] = useState(request);
   if (prevRequest !== request) {
     setPrevRequest(request);
-    if (request) {
-      setDate(first);
-      setHn("");
-      setOperation("");
-      setNote("");
-      setChoice("dept");
-      setScrubDoes(null);
-      setInvalid(null);
-      setError("");
-      setDone("");
-      setConfirming(null);
-    }
+    if (request) begin(request);
   }
 
   useEffect(() => {
@@ -226,11 +306,22 @@ export function AddCase({
   }
 
   // The doctor's choice of room. The dressing room asks the scrub question at once, in a dialog over the form.
+  // Whether the open scrub question came from picking ห้องทำแผล (leaving it unanswered then goes back to the department's
+  // room) rather than from answering it for a booking that already has the dressing room (which keeps it).
+  const scrubFromPick = useRef(false);
+
   function pickRoom(next: RoomChoice) {
     setChoice(next);
     edited("room");
-    if (next === "dressing") scrubRef.current?.showModal();
-    else setScrubDoes(null);
+    if (next === "dressing") {
+      scrubFromPick.current = true;
+      scrubRef.current?.showModal();
+    } else setScrubDoes(null);
+  }
+
+  function askScrub() {
+    scrubFromPick.current = false;
+    scrubRef.current?.showModal();
   }
 
   function answerScrub(answer: boolean) {
@@ -244,14 +335,19 @@ export function AddCase({
   // Closed without an answer (ย้อนกลับ, Escape, the phone's back gesture): a dressing room without one is no choice,
   // so the department's room is picked again. An answer given before stays when the doctor only looked again.
   function leaveScrub() {
-    if (scrubDoes === null) setChoice("dept");
+    if (scrubDoes === null && scrubFromPick.current) setChoice("dept");
   }
 
   function apply(result: CaseResult, from: "save" | "remove") {
     setAbout(from);
     // A cancel's answer replaces a save's message, so the field that message marked is cleared too.
     if (from === "remove") setInvalid(null);
-    if (result.mine) setMine(result.mine);
+    if (result.mine) {
+      setMine(result.mine);
+      // The edited booking as saved, which the next save compares with (and which may now be closed).
+      const saved = editing ? result.mine.find((item) => item.id === editing.id) : undefined;
+      if (saved) setEditing(saved);
+    }
     if (result.ok) {
       setDone(result.message);
       setError("");
@@ -285,9 +381,22 @@ export function AddCase({
     // No ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026): a booking is saved as ในเวลา, and a HOSxP case it matches keeps
     // its own เวร on the board.
     const input = { date, hn, operation, room: choice, scrubDoes, note };
-    const checked = checkCase(input, { today, earliest: first, periods, subtype: doctor.subtype, holidays });
+    const edit = mode === "edit" ? editing : null;
+    const checked = checkCase(input, {
+      today,
+      earliest: first,
+      periods,
+      subtype: doctor.subtype,
+      holidays,
+      ...(edit ? { editing: { ...edit, subtype: doctor.subtype } } : {}),
+    });
     if (!checked.ok) {
       refuse(checked.error, checked.field);
+      return;
+    }
+    // Booking again keeps the form filled for the next day of a series, so a second tap would book the same day twice.
+    if (mode === "again" && bookedAlready(mine, { date, hn, choice }, periods)) {
+      refuse(SAME_DAY_TEXT, "date");
       return;
     }
     setInvalid(null);
@@ -295,7 +404,7 @@ export function AddCase({
       try {
         // The checked value carries the HN normalised and the room; the server checks it all again and works out the
         // room itself, from the doctor's choice and their department as the database has it.
-        const result = await onAdd(input);
+        const result = edit ? await onEdit(edit.id, input) : await onAdd(input);
         if (!result.ok && result.earliest) {
           // 15:00 passed while the form was open: the calendar moves on with the server's first day.
           setMovedOn(result.earliest);
@@ -306,7 +415,8 @@ export function AddCase({
           return;
         }
         apply(result, "save");
-        if (result.ok) {
+        // An edit keeps what it saved, and booking again keeps the patient for the next day of a series.
+        if (result.ok && mode === "new") {
           // Ready for the next patient on the same day, whose room is chosen afresh.
           setHn("");
           setOperation("");
@@ -373,6 +483,10 @@ export function AddCase({
     return found ? roomLabel(found) : roomId;
   };
   const saveError = about === "save" && error ? error : "";
+  // Whether saving this edit puts the case at the back of the queue (lib/added-cases.ts bookingChange): a new day, room
+  // choice or HN.
+  const requeues = mode === "edit" && editing !== null && editRequeues(editing, { date, hn, operation, choice }, doctor.subtype, periods);
+  const title = mode === "edit" ? (moving ? "เลื่อนวัน" : "แก้ไขการจอง") : mode === "again" ? "จองซ้ำวันอื่น" : "จองห้องผ่าตัด";
   // The message under จองห้อง names the field it is about, for screen readers on that field.
   const describe = (field: CaseField, own?: string) => [own, invalid === field && saveError ? "case-save-status" : null].filter(Boolean).join(" ") || undefined;
 
@@ -390,8 +504,8 @@ export function AddCase({
       <form onSubmit={save} noValidate>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 id="add-case-title" className="text-lg font-bold">
-              จองห้องผ่าตัด
+            <h2 id="add-case-title" className="text-lg font-bold" data-mode={mode}>
+              {title}
             </h2>
             <p className="mt-0.5 text-sm text-ink-2">
               ศัลยแพทย์ <span className="font-semibold text-ink">{doctor.name}</span>
@@ -443,6 +557,7 @@ export function AddCase({
               testId="case-date"
               today={today}
               unlisted={unlisted}
+              openSignal={calendarOpen}
             />
             {/* The 15:00 rule always, in Pong's words, a little larger than a hint (Pong, 15 Nov 2026), then the first day. */}
             <p id="case-date-hint" className="mt-1.5 text-[0.8125rem] leading-5 text-muted" data-testid="case-date-hint">
@@ -456,8 +571,16 @@ export function AddCase({
               </span>{" "}
               <span className="block">{bookableFrom(first)}</span>
             </p>
+            {/* An edit's own day once 15:00 the day before passed: the fields below wait for another day. */}
+            {locked ? (
+              <p className="mt-1.5 text-[0.8125rem] leading-5 font-semibold text-ink-2" data-testid="case-locked">
+                {NOTE_ONLY_TEXT} หรือเลื่อนไปวันอื่น
+              </p>
+            ) : null}
           </div>
 
+          {/* min-w-0 as the outer fieldset; disabled on an edit's closed day. */}
+          <fieldset disabled={locked} className="locked-fields min-w-0 space-y-4" data-testid="case-locked-fields">
           <HnField
             id="case-hn"
             value={hn}
@@ -490,7 +613,8 @@ export function AddCase({
               }}
               maxLength={MAX_OPERATION}
               autoComplete="off"
-              placeholder="LC, ORIF PS femur"
+              // No example on a closed day: in a fixed field it would read as the case's name.
+              placeholder={locked ? undefined : "LC, ORIF PS femur"}
               required
               aria-required="true"
               aria-invalid={invalid === "operation" || undefined}
@@ -590,21 +714,24 @@ export function AddCase({
                   <span className="text-xs text-muted" data-testid="case-room-why">
                     {SCRUB_QUESTION} <span className="font-semibold text-ink">{scrubDoes ? SCRUB_YES : SCRUB_NO}</span>
                   </span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost min-h-11 px-2 text-sm"
-                    onClick={() => scrubRef.current?.showModal()}
-                    data-testid="case-scrub-change"
-                  >
+                  <button type="button" className="btn btn-ghost min-h-11 px-2 text-sm" onClick={askScrub} data-testid="case-scrub-change">
                     เปลี่ยนคำตอบ
                   </button>
                 </>
               ) : choice === "dressing" ? (
-                <span className="text-xs text-muted" data-testid="case-room-why">
-                  ตอบคำถาม {SCRUB_QUESTION}
-                </span>
+                // A booking from before the form asked has the dressing room without an answer: the room is already
+                // picked, so a tap on it asks nothing, and this asks instead.
+                <>
+                  <span className="text-xs text-muted" data-testid="case-room-why">
+                    ตอบคำถาม {SCRUB_QUESTION}
+                  </span>
+                  <button type="button" className="btn btn-ghost min-h-11 px-2 text-sm" onClick={askScrub} data-testid="case-scrub-answer">
+                    ตอบ
+                  </button>
+                </>
               ) : null}
             </div>
+          </fieldset>
           </fieldset>
 
           {/*
@@ -641,6 +768,11 @@ export function AddCase({
               ทุกคนที่เปิดตารางเห็นข้อความนี้ ไม่ต้องใส่ชื่อหรือ HN ผู้ป่วย
             </p>
           </div>
+          {requeues ? (
+            <p className="text-[0.8125rem] leading-5 font-semibold text-late" data-testid="case-requeue">
+              {REQUEUE_TEXT}
+            </p>
+          ) : null}
         </fieldset>
 
         {/* A save's answer is said quietly beside จองห้อง: left of the buttons, or on its own line above them on a phone. */}
@@ -659,13 +791,14 @@ export function AddCase({
               ปิด
             </button>
             <button type="submit" disabled={pending} aria-busy={pending} className="btn btn-primary" data-testid="case-submit">
-              {pending ? "กำลังบันทึก…" : "จองห้อง"}
+              {pending ? "กำลังบันทึก…" : mode === "edit" ? "บันทึก" : "จองห้อง"}
             </button>
           </div>
         </div>
       </form>
 
-      <section className="mt-6 border-t border-line pt-4" aria-labelledby="my-cases-title">
+      {/* An edit is about one booking: the list waits until the form books again. */}
+      <section className="mt-6 border-t border-line pt-4" aria-labelledby="my-cases-title" hidden={mode === "edit"}>
         <h3 id="my-cases-title" className="flex items-center gap-2 text-sm font-bold">
           การจองของฉัน
           <span className="count-tag">
@@ -730,16 +863,34 @@ export function AddCase({
                       </p>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => remove(item.id)}
-                    onBlur={() => setConfirming((current) => (current === item.id ? null : current))}
-                    className={`btn min-h-11 shrink-0 px-3 text-sm ${asking ? "btn-danger" : "btn-ghost btn-ghost-danger"}`}
-                    aria-label={asking ? `ยืนยันยกเลิก ${what}` : `ยกเลิกจอง ${what}`}
-                  >
-                    {asking ? "ยืนยันยกเลิก" : "ยกเลิกจอง"}
-                  </button>
+                  <div className="flex shrink-0 flex-col items-stretch gap-1">
+                    {/* The form edits it in place (a booking whose day has gone is not in the list). */}
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => {
+                        // The list hides while editing: the focus goes up to the form's first field with it.
+                        flushSync(() => begin({ mode: "edit", booking: item, focus: "details" }));
+                        ref.current?.scrollTo({ top: 0 });
+                        ref.current?.querySelector<HTMLElement>('[data-testid="case-date"]')?.focus({ preventScroll: true });
+                      }}
+                      className="btn btn-ghost min-h-11 px-3 text-sm"
+                      aria-label={`แก้ไข ${what}`}
+                      data-testid="my-case-edit"
+                    >
+                      แก้ไข
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => remove(item.id)}
+                      onBlur={() => setConfirming((current) => (current === item.id ? null : current))}
+                      className={`btn min-h-11 px-3 text-sm ${asking ? "btn-danger" : "btn-ghost btn-ghost-danger"}`}
+                      aria-label={asking ? `ยืนยันยกเลิก ${what}` : `ยกเลิกจอง ${what}`}
+                    >
+                      {asking ? "ยืนยันยกเลิก" : "ยกเลิกจอง"}
+                    </button>
+                  </div>
                 </li>
               );
             })}

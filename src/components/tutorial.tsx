@@ -10,7 +10,7 @@ import { NoTableIcon } from "@/components/no-table-icon";
 import { Mascot, talkFor, type MascotMood } from "@/components/mascot";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
-import { bookedMessage, checkCase, type AddedCase } from "@/lib/added-cases";
+import { bookedMessage, bookingChange, checkCase, editedMessage, type AddedCase } from "@/lib/added-cases";
 import { allocationFor, DEPARTMENTS, INSTRUMENT_ROOM, readableTextOn, RECOVERY_ROOM, type Department } from "@/lib/allocation";
 import { boardNotices } from "@/lib/board-notices";
 import { thaiDate } from "@/lib/days";
@@ -273,14 +273,40 @@ export function Tutorial({
     },
     [today, day, periods, doctor, holidays],
   );
+  // The row's จัดการ edits it the same way; the coach never sends the doctor there, so these only stand in.
+  const onEdit = useCallback(
+    async (id: string, input: unknown): Promise<CaseResult> => {
+      if (mine === null || mine.id !== id) return { ok: false, error: "การจองนี้ถูกยกเลิกไปแล้ว", mine: [] };
+      const editing = { ...mine, subtype: doctor.subtype };
+      const checked = checkCase(input, { today, earliest: day, periods, subtype: doctor.subtype, holidays, editing });
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      if (!checked.ok) return { ok: false, error: checked.error };
+      const change = bookingChange(editing, checked.value, periods);
+      if (!change.changed) return { ok: true, mine: [mine], message: "ไม่มีอะไรเปลี่ยน" };
+      const now = new Date().toISOString();
+      const booking: AddedCase = { ...mine, ...checked.value, shift: mine.shift, editedAt: now, ...(change.requeue ? { bookedAt: now } : {}) };
+      setMine(booking);
+      return { ok: true, mine: [booking], message: editedMessage(checked.value, mine, change) };
+    },
+    [mine, today, day, periods, doctor, holidays],
+  );
+  const cancelled = useRef<AddedCase | null>(null);
   const onRemove = useCallback(async (): Promise<CaseResult> => {
+    cancelled.current = mine;
     setMine(null);
     return { ok: true, mine: [], message: "ยกเลิกแล้ว" };
+  }, [mine]);
+  const onRestore = useCallback(async (): Promise<CaseResult> => {
+    const back = cancelled.current;
+    cancelled.current = null;
+    if (back === null) return { ok: false, error: "เลิกทำไม่ได้แล้ว จองใหม่แทน", mine: [] };
+    setMine(back);
+    return { ok: true, mine: [back], message: "จองคืนแล้ว คิวเดิม" };
   }, []);
   const mineList = useMemo(() => (mine ? [mine] : []), [mine]);
   const adding: CaseAdding = useMemo(
-    () => ({ doctor, today, earliest: day, holidays, unlisted, mine: mineList, onAdd, onRemove }),
-    [doctor, today, day, holidays, unlisted, mineList, onAdd, onRemove],
+    () => ({ doctor, today, earliest: day, holidays, unlisted, mine: mineList, onAdd, onEdit, onRemove, onRestore }),
+    [doctor, today, day, holidays, unlisted, mineList, onAdd, onEdit, onRemove, onRestore],
   );
 
   // The rooms the steps point at.
@@ -563,7 +589,7 @@ function buildSteps({
       id: "booked",
       chapter: 1,
       title: "จองแล้ว!",
-      body: "เคสนี้ได้คิวก่อนเคสที่ไม่ได้จองแล้ว การจองของคุณอยู่ตรงนี้ ยกเลิกได้ด้วยปุ่ม ยกเลิกจอง",
+      body: "เคสนี้ได้คิวก่อนเคสที่ไม่ได้จองแล้ว การจองของคุณอยู่ตรงนี้ แก้ไขหรือยกเลิกได้",
       target: () => find("[data-testid=my-cases]"),
       setup: form,
       scroll: "center",
@@ -600,6 +626,16 @@ function buildSteps({
       title: "เคสของคุณ",
       body: "HN ของคุณ แพทย์คนอื่นไม่เห็น บรรทัดล่างคือเวลาที่จอง",
       target: myRow,
+      setup: () => openRoom(roomId),
+      scroll: "nearest",
+    },
+    {
+      id: "my-manage",
+      chapter: 2,
+      title: "ปุ่มจัดการ",
+      body: "เคสที่คุณจองมีปุ่มนี้ แก้ไข เลื่อนวัน จองซ้ำ หรือยกเลิก แก้ไขได้จนถึงเวลาปิดรับจอง 15.00 น.",
+      target: () => find("[data-testid=row-manage]", myRow()),
+      round: true,
       setup: () => openRoom(roomId),
       scroll: "nearest",
     },

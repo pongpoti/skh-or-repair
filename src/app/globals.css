@@ -605,6 +605,61 @@ body {
     .case-note:hover { border-color: rgb(63 47 36 / 0.45); }
   }
   .case-note:active { background: #e8d9c6; }
+  /* The doctor's own booking (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete"): จัดการ, the
+     note pill's shape in white with the field border, last in the row's pill line; it opens the booking's actions
+     (components/booking-actions.tsx). Nobody else's rows have it. */
+  .case-manage { background: #fff; border-color: var(--line-strong); color: var(--ink-2); }
+  @media (hover: hover) {
+    .case-manage:hover { border-color: var(--line-input); }
+  }
+  .case-manage:active { background: var(--surface-2); }
+  /* The booking's actions: tall rows in a white card, an icon tile, the label and a short line under it. ยกเลิกจอง sits in a
+     card of its own, apart from the others. */
+  .booking-actions {
+    list-style: none;
+    margin-inline: 0;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .booking-actions > li + li { border-top: 1px solid var(--line); }
+  .booking-action {
+    display: flex;
+    width: 100%;
+    min-height: 3.5rem;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.875rem;
+    border: 0;
+    background: none;
+    font: inherit;
+    text-align: left;
+    color: var(--ink);
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.15s ease;
+  }
+  @media (hover: hover) {
+    .booking-action:hover:not(:disabled) { background: var(--surface-2); }
+  }
+  .booking-action:active:not(:disabled) { background: var(--brand-tint); }
+  .booking-action:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .booking-action:disabled { cursor: not-allowed; opacity: 0.55; }
+  .booking-action-icon {
+    display: inline-flex;
+    flex: none;
+    width: 2.25rem;
+    height: 2.25rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    background: var(--brand-tint);
+    color: var(--brand);
+  }
+  .booking-action-danger { color: var(--stop); }
+  .booking-action-danger .booking-action-icon { background: #fbe9e7; color: var(--stop); }
   /* The note in its dialog: the doctor's own line breaks, long words wrapped, on a soft card. */
   .case-note-text {
     margin: 0;
@@ -1434,7 +1489,8 @@ dialog[open]::backdrop {
   .day-swipe-hint { transition: none; }
   .notice-badge-chevron,
   .case-op-chev,
-  .case-note { transition: none; }
+  .case-note,
+  .booking-action { transition: none; }
   /* No movement: the steady halo only. */
   .book-glow,
   .book-glow::after {
@@ -2020,4 +2076,26 @@ dialog[open]::backdrop {
 }
 @media (prefers-reduced-motion: reduce) {
   .coach-trophy { animation: none; }
+}
+
+/*
+ * An edit's closed day (add-case.tsx): the HN boxes and the operation name read as fixed, on the tint a disabled room
+ * choice has, still readable. Outside @layer: the boxes' own utility classes set their colours.
+ */
+.locked-fields:disabled [data-testid="case-hn-card"] {
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: not-allowed;
+}
+.locked-fields:disabled [data-testid="case-hn-card"] [aria-hidden="true"] > span {
+  background: transparent;
+  border-color: var(--line);
+  box-shadow: none;
+  color: var(--ink-2);
+}
+.locked-fields:disabled .field:disabled {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink-2);
+  cursor: not-allowed;
 }

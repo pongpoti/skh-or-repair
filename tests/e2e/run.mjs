@@ -4077,6 +4077,255 @@ async function main() {
       rmSync(NOW_FILE, { force: true });
     });
 
+    await t("a doctor's own booking rows: จัดการ edits, moves, books again and cancels with undo; a new day or HN takes the back of the queue; a closed day changes only the note", async () => {
+      // Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete and other functions. Try design"
+      // Tuesday 1 Dec 2026 at 10:00: Wednesday is the first day that can be booked; today's list is MX's.
+      setNow("2026-12-01T10:00:00+07:00");
+      const dr = RP.drY.userId;
+      const insert = async (date, hn, operation, note, minutesAgo) =>
+        (
+          await db.query(
+            `INSERT INTO cases (op_date, room_id, hn, operation, note, dressing, surgeon_id, line_sub, queued_at)
+             VALUES ($1, 'or-12', $2, $3, $4, false, $5, $6, now() - make_interval(mins => $7)) RETURNING id::text AS id`,
+            [date, hn, operation, note, dr, RP.drY.sub, minutesAgo],
+          )
+        ).rows[0].id;
+      const first = await insert("2026-12-03", "7100001", "Lap chole", "ขอ C-arm", 120);
+      const second = await insert("2026-12-03", "7100002", "Hernia repair", null, 60);
+      const today = await insert("2026-12-01", "7100003", "Excision lipoma", null, 600);
+      // a dressing-room booking from before the form asked (no room choice, no scrub answer) on today's list
+      const older = (
+        await db.query(
+          "INSERT INTO cases (op_date, room_id, hn, operation, surgeon_id, line_sub) VALUES ('2026-12-01', 'or-10', '7100004', 'D/S', $1, $2) RETURNING id::text AS id",
+          [dr, RP.drY.sub],
+        )
+      ).rows[0].id;
+      const queued = async (id) => (await db.query("SELECT queued_at, edited_at, op_date::text AS date, removed_at FROM cases WHERE id = $1", [id])).rows[0];
+      const firstQueued = (await queued(first)).queued_at.toISOString();
+
+      // another doctor's page carries no booking's id at all
+      assert(!(await htmlAs(RP.drX, "/?date=2026-12-03&room=or-12")).html.includes("bookingId"), "no booking id for another doctor");
+
+      const ctx = await contextAs(RP.drY);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      const row = (hn) => page.locator(".room-sheet .case-row", { hasText: `HN ${hn}` });
+      const order = () => page.$$eval(".room-sheet .case-row", (rows) => rows.map((r) => r.querySelector('[data-testid="row-hn"]')?.textContent.trim() ?? null));
+      const sheet = '[data-testid="booking-sheet"]';
+      const dialog = '[data-testid="add-case-dialog"]';
+      const openSheet = async (hn) => {
+        await row(hn).locator('[data-testid="row-manage"]').click();
+        await page.waitForSelector(`${sheet}[open][data-step="menu"]`);
+        // the first moment's taps are ignored (a slow phone's double tap)
+        await page.waitForTimeout(400);
+      };
+      const saved = (want) =>
+        page.waitForFunction((text) => document.querySelector('[data-testid="add-case-dialog"] .inline-status-success')?.textContent?.trim() === text, want);
+      const closeForm = async () => {
+        await page.click('[data-testid="add-case-close"]');
+        await page.waitForSelector(`${dialog}:not([open])`, { state: "attached" });
+      };
+
+      await page.goto(`${APP}/?date=2026-12-03&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      assert(JSON.stringify(await order()) === JSON.stringify(["HN 7100001", "HN 7100002"]), `the queue: ${JSON.stringify(await order())}`);
+      assert((await page.locator('.room-sheet [data-testid="row-manage"]').count()) === 2, "จัดการ on each of the doctor's own rows");
+      assert((await textOf(page, '.room-sheet [data-testid="row-manage"]')) === "จัดการ", "named จัดการ");
+      await ownerShot(page, "row-actions-rows.png");
+
+      // the sheet: the case, until when it can change, the actions, ยกเลิกจอง apart
+      await openSheet("7100001");
+      assert((await textOf(page, '[data-testid="booking-sheet-where"]')) === "OR 12 · ลำดับ 1 · วันพฤหัสบดีที่ 3 ธ.ค. 2569", await textOf(page, '[data-testid="booking-sheet-where"]'));
+      assert((await textOf(page, '[data-testid="booking-sheet-rule"]')) === "แก้ไขได้ถึง 15.00 น. วันพุธที่ 2 ธ.ค. 2569", await textOf(page, '[data-testid="booking-sheet-rule"]'));
+      assert((await textOf(page, '[data-testid="booking-sheet-details"]')).includes("ขอ C-arm"), "the note in the details");
+      for (const id of ["booking-edit", "booking-move", "booking-again", "booking-cancel"]) assert(await page.isVisible(`[data-testid="${id}"]`), id);
+      const box = await page.locator(sheet).boundingBox();
+      assert(Math.abs(box.y + box.height - 844) < 1 && Math.abs(box.width - 390) < 1, `a bottom sheet on a phone: ${JSON.stringify(box)}`);
+      await ownerShot(page, "row-actions-sheet.png");
+
+      // in the full screen card too: closing the sheet leaves the card open (a dialog's close inside it is not its own)
+      await page.click('[data-testid="booking-sheet-close"]');
+      await page.waitForSelector(`${sheet}:not([open])`, { state: "attached" });
+      await page.click('[data-testid="room-expand"]');
+      await page.waitForSelector('[data-testid="room-full"][open]');
+      await page.locator('[data-testid="room-full"] .case-row', { hasText: "HN 7100001" }).locator('[data-testid="row-manage"]').click();
+      await page.waitForSelector('[data-testid="room-full"] [data-testid="booking-sheet"][open]');
+      await page.keyboard.press("Escape");
+      await page.waitForSelector('[data-testid="room-full"] [data-testid="booking-sheet"]:not([open])', { state: "attached" });
+      assert(await page.isVisible('[data-testid="room-full"][open]'), "the card stays open");
+      await page.keyboard.press("Escape");
+      await page.waitForSelector('[data-testid="room-full"]', { state: "detached" });
+      await openSheet("7100001");
+
+      // แก้ไขรายละเอียด: the form on this booking; the name and the note keep the place in the queue
+      await page.click('[data-testid="booking-edit"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert((await textOf(page, "#add-case-title")) === "แก้ไขการจอง", "the form's title");
+      assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7100001", "filled with the booking");
+      assert((await page.inputValue('[data-testid="case-operation"]')) === "Lap chole");
+      assert((await textOf(page, '[data-testid="case-submit"]')) === "บันทึก");
+      assert(await page.locator('[data-testid="my-cases"]').isHidden(), "no list of bookings while editing one");
+      await page.fill('[data-testid="case-operation"]', "Lap chole + IOC");
+      await page.fill('[data-testid="case-note"]', "ขอ C-arm\nNPO หลังเที่ยงคืน");
+      assert((await page.locator('[data-testid="case-requeue"]').count()) === 0, "no word of the queue for the name and the note");
+      await page.click('[data-testid="case-submit"]');
+      await saved("บันทึกแล้ว");
+      const noted = await queued(first);
+      assert(noted.queued_at.toISOString() === firstQueued && noted.edited_at !== null, "its place kept, the edit noted");
+      await closeForm();
+      await page.waitForFunction(() => document.querySelector(".room-sheet .case-row")?.textContent?.includes("Lap chole + IOC"));
+      assert(JSON.stringify(await order()) === JSON.stringify(["HN 7100001", "HN 7100002"]), "still first");
+
+      // another patient (HN): the form says so before saving, and the case goes to the back of the queue
+      await openSheet("7100001");
+      await page.click('[data-testid="booking-edit"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      await page.fill(`${dialog} input[data-testid="case-hn"]`, "7100009");
+      assert((await textOf(page, '[data-testid="case-requeue"]')) === "เปลี่ยนวัน ห้อง หรือ HN จะต่อท้ายคิว", "the queue rule");
+      await ownerShot(page, "row-actions-edit.png");
+      await page.click('[data-testid="case-submit"]');
+      await saved("บันทึกแล้ว ต่อท้ายคิว");
+      await closeForm();
+      await page.waitForFunction(() => document.querySelectorAll(".room-sheet .case-row")[1]?.textContent?.includes("7100009"));
+      assert(JSON.stringify(await order()) === JSON.stringify(["HN 7100002", "HN 7100009"]), `behind the other: ${JSON.stringify(await order())}`);
+
+      // เลื่อนวัน: the calendar opens; Friday, at the back of that day's queue
+      await openSheet("7100009");
+      await page.click('[data-testid="booking-move"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert((await textOf(page, "#add-case-title")) === "เลื่อนวัน", "titled for the move");
+      assert(await page.isVisible('[data-testid="case-date-calendar"]'), "the calendar open");
+      assert(await page.locator('[data-testid="case-date-calendar"] [data-date="2026-12-01"]').isDisabled(), "not today");
+      await ownerShot(page, "row-actions-move.png");
+      await pickDate(page, "case-date", "2026-12-04");
+      await page.click('[data-testid="case-submit"]');
+      await saved("เลื่อนไป OR 12 วันศุกร์ที่ 4 ธ.ค. 2569 แล้ว");
+      assert((await queued(first)).date === "2026-12-04", "moved in the database");
+      await closeForm();
+      await page.waitForFunction(() => document.querySelectorAll(".room-sheet .case-row").length === 1);
+
+      // ยกเลิกจอง asks again (ไม่ยกเลิก first in focus), then เลิกทำ books it back in its old place
+      await openSheet("7100002");
+      await page.click('[data-testid="booking-cancel"]');
+      await page.waitForSelector(`${sheet}[data-step="confirm"]`);
+      assert((await textOf(page, "#booking-sheet-title")) === "ยกเลิกการจองนี้?");
+      assert(await page.evaluate(() => document.activeElement?.dataset.testid === "booking-keep"), "ไม่ยกเลิก has the focus");
+      assert((await textOf(page, '[data-testid="booking-confirm-note"]')) === "เลิกทำได้ภายใน 10 นาที");
+      await ownerShot(page, "row-actions-cancel.png");
+      await page.waitForTimeout(400);
+      await page.click('[data-testid="booking-confirm"]');
+      await page.waitForSelector(`${sheet}[data-step="cancelled"]`);
+      assert((await textOf(page, '[data-testid="booking-cancelled"]')) === "ยกเลิกการจองแล้ว");
+      await page.waitForFunction(() => document.querySelectorAll(".room-sheet .case-row").length === 0);
+      assert((await queued(second)).removed_at !== null, "removed");
+      await ownerShot(page, "row-actions-undo.png");
+      await page.waitForTimeout(400);
+      await page.click('[data-testid="booking-restore"]');
+      await page.waitForSelector(`${sheet}[data-step="menu"]`);
+      assert((await textOf(page, `${sheet} .inline-status-success`)) === "จองคืนแล้ว คิวเดิม");
+      await page.waitForFunction(() => document.querySelectorAll(".room-sheet .case-row").length === 1);
+      assert((await queued(second)).removed_at === null, "booked back");
+      await page.click('[data-testid="booking-sheet-close"]');
+      await page.waitForSelector(`${sheet}:not([open])`, { state: "attached" });
+
+      // จองซ้ำวันอื่น: a new booking of the same patient on another day, the form kept filled for the next day
+      await openSheet("7100002");
+      await page.click('[data-testid="booking-again"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert((await textOf(page, "#add-case-title")) === "จองซ้ำวันอื่น");
+      assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7100002", "the same patient");
+      assert((await dateValue(page, "case-date")) === "2026-12-02", "on the first day that can be booked");
+      await pickDate(page, "case-date", "2026-12-04");
+      await page.click('[data-testid="case-submit"]');
+      await saved("จอง OR 12 วันศุกร์ที่ 4 ธ.ค. 2569 แล้ว");
+      assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7100002", "kept for the next day of a series");
+      // a second tap books nothing more: the patient is on Friday in that room already
+      await page.click('[data-testid="case-submit"]');
+      await page.waitForFunction(
+        (text) => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === text,
+        "วันนั้นจองผู้ป่วยคนนี้แล้ว เลือกวันอื่น",
+      );
+      const friday = await db.query("SELECT hn FROM cases WHERE surgeon_id = $1 AND op_date = '2026-12-04' AND removed_at IS NULL ORDER BY queued_at", [dr]);
+      assert(JSON.stringify(friday.rows.map((r) => r.hn)) === JSON.stringify(["7100009", "7100002"]), `Friday's queue: ${JSON.stringify(friday.rows)}`);
+      await closeForm();
+      // booking again from a booking on the first day that can be booked starts on the next open day, not its own
+      await insert("2026-12-02", "7100005", "Excision", null, 30);
+      await page.goto(`${APP}/?date=2026-12-02&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      await openSheet("7100005");
+      await page.click('[data-testid="booking-again"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert((await dateValue(page, "case-date")) === "2026-12-03", `another day: ${await dateValue(page, "case-date")}`);
+      await closeForm();
+
+      // an older dressing-room booking (no scrub answer) on an open day: the form asks for the answer, then saves it in place
+      const unanswered = (
+        await db.query(
+          "INSERT INTO cases (op_date, room_id, hn, operation, surgeon_id, line_sub) VALUES ('2026-12-03', 'or-10', '7100006', 'D/S', $1, $2) RETURNING id::text AS id, queued_at",
+          [dr, RP.drY.sub],
+        )
+      ).rows[0];
+      await page.goto(`${APP}/?date=2026-12-03&room=or-10`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      await openSheet("7100006");
+      await page.click('[data-testid="booking-edit"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert(await page.isChecked('[data-testid="case-room-dressing"]'), "its dressing room");
+      assert(!(await page.isVisible('[data-testid="case-requeue"]')), "no queue warning");
+      await page.fill('[data-testid="case-note"]', "แผลกดทับ");
+      await page.click('[data-testid="case-submit"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.includes("ตอบก่อนว่า"));
+      await page.click('[data-testid="case-scrub-answer"]');
+      await page.waitForSelector('[data-testid="scrub-dialog"][open]');
+      await page.click('[data-testid="scrub-yes"]');
+      assert(await page.isChecked('[data-testid="case-room-dressing"]'), "still the dressing room");
+      await page.click('[data-testid="case-submit"]');
+      await saved("บันทึกแล้ว");
+      const answered = (await db.query("SELECT dressing, scrub_does, note, queued_at FROM cases WHERE id = $1", [unanswered.id])).rows[0];
+      assert(answered.dressing === true && answered.scrub_does === true && answered.note === "แผลกดทับ", JSON.stringify(answered));
+      assert(answered.queued_at.toISOString() === unanswered.queued_at.toISOString(), "its place in the queue kept");
+      await closeForm();
+
+      // today's booking: closed (MX has the list); only the note changes, or the case moves to an open day
+      await page.goto(`${APP}/?date=2026-12-01&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      await openSheet("7100003");
+      assert((await textOf(page, '[data-testid="booking-sheet-rule"]')) === "ปิดรับแก้ไขแล้ว แก้ได้เฉพาะหมายเหตุ");
+      await page.click('[data-testid="booking-edit"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      assert((await textOf(page, '[data-testid="case-locked"]')) === "ปิดรับแก้ไขแล้ว แก้ได้เฉพาะหมายเหตุ หรือเลื่อนไปวันอื่น");
+      assert(await page.locator(`${dialog} input[data-testid="case-hn"]`).first().isDisabled(), "the HN locked");
+      assert(await page.locator('[data-testid="case-operation"]').isDisabled(), "the name locked");
+      await page.fill('[data-testid="case-note"]', "เลื่อนเป็นเคสสุดท้าย");
+      await ownerShot(page, "row-actions-closed.png");
+      await page.click('[data-testid="case-submit"]');
+      await saved("บันทึกแล้ว");
+      assert((await db.query("SELECT note FROM cases WHERE id = $1", [today])).rows[0].note === "เลื่อนเป็นเคสสุดท้าย");
+      await closeForm();
+      // the older dressing-room booking: its note saves, its missing room choice kept
+      await page.goto(`${APP}/?date=2026-12-01&room=or-10`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      await openSheet("7100004");
+      await page.click('[data-testid="booking-edit"]');
+      await page.waitForSelector(`${dialog}[open]`);
+      await page.fill('[data-testid="case-note"]', "แผลกดทับ ก้นกบ");
+      await page.click('[data-testid="case-submit"]');
+      await saved("บันทึกแล้ว");
+      const kept = (await db.query("SELECT note, dressing, scrub_does FROM cases WHERE id = $1", [older])).rows[0];
+      assert(kept.note === "แผลกดทับ ก้นกบ" && kept.dressing === null && kept.scrub_does === null, JSON.stringify(kept));
+      await closeForm();
+
+      // once its day has gone, a booking has no actions
+      setNow("2026-12-04T10:00:00+07:00");
+      await page.goto(`${APP}/?date=2026-12-03&room=or-12`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet .case-row");
+      assert((await page.locator('.room-sheet [data-testid="row-manage"]').count()) === 0, "no จัดการ on a day that has gone");
+      assert(errors.length === 0, `page errors: ${errors.join("; ")}`);
+      await ctx.close();
+      await db.query("DELETE FROM cases WHERE surgeon_id = $1 AND op_date BETWEEN '2026-12-01' AND '2026-12-04'", [dr]);
+    });
+
     await t("doctors' tutorial: a doctor's first visit opens it once; a practice booking on a made-up day, before and after the 16:00 upload, every symbol explained; nothing saved", async () => {
       // Thursday 10:00: the first day a doctor could book is Friday 20 Nov, the made-up day (the repair's first half:
       // OR 10 the dressing room, OR 12 general surgery, OR 13 orthopaedics)
@@ -4126,6 +4375,7 @@ async function main() {
         book: "tutorial-book.png",
         "form-hn": "tutorial-hn.png",
         "my-row": "tutorial-my-row.png",
+        "my-manage": "tutorial-my-manage.png",
         upload: "tutorial-upload.png",
         mismatch: "tutorial-mismatch.png",
         matched: "tutorial-matched.png",
@@ -4190,6 +4440,11 @@ async function main() {
         "my-row": async () => {
           const rows = await sheetRows(page);
           assert(JSON.stringify(rows) === JSON.stringify([["booking", null, null], ["booking", null, "HN 1234567"]]), `before the upload: the colleague's booking, then the doctor's with its HN only: ${JSON.stringify(rows)}`);
+        },
+        // Pong, 25 Nov 2026: the doctor's own row's จัดการ, shown (the coach keeps the taps off it)
+        "my-manage": async () => {
+          assert((await page.locator('.room-sheet [data-testid="row-manage"]').count()) === 1, "จัดการ on the practice booking alone");
+          assert((await textOf(page, '[data-testid="coach-title"]')) === "ปุ่มจัดการ", "the bubble names it");
         },
         booked: async () => {
           // the confetti, mid-fall

@@ -259,6 +259,26 @@ BEGIN
   END IF;
 END $$;
 
+-- A doctor's edits of their own booking (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete
+-- and other functions"; lib/added-cases.ts bookingChange). The row is changed in place, so its id stays. queued_at is
+-- the booking's place in its room's queue ("จองก่อน ได้คิวก่อน"), the time the case rows show as วันเวลาที่จองคิว: the
+-- time it was made, set again to the time of an edit that moves it to another day, room or patient (HN), which counts as
+-- a new booking at the back of that queue. Fixing the operation's name, the note or the scrub answer keeps it.
+-- edited_at is the last edit's time, NULL for a booking never edited. Applied to existing databases too: a booking made
+-- before keeps its place (queued_at = created_at).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'queued_at' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN queued_at timestamptz;
+    UPDATE cases SET queued_at = created_at;
+    ALTER TABLE cases ALTER COLUMN queued_at SET DEFAULT now(), ALTER COLUMN queued_at SET NOT NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'edited_at' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN edited_at timestamptz;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS cases_day_queue_idx ON cases (op_date, queued_at) WHERE removed_at IS NULL;
+
 -- The ventilation repair's two halves, which an admin can move on /admin (lib/repair-store.ts; the room layout of each
 -- half is in lib/repair.ts). Seeded once with the planned dates; a saved row is never overwritten by the seed.
 -- updated_by is the LINE sub of the admin who saved it (NULL for the seed).

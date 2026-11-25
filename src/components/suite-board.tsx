@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
-import { AddCase, type Doctor } from "@/components/add-case";
+import { AddCase, type CaseRequest, type Doctor } from "@/components/add-case";
+import type { OwnBookings } from "@/components/booking-actions";
 import type { DatePick } from "@/components/board-date-picker";
 import { BoardNotices, noticeBadge } from "@/components/board-notices";
 import { CaseList, isCaseBubbleOpen } from "@/components/case-list";
@@ -51,7 +52,11 @@ export type CaseAdding = {
   unlisted: readonly number[];
   mine: readonly AddedCase[];
   onAdd: (input: unknown) => Promise<CaseResult>;
+  /** Saves the doctor's edit of one of their own bookings: its new state, as a booking's input (app/(board)/actions.ts editCase). */
+  onEdit: (id: string, input: unknown) => Promise<CaseResult>;
   onRemove: (id: string) => Promise<CaseResult>;
+  /** Books back a booking cancelled moments ago, in its old place (app/(board)/actions.ts undoCancel). */
+  onRestore: (id: string) => Promise<CaseResult>;
 };
 
 const PLUS = (
@@ -318,7 +323,10 @@ function RoomCard({ onClose, headingRef, children }: { onClose: () => void; head
       ref={ref}
       aria-labelledby="room-full-title"
       className={ROOM_CARD}
-      onClose={onClose}
+      // Its own close only: React passes the close of a dialog inside it (a row's note or actions) up to here too.
+      onClose={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
       onPointerDown={(event) => {
         pressedOutside.current = event.target === event.currentTarget;
       }}
@@ -374,7 +382,8 @@ export function SuiteBoard({
   const cardHeadingRef = useRef<HTMLHeadingElement>(null);
   // The open room's list in the full screen card.
   const [full, setFull] = useState(false);
-  const [addRequest, setAddRequest] = useState<object | null>(null);
+  // The booking form's opening: a new booking (จองห้อง), or one of the doctor's own bookings from its row's actions.
+  const [addRequest, setAddRequest] = useState<CaseRequest | null>(null);
   // The notice whose chat bubble is open (BoardNotices).
   const [noticeId, setNoticeId] = useState<string | null>(null);
   const menuWasOpen = useRef(false);
@@ -468,6 +477,24 @@ export function SuiteBoard({
   const emergency = roomDept?.am?.code === "EMER" || roomDept?.pm?.code === "EMER";
   const noTable = room?.kind === "or" && !emergency && notices.some((notice) => notice.id === "no-upload");
   const overviewRooms = useMemo(() => (planDate ? openRooms(planDate, periods) : []), [planDate, periods]);
+  // The doctor's own bookings for their rows' actions (components/booking-actions.tsx): the form opens on one of them.
+  const own: OwnBookings | null = useMemo(
+    () =>
+      adding
+        ? {
+            mine: adding.mine,
+            today: adding.today,
+            earliest: adding.earliest,
+            holidays: adding.holidays,
+            periods,
+            onEdit: (booking, focus) => setAddRequest({ mode: "edit", booking, focus }),
+            onAgain: (booking) => setAddRequest({ mode: "again", booking }),
+            onRemove: adding.onRemove,
+            onRestore: adding.onRestore,
+          }
+        : null,
+    [adding, periods],
+  );
 
   return (
     <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -503,7 +530,7 @@ export function SuiteBoard({
               <button
                 type="button"
                 className="btn btn-primary book-glow pointer-events-auto rounded-full px-6"
-                onClick={() => setAddRequest({})}
+                onClick={() => setAddRequest({ mode: "new" })}
                 data-testid="add-case-button"
               >
                 {PLUS}
@@ -568,7 +595,7 @@ export function SuiteBoard({
                 </RoomHead>
               ) : null}
               {/* An empty room too: the list says ไม่มีรายการ itself, so a note open when a refresh empties the room stays. */}
-              <CaseList key={room?.id} cases={cases} />
+              <CaseList key={room?.id} cases={cases} own={own} />
               {full && room ? (
                 <RoomCard onClose={() => setFull(false)} headingRef={cardHeadingRef}>
                   <RoomHead
@@ -591,7 +618,7 @@ export function SuiteBoard({
                       {SHRINK_ICON}
                     </button>
                   </RoomHead>
-                  <CaseList key={room.id} cases={cases} />
+                  <CaseList key={room.id} cases={cases} own={own} />
                 </RoomCard>
               ) : null}
             </div>
@@ -619,7 +646,17 @@ export function SuiteBoard({
       {adding ? (
         <AddCase
           request={addRequest}
-          onClosed={() => setAddRequest(null)}
+          onClosed={() => {
+            setAddRequest(null);
+            // Opened from a row's actions, the form gives the focus back to that row's จัดการ, which a move or a cancel
+            // may have taken off the page: the open room's heading has it then, else จองห้อง.
+            if (document.activeElement === null || document.activeElement === document.body) {
+              const heading =
+                document.querySelector<HTMLElement>("dialog[open][data-room-view] h2[tabindex='-1']") ??
+                document.querySelector<HTMLElement>("[data-room-view] h2[tabindex='-1']");
+              (heading ?? document.querySelector<HTMLElement>('[data-testid="add-case-button"]'))?.focus({ preventScroll: true });
+            }
+          }}
           doctor={adding.doctor}
           today={adding.today}
           earliest={adding.earliest}
@@ -628,6 +665,7 @@ export function SuiteBoard({
           periods={periods}
           initialMine={adding.mine}
           onAdd={adding.onAdd}
+          onEdit={adding.onEdit}
           onRemove={adding.onRemove}
         />
       ) : null}

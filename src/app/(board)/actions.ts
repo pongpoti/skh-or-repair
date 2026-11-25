@@ -1,14 +1,32 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { addDays, BOOK_AHEAD_DAYS, bookedMessage, checkCase, deptRooms, earliestBookingDay, roomAmong, type AddedCase } from "@/lib/added-cases";
+import {
+  addDays,
+  BOOK_AHEAD_DAYS,
+  bookedChoice,
+  bookedMessage,
+  bookedRoom,
+  bookingChange,
+  bookingState,
+  checkCase,
+  deptRooms,
+  earliestBookingDay,
+  editedMessage,
+  roomAmong,
+  STARTED_TEXT,
+  type AddedCase,
+} from "@/lib/added-cases";
 import { getUser } from "@/lib/auth/server";
-import { addedToday, DAILY_ADD_LIMIT, doctorFor, insertCase, listCasesBy, listCasesOn, removeCase } from "@/lib/cases";
+import { bookingUnderWay } from "@/lib/board-rows";
+import { addedToday, DAILY_ADD_LIMIT, doctorFor, insertCase, listCasesBy, listCasesOn, ownCase, removeCase, restoreCase, UNDO_MINUTES, updateCase, updateNote } from "@/lib/cases";
 import { bangkokParts, now, today as todayInBangkok } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
+import type { RepairPeriods } from "@/lib/repair";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { markTutorialSeen } from "@/lib/tutorial-store";
+import { workbookForDay } from "@/lib/workbook-store";
 
 /**
  * Every answer carries the doctor's own bookings from today on, so the form's list stays current. They carry the HN:
@@ -81,20 +99,131 @@ export async function addCase(input: unknown): Promise<CaseResult> {
   }
 }
 
-/** Cancels one of the doctor's own bookings (the row stays, with removed_at set). */
-export async function deleteCase(id: unknown): Promise<CaseResult> {
-  if (typeof id !== "string" || !/^\d{1,18}$/.test(id)) return FAILED;
+const isCaseId = (id: unknown): id is string => typeof id === "string" && /^\d{1,18}$/.test(id);
+const GONE = "การจองนี้ถูกยกเลิกไปแล้ว";
+const PAST = "ผ่านวันผ่าตัดแล้ว แก้ไม่ได้";
+
+/**
+ * Whether today's booking is on a row HOSxP says is under way or over (lib/board-rows.ts bookingUnderWay): the row's
+ * actions then offer only booking again, and the server refuses an edit or a cancel. Only today's list can say so.
+ */
+async function startedToday(pool: Awaited<ReturnType<typeof db>>, booking: AddedCase, today: string, surgeonId: string, periods?: RepairPeriods): Promise<boolean> {
+  if (booking.date !== today) return false;
+  const [workbook, bookings, inForce] = await Promise.all([
+    workbookForDay(pool, today),
+    listCasesOn(pool, today),
+    periods ? Promise.resolve(periods) : getRepairPeriods(pool),
+  ]);
+  if (!workbook) return false;
+  return bookingUnderWay({ date: today, periods: inForce, workbook: workbook.cases, bookings }, booking.id, surgeonId);
+}
+
+/**
+ * Saves the doctor's edit of one of their own bookings (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move
+ * date, delete and other functions"): the new day, HN, operation, room choice, scrub answer and note, checked as a new
+ * booking is (lib/added-cases.ts checkCase), except that its own day needs no day checks. Until 15:00 the day before it
+ * all can change, the day too (a move); from then on only the note, though the case can still move to a day that is
+ * open; that note alone is saved then (updateNote), the rest left as the day's list has it. A new day, room choice or HN
+ * puts it at the back of its room's queue (bookingChange). In a department with several rooms that day a booking keeps
+ * its room on its own day; on another day, or back from the dressing room, it takes one by roomAmong, as a new booking
+ * does. A booking whose day has gone cannot change, nor one HOSxP says is under way or over.
+ */
+export async function editCase(id: unknown, input: unknown): Promise<CaseResult> {
+  if (!isCaseId(id)) return FAILED;
   try {
     const signed = await signedInDoctor();
     if (!signed) return NOT_DOCTOR;
     const { doctor, pool } = signed;
-    const removed = await removeCase(pool, id, doctor.id);
+    const { date: today, minutes } = bangkokParts(now());
+    const [periods, { holidays }, booking] = await Promise.all([
+      getRepairPeriods(pool),
+      holidaysBetween(today, addDays(today, BOOK_AHEAD_DAYS)),
+      ownCase(pool, id, doctor.id),
+    ]);
+    const mine = () => listCasesBy(pool, doctor.id, today);
+    if (!booking) return { ok: false, error: GONE, mine: await mine() };
+    const earliest = earliestBookingDay(today, minutes, holidays);
+    if (bookingState(booking.date, today, earliest) === "past") return { ok: false, error: PAST, mine: await mine() };
+    if (await startedToday(pool, booking, today, doctor.id, periods)) return { ok: false, error: STARTED_TEXT, mine: await mine() };
+    const editing = { ...booking, subtype: doctor.subtype };
+    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, editing });
+    if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
+    const value = checked.value;
+
+    // A closed day: only the note, saved alone (checkCase made sure nothing else changed).
+    if (value.date === booking.date && value.date < earliest) {
+      if (value.note === booking.note) return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
+      if (!(await updateNote(pool, id, doctor.id, value.note))) return { ok: false, error: GONE, mine: await mine() };
+      revalidatePath("/");
+      return { ok: true, mine: await mine(), message: "บันทึกแล้ว" };
+    }
+    if (!value.dressing) {
+      const sameRoom = value.date === booking.date && bookedChoice(editing, periods) === "dept";
+      const rooms = deptRooms(doctor.subtype, value.operation, value.date, periods);
+      if (sameRoom && rooms.includes(bookedRoom(editing, periods).roomId)) value.roomId = bookedRoom(editing, periods).roomId;
+      else if (rooms.length > 1) {
+        // Among the day's other bookings: this one does not hold a room for itself.
+        const day = (await listCasesOn(pool, value.date)).filter((item) => item.id !== booking.id);
+        value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods);
+      }
+    }
+
+    const change = bookingChange(editing, value, periods);
+    if (!change.changed) return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
+    if (!(await updateCase(pool, id, doctor.id, value, change.requeue))) return { ok: false, error: GONE, mine: await mine() };
     revalidatePath("/");
-    const mine = await listCasesBy(pool, doctor.id, todayInBangkok());
-    return removed ? { ok: true, mine, message: "ยกเลิกการจองแล้ว" } : { ok: true, mine, message: "การจองนี้ถูกยกเลิกไปแล้ว" };
+    return { ok: true, mine: await mine(), message: editedMessage(value, booking, change) };
+  } catch (error) {
+    logFailure("Editing a booking failed", error);
+    return FAILED;
+  }
+}
+
+/**
+ * Cancels one of the doctor's own bookings (the row stays, with removed_at set), whenever until its day has gone: after
+ * 15:00 the day before too, when the case may already be on MX's HOSxP list (its row then shows it unbooked). Not once
+ * HOSxP says the case is under way or over.
+ */
+export async function deleteCase(id: unknown): Promise<CaseResult> {
+  if (!isCaseId(id)) return FAILED;
+  try {
+    const signed = await signedInDoctor();
+    if (!signed) return NOT_DOCTOR;
+    const { doctor, pool } = signed;
+    const today = todayInBangkok();
+    const booking = await ownCase(pool, id, doctor.id);
+    if (booking && booking.date < today) return { ok: false, error: PAST, mine: await listCasesBy(pool, doctor.id, today) };
+    if (booking && (await startedToday(pool, booking, today, doctor.id))) return { ok: false, error: STARTED_TEXT, mine: await listCasesBy(pool, doctor.id, today) };
+    const removed = booking !== null && (await removeCase(pool, id, doctor.id));
+    revalidatePath("/");
+    const mine = await listCasesBy(pool, doctor.id, today);
+    return removed ? { ok: true, mine, message: "ยกเลิกการจองแล้ว" } : { ok: true, mine, message: GONE };
   } catch (error) {
     logFailure("Cancelling a booking failed", error);
     return { ok: false, error: "ยกเลิกไม่สำเร็จ ลองอีกครั้ง" };
+  }
+}
+
+/**
+ * Books back a booking the doctor cancelled moments ago (เลิกทำ on the cancel's answer), in its old place in the queue:
+ * within UNDO_MINUTES of the cancel, and only while its day has not gone.
+ */
+export async function undoCancel(id: unknown): Promise<CaseResult> {
+  if (!isCaseId(id)) return FAILED;
+  try {
+    const signed = await signedInDoctor();
+    if (!signed) return NOT_DOCTOR;
+    const { doctor, pool } = signed;
+    const today = todayInBangkok();
+    const restored = await restoreCase(pool, id, doctor.id, today);
+    revalidatePath("/");
+    const mine = await listCasesBy(pool, doctor.id, today);
+    return restored
+      ? { ok: true, mine, message: "จองคืนแล้ว คิวเดิม" }
+      : { ok: false, mine, error: `เลิกทำได้ภายใน ${UNDO_MINUTES} นาทีหลังยกเลิก จองใหม่แทน` };
+  } catch (error) {
+    logFailure("Restoring a booking failed", error);
+    return { ok: false, error: "จองคืนไม่สำเร็จ ลองอีกครั้ง" };
   }
 }
 

@@ -26,7 +26,7 @@ import { tutorialSeen } from "@/lib/tutorial-store";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
 import { workbookFor, workbookForDay } from "@/lib/workbook-store";
-import { addCase, deleteCase } from "./actions";
+import { addCase, deleteCase, editCase, undoCancel } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +75,9 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
         unlisted,
         mine,
         onAdd: addCase,
+        onEdit: editCase,
         onRemove: deleteCase,
+        onRestore: undoCancel,
       };
     }
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
