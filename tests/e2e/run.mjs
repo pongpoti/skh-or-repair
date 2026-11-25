@@ -4134,14 +4134,17 @@ async function main() {
       assert((await textOf(page, '.room-sheet [data-testid="row-manage"]')) === "จัดการ", "named จัดการ");
       await ownerShot(page, "row-actions-rows.png");
 
-      // the sheet: the case, until when it can change, the actions, ยกเลิกจอง apart
+      // the sheet (Pong, 26 Nov 2026: "make it more concise"): the operation, where and when, until when it can change,
+      // one line per action, ยกเลิกจอง apart
       await openSheet("7100001");
+      assert((await textOf(page, `${sheet}[open] [data-testid="booking-sheet-title"]`)) === "Lap chole", "titled with the operation");
       assert((await textOf(page, '[data-testid="booking-sheet-where"]')) === "OR 12 · ลำดับ 1 · วันพฤหัสบดีที่ 3 ธ.ค. 2569", await textOf(page, '[data-testid="booking-sheet-where"]'));
       assert((await textOf(page, '[data-testid="booking-sheet-rule"]')) === "แก้ไขได้ถึง 15.00 น. วันพุธที่ 2 ธ.ค. 2569", await textOf(page, '[data-testid="booking-sheet-rule"]'));
-      assert((await textOf(page, '[data-testid="booking-sheet-details"]')).includes("ขอ C-arm"), "the note in the details");
+      assert(JSON.stringify(await page.$$eval(`${sheet} .booking-action`, (items) => items.map((item) => item.textContent.trim()))) === JSON.stringify(["แก้ไข", "เลื่อนวัน", "จองซ้ำวันอื่น", "ยกเลิกจอง"]), "one line each");
       for (const id of ["booking-edit", "booking-move", "booking-again", "booking-cancel"]) assert(await page.isVisible(`[data-testid="${id}"]`), id);
       const box = await page.locator(sheet).boundingBox();
       assert(Math.abs(box.y + box.height - 844) < 1 && Math.abs(box.width - 390) < 1, `a bottom sheet on a phone: ${JSON.stringify(box)}`);
+      assert(box.height < 400, `short: ${box.height}`);
       await ownerShot(page, "row-actions-sheet.png");
 
       // in the full screen card too: closing the sheet leaves the card open (a dialog's close inside it is not its own)
@@ -4173,7 +4176,14 @@ async function main() {
       await saved("บันทึกแล้ว");
       const noted = await queued(first);
       assert(noted.queued_at.toISOString() === firstQueued && noted.edited_at !== null, "its place kept, the edit noted");
-      await closeForm();
+      // the form's back arrow (Pong, 26 Nov 2026: "add back button"): the sheet again, on the booking as saved
+      assert(await page.isHidden(`${sheet}[open]`), "the sheet closed while the form is open");
+      await page.click('[data-testid="add-case-back"]');
+      await page.waitForSelector(`${sheet}[open][data-step="menu"]`);
+      await page.waitForSelector(`${dialog}:not([open])`, { state: "attached" });
+      await page.waitForFunction(() => document.querySelector('[data-testid="booking-sheet"][open] [data-testid="booking-sheet-title"]')?.textContent?.trim() === "Lap chole + IOC");
+      await page.click('[data-testid="booking-sheet-close"]');
+      await page.waitForSelector(`${sheet}:not([open])`, { state: "attached" });
       await page.waitForFunction(() => document.querySelector(".room-sheet .case-row")?.textContent?.includes("Lap chole + IOC"));
       assert(JSON.stringify(await order()) === JSON.stringify(["HN 7100001", "HN 7100002"]), "still first");
 
@@ -4205,12 +4215,19 @@ async function main() {
       await closeForm();
       await page.waitForFunction(() => document.querySelectorAll(".room-sheet .case-row").length === 1);
 
-      // ยกเลิกจอง asks again (ไม่ยกเลิก first in focus), then เลิกทำ books it back in its old place
+      // ยกเลิกจอง asks again (its back arrow first in focus, which keeps the booking), then เลิกทำ books it back in its old place
       await openSheet("7100002");
       await page.click('[data-testid="booking-cancel"]');
       await page.waitForSelector(`${sheet}[data-step="confirm"]`);
-      assert((await textOf(page, "#booking-sheet-title")) === "ยกเลิกการจองนี้?");
-      assert(await page.evaluate(() => document.activeElement?.dataset.testid === "booking-keep"), "ไม่ยกเลิก has the focus");
+      assert((await textOf(page, `${sheet}[open] [data-testid="booking-sheet-title"]`)) === "ยกเลิกการจองนี้?");
+      assert(await page.evaluate(() => document.activeElement?.dataset.testid === "booking-back"), "the back arrow has the focus");
+      await page.waitForTimeout(400);
+      await page.click('[data-testid="booking-back"]');
+      await page.waitForSelector(`${sheet}[data-step="menu"]`);
+      assert((await queued(second)).removed_at === null, "back keeps it");
+      await page.waitForTimeout(400);
+      await page.click('[data-testid="booking-cancel"]');
+      await page.waitForSelector(`${sheet}[data-step="confirm"]`);
       assert((await textOf(page, '[data-testid="booking-confirm-note"]')) === "เลิกทำได้ภายใน 10 นาที");
       await ownerShot(page, "row-actions-cancel.png");
       await page.waitForTimeout(400);

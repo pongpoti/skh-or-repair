@@ -120,6 +120,12 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
   const manageFrom = useRef<HTMLElement | null>(null);
   const managedRow = managed ? (cases.find((item) => item.bookingId === managed.booking.id) ?? null) : null;
   const managedBooking = managed ? (own?.mine.find((item) => item.id === managed.booking.id) ?? managed.booking) : null;
+  // The rows and bookings as they are now, for the booking form's back arrow (reopenManage), which runs after the form may
+  // have saved: an edit refreshes them, a move or a cancel can take the row off this list.
+  const latest = useRef({ cases, own, managed });
+  useLayoutEffect(() => {
+    latest.current = { cases, own, managed };
+  });
   /** The doctor's booking behind a row, when they can still do something with it (its day has not gone). */
   const ownBooking = (row: BoardRow): AddedCase | null => {
     if (!own || !row.bookingId) return null;
@@ -212,13 +218,28 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
     if (!noteRef.current?.open) noteRef.current?.showModal();
   }
 
-  function openManage(row: BoardRow, booking: AddedCase, from: HTMLElement) {
+  function openManage(row: BoardRow, booking: AddedCase, from: HTMLElement | null) {
     manageFrom.current = from;
     flushSync(() => {
       setTip(null);
       setManaged((current) => ({ row, booking, opened: (current?.opened ?? 0) + 1 }));
     });
     if (!manageRef.current?.open) manageRef.current?.showModal();
+  }
+
+  /**
+   * The booking form's back arrow (Pong, 26 Nov 2026: "add back button"): the sheet again, on the booking it opened the
+   * form for, as it is now. A booking moved to another day or room, cancelled or gone past has no sheet here: the form
+   * just closes then.
+   */
+  function reopenManage() {
+    const { cases: rows, own: now, managed: last } = latest.current;
+    if (!last || !now) return;
+    const row = rows.find((item) => item.bookingId === last.booking.id);
+    const booking = now.mine.find((item) => item.id === last.booking.id);
+    if (!row || !booking || bookingState(booking.date, now.today, now.earliest) === "past") return;
+    const pill = listRef.current?.querySelector<HTMLElement>(`[data-manage-for="${CSS.escape(booking.id)}"]`) ?? null;
+    openManage(row, booking, pill);
   }
 
   function manageClosed() {
@@ -351,6 +372,7 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
                       aria-haspopup="dialog"
                       aria-label={`จัดการการจอง ลำดับ ${item.order} ${item.procedure}`}
                       onClick={(event) => openManage(item, booking, event.currentTarget)}
+                      data-manage-for={booking.id}
                       data-testid="row-manage"
                     >
                       <ManageIcon size={15} />
@@ -383,6 +405,7 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
         own={own}
         opened={managed?.opened ?? 0}
         onClosed={manageClosed}
+        onReopen={reopenManage}
       />
     ) : null}
     </>
