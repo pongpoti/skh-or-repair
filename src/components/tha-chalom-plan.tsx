@@ -131,12 +131,13 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
   );
 }
 
+/** The plan sits at the top of its box, as รพ.สมุทรสาคร's does (components/floor-plan.tsx), centred across it. */
 export function ThaChalomPlan({ className, day = null }: { className?: string; day?: readonly ThaChalomRoomDay[] | null }) {
   const byId = new Map((day ?? []).map((entry) => [entry.room.id as string, entry]));
   return (
     <svg
       viewBox="104.5 31.5 614 578.25"
-      preserveAspectRatio="xMidYMid meet"
+      preserveAspectRatio="xMidYMin meet"
       className={className}
       role={day ? "group" : "img"}
       aria-label="แปลนห้องผ่าตัด รพ.ท่าฉลอม: ห้องผ่าตัด 1 ถึง 4"

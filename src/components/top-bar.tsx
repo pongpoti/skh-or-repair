@@ -38,17 +38,6 @@ const UPLOAD_ICON = (
 );
 
 /** Lucide "hospital" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): the hospitals' page. */
-const PLACES_ICON = (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M12 6v4" />
-    <path d="M14 14h-4" />
-    <path d="M14 18h-4" />
-    <path d="M14 8h-4" />
-    <path d="M18 12h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h2" />
-    <path d="M18 22V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v18" />
-  </svg>
-);
-
 const HEADING = "text-[0.9375rem] leading-6 font-bold text-ink min-[400px]:text-base sm:text-lg";
 
 /**
@@ -67,7 +56,6 @@ export function TopBar({
   adminHref = null,
   uploadHref = null,
   helpHref = null,
-  placesHref = null,
   datePick = null,
   place = null,
 }: {
@@ -91,8 +79,6 @@ export function TopBar({
   uploadHref?: string | null;
   /** The doctors' tutorial (วิธีใช้งาน), in the account menu of doctors and admins. */
   helpHref?: string | null;
-  /** The page that asks which hospital (เปลี่ยนโรงพยาบาล), first in the account menu. */
-  placesHref?: string | null;
   /** When given, the date is a button that opens a calendar to show the board of another day (BoardDatePicker). */
   datePick?: DatePick | null;
   /** On a hospital's board: the switch to the other hospital's board (PlaceTabs). */
@@ -203,7 +189,6 @@ export function TopBar({
             uploadHref={uploadHref}
             adminHref={adminHref}
             helpHref={helpHref}
-            placesHref={placesHref}
           />
         ) : (
           <span className="flex shrink-0 items-center gap-2">
@@ -218,9 +203,9 @@ export function TopBar({
 
 /**
  * The avatar and its account menu (a popover, so a tap outside or Escape closes it without any script): who is signed
- * in, the pages the person may open, and sign-out. The board's bar and the hospitals' pages share it.
+ * in, the pages the person may open, and sign-out.
  */
-export function AccountMenu({
+function AccountMenu({
   name,
   role = null,
   phone,
@@ -228,7 +213,6 @@ export function AccountMenu({
   uploadHref = null,
   adminHref = null,
   helpHref = null,
-  placesHref = null,
 }: {
   name: string;
   role?: string | null;
@@ -237,7 +221,6 @@ export function AccountMenu({
   uploadHref?: string | null;
   adminHref?: string | null;
   helpHref?: string | null;
-  placesHref?: string | null;
 }) {
   const src = avatarSrc(image);
   const initial = initialOf(name);
@@ -280,12 +263,6 @@ export function AccountMenu({
             ) : null}
           </div>
         </div>
-        {placesHref ? (
-          <Link href={placesHref} className="btn btn-ghost mb-2 w-full" data-testid="account-places-link">
-            {PLACES_ICON}
-            เปลี่ยนโรงพยาบาล
-          </Link>
-        ) : null}
         {uploadHref ? (
           <Link href={uploadHref} className="btn btn-ghost mb-2 w-full" data-testid="account-upload-link">
             {UPLOAD_ICON}

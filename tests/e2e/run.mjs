@@ -1103,7 +1103,7 @@ async function main() {
       await page.click('[data-testid="claim-name"]');
       await page.waitForSelector('[data-testid="claim-confirm"][open]');
       await page.click('[data-testid="claim-confirm-yes"]');
-      await page.waitForURL(`${APP}/`);
+      await page.waitForURL(`${APP}/skh`);
       assert((await boardName(page)) === DOC1_NAME, `full name from the table: ${await boardName(page)}`);
       const header = await page.textContent("header");
       assert(!header.includes(LINE_NAME_A), "the LINE display name is not shown on the board");
@@ -1255,7 +1255,7 @@ async function main() {
       await page.close();
     });
 
-    await t("the hospitals (Pong, 26 Nov 2026): / asks which; รพ.สมุทรสาคร opens the board at /skh, รพ.ท่าฉลอม its weekly table on its plan; the ways back; an old board address goes on to /skh", async () => {
+    await t("the hospitals (Pong, 26-27 Nov 2026): / opens รพ.สมุทรสาคร's board at /skh, with no choice of hospital; รพ.ท่าฉลอม its weekly table on its plan, laid out as รพ.สมุทรสาคร's board; the switch between them; an old board address goes on to /skh", async () => {
       assert(ctxA, "signed-in context from the first-login test");
       const page = await ctxA.newPage();
       const csp = [];
@@ -1263,44 +1263,11 @@ async function main() {
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
       await page.setViewportSize({ width: 390, height: 844 });
+      // no more cards (Pong, 27 Nov 2026: "No more card selection. Default select is สมุทรสาคร")
       await page.goto(`${APP}/`, { waitUntil: "networkidle" });
-      assert((await plainText(page, '[data-testid="place-title"]')) === "เลือกโรงพยาบาล", "the page asks which hospital");
-      assert((await boardName(page)) === DOC1_NAME, "the account menu, as on the board");
-      const cards = page.locator('[data-testid="place-card"]');
-      assert((await cards.count()) === 2, `two hospitals: ${await cards.count()}`);
-      const listed = await cards.evaluateAll((els) =>
-        els.map((el) => [el.dataset.place, el.getAttribute("href"), el.querySelector('[data-testid="place-name"]').textContent.trim(), el.querySelector('[data-testid="place-detail"]').textContent.trim()]),
-      );
-      assert(
-        JSON.stringify(listed) ===
-          JSON.stringify([
-            ["skh", "/skh", "รพ.สมุทรสาคร", "ห้องผ่าตัด 13 ห้อง"],
-            ["tha-chalom", "/tha-chalom", "รพ.ท่าฉลอม", "ห้องผ่าตัด 4 ห้อง"],
-          ]),
-        `the cards: ${JSON.stringify(listed)}`,
-      );
-      assert((await page.locator('[data-testid="place-card"] .place-art svg').count()) === 2, "a picture of each hospital");
-      // a phone shows both cards whole, with no scrolling, the small one too; side by side and the same size on every
-      // screen (Pong, 26 Nov 2026: "Place card size are inconsistent and too large")
-      const sizes = [];
-      for (const [width, height] of [[390, 844], [375, 667], [360, 640], [1280, 900]]) {
-        await page.setViewportSize({ width, height });
-        const [first, last] = [await cards.nth(0).boundingBox(), await cards.nth(1).boundingBox()];
-        assert(last && last.y + last.height <= height, `both cards in view at ${width}×${height}: ${JSON.stringify(last)}`);
-        assert(Math.abs(first.y - last.y) < 1 && last.x > first.x + first.width, `side by side at ${width}px`);
-        assert(Math.abs(first.width - last.width) < 1 && Math.abs(first.height - last.height) < 1, `the same size at ${width}px: ${JSON.stringify([first, last])}`);
-        assert(first.width <= 172 && first.height <= 160, `small cards at ${width}px: ${JSON.stringify(first)}`);
-        sizes.push(Math.round(first.width));
-      }
-      assert(sizes[0] === sizes[3], `as wide on a phone as on a computer: ${JSON.stringify(sizes)}`);
-      await page.setViewportSize({ width: 390, height: 844 });
-      await touchTargets(page, "the hospitals");
-      await shoot(page, "places", { full: false });
-
-      // รพ.สมุทรสาคร: the board, whose account menu goes back to the choice
-      await cards.nth(0).click();
-      await page.waitForURL(`${APP}/skh`);
+      assert(new URL(page.url()).pathname === "/skh", `the app opens on รพ.สมุทรสาคร's board: ${page.url()}`);
       await page.waitForSelector('[data-testid="board-eyebrow"]');
+      assert((await page.locator('[data-testid="place-card"], [data-testid="place-title"]').count()) === 0, "no choice of hospital");
       // the bar's switch: รพ.สมุทรสาคร lit, รพ.ท่าฉลอม one tap away (Pong, 26 Nov 2026: "seamless navigation between 2 places")
       const tabsOf = () =>
         page.$$eval('[data-testid="place-tab"]', (els) => els.map((el) => [el.dataset.place, el.textContent.trim(), el.getAttribute("href"), el.getAttribute("aria-current")]));
@@ -1308,18 +1275,20 @@ async function main() {
         JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "รพ.สมุทรสาคร", null, "page"], ["tha-chalom", "รพ.ท่าฉลอม", "/tha-chalom", null]]),
         `the switch on รพ.สมุทรสาคร's board: ${JSON.stringify(await tabsOf())}`,
       );
-      await page.click('[data-testid="user-menu"]');
-      const places = page.locator('[data-testid="account-places-link"]');
-      await places.waitFor({ state: "visible" });
-      assert((await places.getAttribute("href")) === "/" && (await plainText(page, '[data-testid="account-places-link"]')) === "เปลี่ยนโรงพยาบาล", "เปลี่ยนโรงพยาบาล in the board's menu");
-      assert(((await places.boundingBox())?.height ?? 0) >= 44, "a 44px target");
-      await page.screenshot({ path: join(SCREENS, "places-board-menu.png") });
-      shots.push("places-board-menu.png");
-      await places.click();
-      await page.waitForURL(`${APP}/`);
+      // the account menu has no way to a choice of hospital any more, and the same links on both boards
+      const menuLinks = async () => {
+        await page.click('[data-testid="user-menu"]');
+        await page.locator('[data-testid="account-menu"]').waitFor({ state: "visible" });
+        const ids = await page.$$eval('[data-testid="account-menu"] a[data-testid]', (els) => els.map((el) => [el.dataset.testid, el.getAttribute("href")]));
+        await page.keyboard.press("Escape");
+        await page.locator('[data-testid="account-menu"]').waitFor({ state: "hidden" });
+        return ids;
+      };
+      const skhMenu = await menuLinks();
+      assert(!skhMenu.some(([id]) => id === "account-places-link"), `no เปลี่ยนโรงพยาบาล: ${JSON.stringify(skhMenu)}`);
+      await page.click('[data-testid="place-tab"][data-place="tha-chalom"]');
 
-      // รพ.ท่าฉลอม: the hospital's weekly table (Pong, 26 Nov 2026) on Pong's plan, with the list of rooms
-      await cards.nth(1).click();
+      // รพ.ท่าฉลอม: the hospital's weekly table (Pong, 26 Nov 2026) on Pong's plan, with the list of open rooms
       await page.waitForURL(`${APP}/tha-chalom`);
       await page.waitForSelector('[data-testid="tha-chalom-plan"]');
       const eyebrow = await plainText(page, '[data-testid="board-eyebrow"]');
@@ -1348,14 +1317,16 @@ async function main() {
       const roomsOf = () =>
         page.$$eval('[data-testid="tc-room"]', (els) => els.map((el) => [el.dataset.room, el.querySelector(".room-pill").getAttribute("title")]));
       const rooms = await roomsOf();
+      // the list has the day's open rooms, as รพ.สมุทรสาคร's ห้องที่เปิด, and says what the plan shows
+      const openOrs = ors.filter(([, , state]) => state === "open").map(([room]) => room);
       assert(
-        JSON.stringify(rooms.map(([room]) => room)) === JSON.stringify(["or-1", "or-2", "or-3", "or-4", "scope"]),
-        `the list: OR 1 to 4 and the Scope room: ${JSON.stringify(rooms)}`,
+        JSON.stringify(rooms.map(([room]) => room).filter((room) => room !== "scope")) === JSON.stringify(openOrs),
+        `the list: the open ORs (and the Scope room when in use): ${JSON.stringify(rooms)} / ${JSON.stringify(ors)}`,
       );
-      // the list says what the plan shows
-      for (const [room, , , label] of ors) {
-        assert(rooms.find(([id]) => id === room)?.[1] === label, `${room} in the list as on the plan: ${label}`);
+      for (const [room, , state, label] of ors) {
+        if (state === "open") assert(rooms.find(([id]) => id === room)?.[1] === label, `${room} in the list as on the plan: ${label}`);
       }
+      assert((await page.locator('[data-testid="tc-room"][data-room="or-3"]').count()) === 0, "OR 3 under works is not open");
       // a Wednesday (the first in the next weeks that is not a holiday): OR 4 is จักษุ's in the morning, โสต ศอ นาสิก's after
       const shown = await page.getAttribute("header time", "datetime");
       let wednesday = null;
@@ -1373,10 +1344,10 @@ async function main() {
       assert((await page.locator('.tcp-or[data-room="or-4"].is-split').count()) === 1, "OR 4 drawn in two bands");
       assert(
         JSON.stringify((await roomsOf()).map(([, title]) => title)) ===
-          JSON.stringify(["OR 1 · ออร์โธปิดิกส์ (TKA)", "OR 2 · ศัลยกรรมหลอดเลือด", "OR 3 · ปรับปรุงเป็นห้อง Intervention", "OR 4 · เช้า จักษุ · บ่าย โสต ศอ นาสิก", "ห้อง Scope · ว่าง"]),
+          JSON.stringify(["OR 1 · ออร์โธปิดิกส์ (TKA)", "OR 2 · ศัลยกรรมหลอดเลือด", "OR 4 · เช้า จักษุ · บ่าย โสต ศอ นาสิก"]),
         `the Wednesday's list: ${JSON.stringify(await roomsOf())}`,
       );
-      assert((await plainText(page, '[data-testid="tc-open-count"]')) === "เปิด 3 ห้อง", "three rooms open on a Wednesday");
+      assert((await plainText(page, '[data-testid="tc-open-count"]')) === "3 ห้อง", "three rooms open on a Wednesday");
       // a picked day goes along to the other hospital and back
       assert(JSON.stringify((await tabsOf()).map(([, , href]) => href)) === JSON.stringify([`/skh?date=${wednesday}`, null]), `the switch keeps the day: ${JSON.stringify(await tabsOf())}`);
       await page.click('[data-testid="place-tab"][data-place="skh"]');
@@ -1388,44 +1359,59 @@ async function main() {
       await page.waitForURL(`${APP}/tha-chalom?date=${wednesday}`);
       await page.waitForSelector('[data-testid="place-tab"][data-place="tha-chalom"][aria-current="page"]');
       assert((await page.getAttribute("header time", "datetime")) === wednesday, "ท่าฉลอม on the same Wednesday again");
-      for (const id of ["add-case-button", "notice-strip", "upload-button", "room-overview", "admin-button"]) {
-        assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's board: ${id}`);
+      // no cases and no bookings at รพ.ท่าฉลอม yet; the bar and its menu are รพ.สมุทรสาคร's, for the same person
+      for (const id of ["add-case-button", "notice-strip", "room-overview"]) {
+        assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's cases: ${id}`);
       }
-      for (const width of [320, ...WIDTHS]) {
-        const height = width === 1280 ? 900 : 780;
+      const tcMenu = await menuLinks();
+      assert(JSON.stringify(tcMenu) === JSON.stringify(skhMenu), `the same account menu: ${JSON.stringify(tcMenu)} / ${JSON.stringify(skhMenu)}`);
+      // the logo goes to ท่าฉลอม's own day, as รพ.สมุทรสาคร's goes to its board
+      assert((await page.getAttribute('header a[aria-label="ORSKH.APP หน้าแรก"]', "href")) === "/tha-chalom", "the logo goes to ท่าฉลอม's day");
+      await touchTargets(page, "รพ.ท่าฉลอม");
+      // laid out as รพ.สมุทรสาคร's board (Pong, 27 Nov 2026: "Arrange component of ท่าฉลอม exact same as สมทุรสาคร"): the
+      // plan alone on a phone, right under the bar; from 1024px the open rooms beside it
+      // (1280px last: the list is measured there below)
+      for (const width of [320, 1024, ...WIDTHS]) {
+        const height = width >= 1024 ? 900 : 780;
         await page.setViewportSize({ width, height });
         await noSideScroll(page, `รพ.ท่าฉลอม at ${width}px`);
         const plan = await page.locator('[data-testid="tha-chalom-plan"]').boundingBox();
         const list = await page.locator('[data-testid="tc-rooms"]').boundingBox();
         const bar = await page.locator("header").boundingBox();
         assert(plan.y >= bar.y + bar.height - 0.5 && plan.y + plan.height <= height + 0.5 && plan.x >= 0 && plan.x + plan.width <= width + 0.5, `the plan fits at ${width}px: ${JSON.stringify(plan)}`);
-        assert(list.y + list.height <= height + 0.5 && list.x + list.width <= width + 0.5, `the list in view at ${width}px: ${JSON.stringify(list)}`);
-        // under the plan on a phone, beside it on a computer
-        assert(width >= 1024 ? list.x >= plan.x + plan.width - 0.5 : list.y >= plan.y + plan.height - 0.5, `the list's place at ${width}px`);
+        if (width < 1024) {
+          assert(list === null, `no list on a phone at ${width}px: ${JSON.stringify(list)}`);
+          assert(plan.y - (bar.y + bar.height) <= 8, `the plan right under the bar at ${width}px: ${JSON.stringify([bar, plan])}`);
+        } else {
+          assert(list && list.y + list.height <= height + 0.5 && list.x + list.width <= width + 0.5, `the list in view at ${width}px: ${JSON.stringify(list)}`);
+          assert(list.x >= plan.x + plan.width - 0.5, `the list beside the plan at ${width}px`);
+        }
       }
-      await page.setViewportSize({ width: 360, height: 640 });
-      const small = await page.locator('[data-testid="tc-rooms"]').boundingBox();
-      assert(small.y + small.height <= 640.5, `every room in view on a small phone: ${JSON.stringify(small)}`);
+      // the list's card where รพ.สมุทรสาคร's ห้องที่เปิด is, the same size, at 1280px
+      assert(WIDTHS.at(-1) === 1280, "measured at 1280px");
+      const tcList = await page.locator('[data-testid="tc-rooms"]').boundingBox();
       await page.setViewportSize({ width: 390, height: 844 });
       await shoot(page, "tha-chalom", { full: false });
-      // the logo goes to ท่าฉลอม's own day, as รพ.สมุทรสาคร's goes to its board; the account menu goes back to the choice
-      assert((await page.getAttribute('header a[aria-label="ORSKH.APP หน้าแรก"]', "href")) === "/tha-chalom", "the logo goes to ท่าฉลอม's day");
-      await page.click('[data-testid="user-menu"]');
-      const back = page.locator('[data-testid="account-places-link"]');
-      await back.waitFor({ state: "visible" });
-      assert((await back.getAttribute("href")) === "/", "เปลี่ยนโรงพยาบาล in ท่าฉลอม's menu");
-      await back.click();
-      await page.waitForURL(`${APP}/`);
-      await page.waitForSelector('[data-testid="place-card"]');
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await shoot(page, "tha-chalom-computer", { full: false });
+      await page.goto(`${APP}/skh?date=${wednesday}`, { waitUntil: "networkidle" });
+      const skhList = await page.locator("aside[data-room-view]").boundingBox();
+      assert(
+        ["x", "y", "width", "height"].every((key) => Math.abs(tcList[key] - skhList[key]) <= 1),
+        `the list's card as รพ.สมุทรสาคร's: ${JSON.stringify(tcList)} / ${JSON.stringify(skhList)}`,
+      );
+      await page.setViewportSize({ width: 390, height: 844 });
 
-      // the board's address from before (a link kept in a chat) goes on to the same board at /skh
+      // / and the board's address from before (a link kept in a chat) go on to the board at /skh
       const session = await cookie(ctxA, "session");
       for (const [from, to] of [["/?room=or-7", "/skh?room=or-7"], ["/?date=2026-12-03&room=or-12", "/skh?date=2026-12-03&room=or-12"], ["/?demo=1&half=2", "/skh?demo=1&half=2"]]) {
         const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
         assert(r.status === 307 && r.location === to, `${from} -> ${r.status} ${r.location}`);
       }
-      const plain = await rawRequest("/?utm_source=line", { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
-      assert(plain.status === 200, `another query stays on the choice: ${plain.status}`);
+      for (const from of ["/", "/?utm_source=line"]) {
+        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
+        assert(r.status === 307 && r.location === "/skh", `${from} -> ${r.status} ${r.location}`);
+      }
       // signed out, both pages ask for a sign-in that comes back to them
       for (const path of ["/tha-chalom", "/skh"]) {
         const r = await rawRequest(path, { host: `localhost:${APP_PORT}` });
@@ -1550,7 +1536,7 @@ async function main() {
       await db.query("UPDATE user_claims SET undone_at = now(), undo_reason = 'manual' WHERE phone = '0900000099' AND undone_at IS NULL");
       await pickName(page, "RN", DOC2_NAME, "สมหญิง");
       await page.click('[data-testid="claim-confirm-yes"]');
-      await page.waitForURL(`${APP}/`);
+      await page.waitForURL(`${APP}/skh`);
       assert((await boardName(page)) === DOC2_NAME, `second account's name: ${await boardName(page)}`);
       const msgs = await waitForTelegram(before + 1);
       assert(msgs.length === before + 1 && msgs[before].text.startsWith(`🪪 ยืนยันชื่อ: ${DOC2_NAME} (พยาบาล · ${DOC2_DEPT})`), "claim message");
@@ -1570,7 +1556,7 @@ async function main() {
         await page.goto(`${APP}/api/auth/line/start?next=${encodeURIComponent(next)}`);
         await page.waitForLoadState("networkidle");
         const at = new URL(page.url());
-        assert(at.origin === APP && at.pathname === "/" && at.search === "", `next=${next} -> ${page.url()}`);
+        assert(at.origin === APP && at.pathname === "/skh" && at.search === "", `next=${next} -> ${page.url()}`);
         await ctx.close();
       }
     });
@@ -1865,7 +1851,7 @@ async function main() {
       // written the international way: the same number
       const sms = await requestCode(page, BREAK_GLASS, `+66 ${BREAK_GLASS.slice(1, 3)} ${BREAK_GLASS.slice(3, 6)} ${BREAK_GLASS.slice(6)}`);
       await page.fill("#code", sms.pin);
-      await page.waitForURL(`${APP}/`);
+      await page.waitForURL(`${APP}/skh`);
       assert((await boardName(page)) === "ผู้ดูแล <b>ฉุกเฉิน</b>", `LINE name for a number without a row: ${await boardName(page)}`);
       assert((await page.innerHTML('[data-testid="account-name"]')).includes("&lt;b&gt;"), "the LINE name is text, not markup");
       assert((await page.textContent('[data-testid="account-phone"]')).trim() === fmt(BREAK_GLASS), "formatted number");
@@ -1961,7 +1947,7 @@ async function main() {
       const att = await db.query("SELECT attempts FROM otp_codes WHERE line_sub = $1", [SUB_I]);
       assert(att.rows[0].attempts === 0, `attempt refunded: ${att.rows[0].attempts}`);
       await page.click('form button[type="submit"]');
-      await page.waitForURL(`${APP}/`);
+      await page.waitForURL(`${APP}/skh`);
       assert((await boardName(page)) === DOC2_NAME, "signed in on the second try");
       const verified = await waitUntil(
         async () => (await telegramMessages()).slice(tgBefore).find((m) => m.text.startsWith("⚠️") || m.text.startsWith("🆕")),
@@ -2007,7 +1993,7 @@ async function main() {
       assert(ctxA, "signed-in context from the first-login test");
       const page = await ctxA.newPage();
       await page.goto(`${APP}/`);
-      assert(new URL(page.url()).pathname === "/", "still signed in");
+      assert(new URL(page.url()).pathname === "/skh", "still signed in, on the board");
       await page.click('[data-testid="user-menu"]');
       await page.click('[data-testid="logout"]');
       // Sign-out lands on /login?signed_out=1, which says so instead of signing straight back in.
@@ -2050,8 +2036,9 @@ async function main() {
 
     await t("forged, unlisted or pre-SMS session tokens are rejected; the break-glass ALLOWED_PHONES still works", async () => {
       for (const phone of [DOC1, BREAK_GLASS]) {
+        // (/ goes on to the board, not to the sign-in)
         const ok = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(phone)}` });
-        assert(ok.status === 200, `valid token for ${fmt(phone)} -> ${ok.status}`);
+        assert(ok.status === 307 && ok.location === "/skh", `valid token for ${fmt(phone)} -> ${ok.status} ${ok.location}`);
       }
       const legacy = await new SignJWT({ email: "someone@example.com", name: "x", picture: null })
         .setProtectedHeader({ alg: "HS256" })
@@ -2194,7 +2181,7 @@ async function main() {
       const row = await db.query("SELECT code_hash, provider_token FROM otp_codes WHERE line_sub = $1", [SUB_J]);
       assert(row.rows[0].code_hash && !row.rows[0].code_hash.includes(file.code) && row.rows[0].provider_token === null, "local mode stores an HMAC only");
       await page.fill("#code", file.code);
-      await page.waitForURL(`${FILE_APP}/`);
+      await page.waitForURL(`${FILE_APP}/skh`);
       assert((await boardName(page)) === DOC1_NAME, `signed in by file mode: ${await boardName(page)}`);
       await ctx.close();
 
@@ -2222,7 +2209,7 @@ async function main() {
       assert(!note.includes("24 ชั่วโมง"), "no undo promised");
       await shoot(page, "claim-confirm-no-undo", { narrow: true, full: false });
       await page.click('[data-testid="claim-confirm-yes"]');
-      await page.waitForURL(`${FILE_APP}/`);
+      await page.waitForURL(`${FILE_APP}/skh`);
       assert((await boardName(page)) === pca, `claimed on the file-mode server: ${await boardName(page)}`);
       const pcaClaim = await currentClaim(db, pca);
       assert(pcaClaim?.phone === UNLISTED && pcaClaim.line_sub === SUB_K, "the claim holds the number and the LINE account");
@@ -2267,7 +2254,7 @@ async function main() {
       let ctx = await newContext(browser);
       let page = await ctx.newPage();
       await lineLogin(page);
-      assert(new URL(page.url()).pathname === "/", `binding fast path: ${page.url()}`);
+      assert(new URL(page.url()).pathname === "/skh", `binding fast path: ${page.url()}`);
       assert((await boardName(page)) === DOC1_NAME, "signed in with the claimed name");
       const claim = (await db.query("SELECT id::text AS id, tg_messages FROM user_claims WHERE phone = $1 AND undone_at IS NULL", [DOC1])).rows[0];
       const usersBeforeUndo = await usersSnapshot(db);
@@ -2439,7 +2426,7 @@ async function main() {
       await page.waitForSelector('[data-testid="doctor-error"]');
       assert((await page.textContent('[data-testid="doctor-error"]')).replace(/\u00a0/g, " ").includes("เหลืออีก 4"), "attempts left");
       await page.fill("#email-code", mail.code.replace(/\d/g, (d) => String.fromCharCode(0x0e50 + Number(d))));
-      await page.waitForURL(`${APP}/`);
+      await page.waitForURL(`${APP}/skh`);
       assert((await boardName(page)) === EMAIL_DOC, `the doctor's name: ${await boardName(page)}`);
       assert((await page.locator('[data-testid="account-phone"]').count()) === 0, "no number in the account menu");
       assert((await page.textContent('[data-testid="account-role"]')).trim() === EMAIL_DOC_ROLE, "role in the account menu");
@@ -2463,7 +2450,7 @@ async function main() {
       ctx = await newContext(browser);
       page = await ctx.newPage();
       await lineLogin(page);
-      assert(new URL(page.url()).pathname === "/", `email binding fast path: ${page.url()}`);
+      assert(new URL(page.url()).pathname === "/skh", `email binding fast path: ${page.url()}`);
       assert((await boardName(page)) === EMAIL_DOC, "signed in as the doctor");
       const ev = await db.query("SELECT 1 FROM login_events WHERE line_sub = $1 AND event = 'login_email_binding'", [SUB_DOC]);
       assert(ev.rowCount === 1, "login_email_binding logged");
@@ -2607,7 +2594,7 @@ async function main() {
       const ownMail = await waitForEmail(mails);
       assert(JSON.stringify(ownMail.to) === '["somjai.j@example.com"]', `to the doctor's address: ${JSON.stringify(ownMail.to)}`);
       await page.fill("#email-code", ownMail.code);
-      await page.waitForURL(`${APP}/`);
+      await page.waitForURL(`${APP}/skh`);
       assert((await boardName(page)) === PHONE_DOC, `signed in by email: ${await boardName(page)}`);
       assert((await page.locator('[data-testid="account-phone"]').count()) === 0, "no number");
       const claims = (await db.query("SELECT phone, via, line_sub, undo_reason, undone_at IS NULL AS current FROM user_claims WHERE user_id = $1 ORDER BY id", [phoneDocId])).rows;
@@ -5000,15 +4987,14 @@ async function main() {
       await shoot(page, "outage-server");
       await ctx.close();
 
-      // 3: break-glass needs no database to sign in, so the page itself fails: the board's error also lands there (the
-      // choice of hospital needs no database, so it still opens)
+      // 3: break-glass needs no database to sign in, so the page itself fails: the board's error also lands there, / too
+      // (it goes on to the board)
       ctx = await newContext(browser);
       await ctx.addCookies([{ name: "session", value: await sessionToken(BREAK_GLASS), url: DOWN_APP, httpOnly: true, sameSite: "Lax" }]);
       page = await ctx.newPage();
       await page.goto(`${DOWN_APP}/`);
-      await page.waitForSelector('[data-testid="place-card"]');
-      await page.goto(`${DOWN_APP}/skh`);
       await page.waitForURL(/\/unavailable\?reason=server/);
+      assert(new URL(page.url()).searchParams.get("from") === "/skh", `the board's address to try again: ${page.url()}`);
       await page.waitForSelector('[data-testid="outage"][data-reason="server"]');
       await ctx.close();
 

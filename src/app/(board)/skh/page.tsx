@@ -16,7 +16,7 @@ import { db } from "@/lib/db";
 import { demoBoardRows, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
-import { BOARD_PATH, PLACES_PATH } from "@/lib/places";
+import { BOARD_PATH } from "@/lib/places";
 import type { RepairPeriods } from "@/lib/repair";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
@@ -215,8 +215,6 @@ export default async function BoardPage({
         uploadHref={canUpload ? "/upload" : null}
         // The tutorial is the doctors' (Pong, 19 Nov 2026); admins may look at it too.
         helpHref={adding || admin ? "/tutorial" : null}
-        // The other hospital (Pong, 26 Nov 2026): the page that asks which, where every visit starts.
-        placesHref={PLACES_PATH}
         datePick={datePick}
         // One tap to รพ.ท่าฉลอม's board on the same day (Pong, 26 Nov 2026: "seamless navigation between 2 places").
         place={{ current: "skh" }}

@@ -120,9 +120,9 @@ export function roomDayText(entry: ThaChalomRoomDay): string {
   return [entry.room.name, ...parts].join(" · ");
 }
 
-/** The rooms a department has for at least half of `date`. */
-export function openRoomCount(day: readonly ThaChalomRoomDay[]): number {
-  return day.filter((entry) => entry.am.kind === "dept" || entry.pm.kind === "dept").length;
+/** The day's open rooms, in the list's order: the ones a department has for at least half of the day. */
+export function openRooms(day: readonly ThaChalomRoomDay[]): ThaChalomRoomDay[] {
+  return day.filter((entry) => entry.am.kind === "dept" || entry.pm.kind === "dept");
 }
 
 /**
