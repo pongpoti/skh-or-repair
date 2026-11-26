@@ -41,7 +41,7 @@ export function ThaChalomPlan({ className }: { className?: string }) {
       preserveAspectRatio="xMidYMid meet"
       className={className}
       role="img"
-      aria-label="แปลนห้องผ่าตัด รพ.ท่าฉลอม ชั้น 5: ห้องผ่าตัด 1 ถึง 4"
+      aria-label="แปลนห้องผ่าตัด รพ.ท่าฉลอม: ห้องผ่าตัด 1 ถึง 4"
       data-testid="tha-chalom-plan"
     >
       <defs>

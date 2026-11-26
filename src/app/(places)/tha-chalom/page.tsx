@@ -19,7 +19,7 @@ export default async function ThaChalomPage() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <PlaceBar
-        eyebrow="แปลนห้องผ่าตัด ชั้น 5"
+        eyebrow="แปลนห้องผ่าตัด"
         title="รพ.ท่าฉลอม"
         back={{ href: PLACES_PATH, label: "เลือกโรงพยาบาล" }}
         account={{ name: profile.name, role: profile.role, phone: user.phone ? formatPhone(user.phone) : undefined, image: user.picture ?? null }}

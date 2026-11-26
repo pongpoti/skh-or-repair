@@ -11,7 +11,7 @@ test("the two hospitals, รพ.สมุทรสาคร's board first (Pong,
     ],
   );
   assert.equal(PLACES[0].detail, "ห้องผ่าตัด 13 ห้อง");
-  assert.equal(PLACES[1].detail, "ห้องผ่าตัด 4 ห้อง · ชั้น 5");
+  assert.equal(PLACES[1].detail, "ห้องผ่าตัด 4 ห้อง");
   assert.equal(PLACES_PATH, "/");
   assert.equal(BOARD_PATH, "/skh");
 });

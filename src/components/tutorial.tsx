@@ -1163,7 +1163,7 @@ function Hand({ kind, rect, up }: { kind: "tap" | "swipe"; rect: Box; up: boolea
   );
 }
 
-const CONFETTI_COLOURS = ["#1E7B3C", "#D32F2F", "#0277BD", "#C2185B", "#ddbf94", "#9A6B00", "#5E35B1", "#00838F"];
+const CONFETTI_COLOURS = ["#1E7B3C", "#D32F2F", "#0277BD", "#C2188F", "#ddbf94", "#9A6B00", "#5E35B1", "#00838F"];
 
 /** A number from 0 to 1 that looks random but is the same on every draw. */
 function scatter(index: number, salt: number): number {

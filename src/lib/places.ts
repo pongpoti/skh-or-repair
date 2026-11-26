@@ -29,7 +29,7 @@ export const THA_CHALOM_ROOMS = 4;
 
 export const PLACES: readonly Place[] = [
   { id: "skh", name: "รพ.สมุทรสาคร", detail: `ห้องผ่าตัด ${ROOMS.filter((room) => room.kind === "or").length} ห้อง`, href: BOARD_PATH },
-  { id: "tha-chalom", name: "รพ.ท่าฉลอม", detail: `ห้องผ่าตัด ${THA_CHALOM_ROOMS} ห้อง · ชั้น 5`, href: THA_CHALOM_PATH },
+  { id: "tha-chalom", name: "รพ.ท่าฉลอม", detail: `ห้องผ่าตัด ${THA_CHALOM_ROOMS} ห้อง`, href: THA_CHALOM_PATH },
 ];
 
 /** The board's own address keys (a room, a day, the admins' test modes). */

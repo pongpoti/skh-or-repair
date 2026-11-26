@@ -1275,7 +1275,7 @@ async function main() {
         JSON.stringify(listed) ===
           JSON.stringify([
             ["skh", "/skh", "รพ.สมุทรสาคร", "ห้องผ่าตัด 13 ห้อง"],
-            ["tha-chalom", "/tha-chalom", "รพ.ท่าฉลอม", "ห้องผ่าตัด 4 ห้อง · ชั้น 5"],
+            ["tha-chalom", "/tha-chalom", "รพ.ท่าฉลอม", "ห้องผ่าตัด 4 ห้อง"],
           ]),
         `the cards: ${JSON.stringify(listed)}`,
       );
@@ -1313,7 +1313,7 @@ async function main() {
       await cards.nth(1).click();
       await page.waitForURL(`${APP}/tha-chalom`);
       await page.waitForSelector('[data-testid="tha-chalom-plan"]');
-      assert((await plainText(page, '[data-testid="place-title"]')) === "รพ.ท่าฉลอม" && (await plainText(page, '[data-testid="place-eyebrow"]')) === "แปลนห้องผ่าตัด ชั้น 5", "named in the bar");
+      assert((await plainText(page, '[data-testid="place-title"]')) === "รพ.ท่าฉลอม" && (await plainText(page, '[data-testid="place-eyebrow"]')) === "แปลนห้องผ่าตัด", "named in the bar");
       const ors = await page.$$eval(".tcp-or", (els) => els.map((el) => [el.dataset.room, el.querySelector(".tcp-or-num").textContent, el.querySelector(".tcp-or-label").textContent]));
       assert(JSON.stringify(ors) === JSON.stringify([1, 2, 3, 4].map((n) => [`or-${n}`, String(n), "OR"])), `four ORs: ${JSON.stringify(ors)}`);
       assert((await page.locator(".tcp-room, .tcp-grid-box").count()) === 15, "the other rooms as drawn");

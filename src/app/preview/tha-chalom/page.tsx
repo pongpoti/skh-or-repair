@@ -10,7 +10,7 @@ export default function PreviewThaChalomPage() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <PlaceBar
-        eyebrow="แปลนห้องผ่าตัด ชั้น 5"
+        eyebrow="แปลนห้องผ่าตัด"
         title="รพ.ท่าฉลอม"
         back={{ href: "/preview/places", label: "เลือกโรงพยาบาล" }}
         account={{ name: "ปราณี สายบุญ", role: "พยาบาล · ห้องผ่าตัด", phone: "081-234-5678", image: null }}

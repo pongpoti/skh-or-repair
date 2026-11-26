@@ -61,7 +61,7 @@ export const DEPARTMENTS: Record<DeptCode, Department> = {
   SCOPE: dept("SCOPE", "ส่องกล้องทางเดินอาหาร", "#6B7016"), // bile, the digestive tract
   VASCULAR: dept("VASCULAR", "ศัลยกรรมหลอดเลือด", "#2E4FA8", "VAS"), // veins as anatomy drawings show them
   ORTHO: dept("ORTHO", "ออร์โธปิดิกส์", "#455A64"), // X-ray film and implant steel
-  OBGYN: dept("OBGYN", "สูติ-นรีเวชกรรม", "#C2185B"), // women and mothers
+  OBGYN: dept("OBGYN", "สูติ-นรีเวชกรรม", "#C2188F"), // women and mothers; magenta pink, clear of EMER's red (Pong, 26 Nov 2026)
   EYE: dept("EYE", "จักษุ", "#0277BD"), // the iris
   URO: dept("URO", "ศัลยกรรมทางเดินปัสสาวะ", "#9A6B00"), // urine
   PLASTIC: dept("PLASTIC", "ศัลยกรรมตกแต่ง", "#A85C52", "PLAST"), // skin
