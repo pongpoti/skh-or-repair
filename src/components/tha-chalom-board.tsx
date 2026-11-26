@@ -34,8 +34,9 @@ export function ThaChalomBoard({ date, pick, pathname = THA_CHALOM_PATH }: { dat
     <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="relative mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col overflow-hidden sm:px-3 lg:flex-row lg:gap-6 lg:px-6 lg:pt-3 lg:pb-4">
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:overflow-visible">
-          <DaySwipe day={date} pick={pick} pathname={pathname} className="flex min-h-0 flex-1 overflow-hidden p-1 lg:p-0">
-            <ThaChalomPlan day={day} className="h-full max-h-full w-full" />
+          <DaySwipe day={date} pick={pick} pathname={pathname} className="tc-plan-box flex min-h-0 flex-1 overflow-hidden p-1 lg:p-0">
+            {/* At รพ.สมุทรสาคร's scale, so the rooms are as big as there (globals.css .tc-plan). */}
+            <ThaChalomPlan day={day} className="tc-plan" />
           </DaySwipe>
         </div>
         <aside
