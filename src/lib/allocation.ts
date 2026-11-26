@@ -61,11 +61,11 @@ export const DEPARTMENTS: Record<DeptCode, Department> = {
   SCOPE: dept("SCOPE", "ส่องกล้องทางเดินอาหาร", "#6B7016"), // bile, the digestive tract
   VASCULAR: dept("VASCULAR", "ศัลยกรรมหลอดเลือด", "#2E4FA8", "VAS"), // veins as anatomy drawings show them
   ORTHO: dept("ORTHO", "ออร์โธปิดิกส์", "#455A64"), // X-ray film and implant steel
-  OBGYN: dept("OBGYN", "สูติ-นรีเวชกรรม", "#C2185B"), // women and mothers
+  OBGYN: dept("OBGYN", "สูติ-นรีเวชกรรม", "#C2188F"), // women and mothers; magenta pink, clear of EMER's red (Pong, 26 Nov 2026)
   EYE: dept("EYE", "จักษุ", "#0277BD"), // the iris
   URO: dept("URO", "ศัลยกรรมทางเดินปัสสาวะ", "#9A6B00"), // urine
   PLASTIC: dept("PLASTIC", "ศัลยกรรมตกแต่ง", "#A85C52", "PLAST"), // skin
-  ENT: dept("ENT", "โสต ศอ นาสิก", "#00838F"), // breath through nose and throat
+  ENT: dept("ENT", "โสต ศอ นาสิก", "#006064"), // breath through nose and throat; a deep teal, darker than GENSX's green and EYE's blue (Pong, 26 Nov 2026)
   NEPHRO: dept("NEPHRO", "อายุรกรรมโรคไต", "#6B4A2E", "NEPHR"), // a kidney bean
   /** No period in the schedule: the pulmonologists in the admin list, who set cases in OR 4 on Mondays (GUESTS). */
   CHEST: dept("CHEST", "อายุรกรรมโรคปอด", "#5867B8"), // air and the lungs

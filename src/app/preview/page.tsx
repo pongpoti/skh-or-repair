@@ -39,6 +39,7 @@ function fixedDay(date: string, time: string | undefined, today: string | undefi
  *   with ?upload=0 the bookings alone, as before MX uploads.
  * - ?demo=1 fills every open room with the admin's demo schedule (lib/demo-schedule.ts, ten or more made-up cases a
  *   room), as an admin sees it: a long list for the room's sheet and its full screen card.
+ * - ?account=1 shows the account menu behind the avatar, with เปลี่ยนโรงพยาบาล (to /preview/places).
  * - ?mx=1 shows the board as MX sees it (every HN, the upload button); otherwise as the sample's doctor, who sees the
  *   HN of their own bookings. ?admin=1 adds the admin button.
  * - ?failed=1 shows the board as when its cases cannot be read (no badge since 16 Nov 2026); ?notices=all puts every
@@ -58,6 +59,7 @@ export default async function PreviewPage({
     at?: string;
     holiday?: string;
     admin?: string;
+    account?: string;
     mx?: string;
     sample?: string;
     upload?: string;
@@ -145,7 +147,9 @@ export default async function PreviewPage({
         eyebrow={boardEyebrow(day.relation)}
         name="สมหญิง ไลน์"
         pathname="/preview"
-        showAccount={false}
+        // ?account=1 shows the account menu (with the way to the other hospital) instead of the name.
+        showAccount={Boolean(params.account)}
+        placesHref="/preview/places"
         // ?admin=1 shows the bar as an admin sees it.
         adminHref={params.admin ? "/preview/admin" : null}
         uploadHref={params.mx || params.admin ? "/upload" : null}

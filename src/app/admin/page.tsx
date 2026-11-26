@@ -16,6 +16,7 @@ import { loadBoardDay, pickRange } from "@/lib/board-day";
 import { now } from "@/lib/clock";
 import { DEMO_MIN_CASES, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
+import { BOARD_PATH } from "@/lib/places";
 import { shortThaiDate } from "@/lib/repair";
 import { XLS_MESSAGE, XLSX_LIMITS } from "@/lib/xlsx";
 import { addStaff, grantMx, importPastLists, revokeMx, saveRepair } from "./actions";
@@ -88,7 +89,7 @@ export default async function AdminPage() {
                     <span className="text-xs font-medium">{to < day.today ? "จบแล้ว" : "ไม่มีวันทำการเหลือ"}</span>
                   </span>
                 ) : (
-                  <Link key={half} href={`/?demo=1&half=${half}`} className="btn btn-secondary flex-col gap-0.5 py-2.5" data-testid={`demo-half-${half}`}>
+                  <Link key={half} href={`${BOARD_PATH}?demo=1&half=${half}`} className="btn btn-secondary flex-col gap-0.5 py-2.5" data-testid={`demo-half-${half}`}>
                     <span>{HALF_NAME[half]}</span>
                     {/* Each date whole on its line when the two do not fit side by side. */}
                     <span className="text-center text-xs font-medium tabular-nums">
@@ -110,14 +111,14 @@ export default async function AdminPage() {
             testId="sim-section"
           >
             <div className="flex flex-col gap-2 p-4 sm:p-5">
-              <Link href={`/?sim=1&date=${SIM_START}`} className="btn btn-secondary flex-col gap-0.5 self-start py-2.5" data-testid="sim-october">
+              <Link href={`${BOARD_PATH}?sim=1&date=${SIM_START}`} className="btn btn-secondary flex-col gap-0.5 self-start py-2.5" data-testid="sim-october">
                 <span>ต.ค. 2569</span>
                 <span className="text-xs font-medium">เริ่ม {shortThaiDate(SIM_START)}</span>
               </Link>
               <p className="text-sm text-ink-2">เลือกวันอื่นในปฏิทิน หรือปัดแผนผัง ก็ยังเป็นการจองจำลอง แตะโลโก้เพื่อกลับตารางจริง</p>
             </div>
           </AdminSection>
-          <TestModeSection href="/?notices=all" />
+          <TestModeSection href={`${BOARD_PATH}?notices=all`} />
         </div>
       </main>
     </div>

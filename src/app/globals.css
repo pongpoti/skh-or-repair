@@ -2099,3 +2099,122 @@ dialog[open]::backdrop {
   color: var(--ink-2);
   cursor: not-allowed;
 }
+
+/*
+ * The hospitals' cards (components/place-picker.tsx; Pong, 26 Nov 2026): solid like the sign-in card, the hospital's
+ * picture across the top, the whole card one link that lifts a little under a pointer and presses in on a tap.
+ */
+.place-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 1.125rem;
+  box-shadow: 0 1px 2px rgb(41 29 20 / 0.05), 0 14px 34px -16px rgb(41 29 20 / 0.22);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.place-card:active {
+  transform: scale(0.985);
+}
+@media (hover: hover) {
+  .place-card:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 1px 2px rgb(41 29 20 / 0.05), 0 20px 40px -16px rgb(41 29 20 / 0.3);
+    transform: translateY(-2px);
+  }
+  .place-card:hover .place-go {
+    background: var(--brand);
+    color: #fff;
+  }
+}
+.place-card:focus-visible {
+  outline-offset: 3px;
+}
+/* The picture: 2:1, a little shorter on a small phone so both cards fit without scrolling. */
+.place-art {
+  display: block;
+  aspect-ratio: 2 / 1;
+  border-bottom: 1px solid var(--line);
+}
+@media (max-height: 700px) and (max-width: 639px) {
+  .place-art {
+    aspect-ratio: 5 / 2;
+  }
+}
+.place-go {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  background: var(--brand-tint);
+  color: var(--brand);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+/*
+ * รพ.ท่าฉลอม's OR suite (components/tha-chalom-plan.tsx), in Pong's drawing's colours, which are the board's plan's. The
+ * only letter-spacing is on "OR": Latin, which iPhone spaces correctly (never on Thai SVG text).
+ */
+.tcp-frame { fill: var(--fp-floor); stroke: var(--fp-wall-outer); stroke-width: 3; }
+.tcp-corridor { fill: var(--fp-outer); }
+.tcp-room { fill: var(--fp-support); stroke: var(--fp-wall); stroke-width: 1.5; }
+.tcp-grid-box { fill: url(#tcp-grid); stroke: var(--fp-detail); stroke-width: 1.5; }
+/* An OR takes the day's department colour (--tcp-fill) when the page has a day; Pong's brown otherwise. */
+.tcp-or-shape { fill: var(--tcp-fill, var(--brand-top)); stroke: var(--fp-wall); stroke-width: 3; }
+.tcp-or-ring { fill: #fff; }
+.tcp-or.is-open .tcp-or-ring,
+.tcp-or.is-free .tcp-or-ring { stroke: var(--fp-wall); stroke-width: 2; }
+.tcp-or.is-closed .tcp-or-shape { stroke: var(--fp-closed-wall); }
+.tcp-or.is-closed .tcp-or-ring { fill: var(--fp-closed-badge); stroke: var(--fp-closed-wall); stroke-width: 2; }
+.tcp-or.is-closed .tcp-or-num { fill: var(--fp-closed-ink); }
+/* The department's short label (ORTHO, VAS): Latin capitals, so a little spacing is safe. */
+.tcp-or-dept {
+  font: 700 24px var(--font-inter), var(--font-thai), system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+  letter-spacing: 0.5px;
+}
+/* ว่าง and ปรับปรุง: Thai, so no letter-spacing. */
+.tcp-or-thai {
+  fill: var(--fp-muted);
+  font: 700 23px var(--font-thai), var(--font-inter), system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.tcp-or-thai.tcp-closed-text { fill: var(--fp-closed-ink); }
+.tcp-or-num {
+  fill: var(--ink);
+  font: 700 34px var(--font-inter), var(--font-thai), system-ui, sans-serif;
+  text-anchor: middle;
+}
+.tcp-or-label {
+  fill: var(--fp-floor);
+  font: 700 22px var(--font-inter), var(--font-thai), system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+  letter-spacing: 1px;
+}
+
+/*
+ * รพ.ท่าฉลอม's list of rooms (components/tha-chalom-board.tsx): under the plan on a phone, on the page's surface with a
+ * line above it; from 1024px the glass card รพ.สมุทรสาคร's board has its list of open rooms on.
+ */
+.tc-rooms {
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 1024px) {
+  .tc-rooms {
+    background: var(--glass);
+    border: 1px solid var(--glass-edge);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md), var(--highlight);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+  }
+}

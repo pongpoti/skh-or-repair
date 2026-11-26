@@ -5,6 +5,7 @@ import { ProfileAvatar } from "@/components/profile-avatar";
 import { SignOutButton } from "@/components/sign-out-button";
 import { avatarSrc, initialOf } from "@/lib/avatar";
 import { thaiDate } from "@/lib/days";
+import { BOARD_PATH } from "@/lib/places";
 
 /**
  * A gear, for the admin's settings (Pong, 15 Nov 2026: a gear, not people). Lucide "settings" (https://lucide.dev, ISC
@@ -35,6 +36,18 @@ const UPLOAD_ICON = (
   </svg>
 );
 
+/** Lucide "hospital" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): the hospitals' page. */
+const PLACES_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 6v4" />
+    <path d="M14 14h-4" />
+    <path d="M14 18h-4" />
+    <path d="M14 8h-4" />
+    <path d="M18 12h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2h2" />
+    <path d="M18 22V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v18" />
+  </svg>
+);
+
 const HEADING = "text-[0.9375rem] leading-6 font-bold text-ink min-[400px]:text-base sm:text-lg";
 
 /**
@@ -48,11 +61,12 @@ export function TopBar({
   image,
   date,
   eyebrow = "ตารางผ่าตัดวันนี้",
-  pathname = "/",
+  pathname = BOARD_PATH,
   showAccount = true,
   adminHref = null,
   uploadHref = null,
   helpHref = null,
+  placesHref = null,
   datePick = null,
 }: {
   /** The person's full name (claimed user, else the LINE name). */
@@ -75,6 +89,8 @@ export function TopBar({
   uploadHref?: string | null;
   /** The doctors' tutorial (วิธีใช้งาน), in the account menu of doctors and admins. */
   helpHref?: string | null;
+  /** The page that asks which hospital (เปลี่ยนโรงพยาบาล), first in the account menu. */
+  placesHref?: string | null;
   /** When given, the date is a button that opens a calendar to show the board of another day (BoardDatePicker). */
   datePick?: DatePick | null;
 }) {
@@ -162,69 +178,16 @@ export function TopBar({
           </Link>
         ) : null}
         {showAccount ? (
-          <>
-            {/* A popover, so a tap outside or Escape closes it without any script. */}
-            <button
-              type="button"
-              popoverTarget="account-menu"
-              aria-label={`บัญชี ${name}`}
-              data-testid="user-menu"
-              className="flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full sm:pr-3 sm:pl-1 sm:hover:bg-white/70"
-            >
-              <ProfileAvatar src={src} initial={initial} />
-              <span className="hidden max-w-56 truncate text-sm font-medium text-ink-2 sm:block" data-testid="user-name">
-                {name}
-              </span>
-            </button>
-            <div
-              id="account-menu"
-              popover="auto"
-              data-testid="account-menu"
-              className="menu fixed inset-auto top-[calc(max(0.5rem,env(safe-area-inset-top))+3.5rem)] right-4 sm:right-[max(1.5rem,calc((100vw-120rem)/2+1.5rem))] m-0 w-[min(18rem,calc(100vw-2rem))] p-2 sm:top-[calc(max(0.625rem,env(safe-area-inset-top))+3.75rem)]"
-            >
-              <div className="flex items-center gap-3 px-2 pt-1.5 pb-3">
-                <ProfileAvatar src={src} initial={initial} size={40} />
-                <div className="min-w-0">
-                  <p className="text-sm leading-snug font-semibold break-words text-ink" data-testid="account-name">
-                    {name}
-                  </p>
-                  {role ? (
-                    <p className="text-xs leading-snug text-ink-2" data-testid="account-role">
-                      {role}
-                    </p>
-                  ) : null}
-                  {phone ? (
-                    // The whole number, never cut off: it is what the session is bound to.
-                    <p className="text-xs leading-snug whitespace-nowrap text-muted tabular-nums" data-testid="account-phone">
-                      {phone}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              {uploadHref ? (
-                <Link href={uploadHref} className="btn btn-ghost mb-2 w-full" data-testid="account-upload-link">
-                  {UPLOAD_ICON}
-                  อัปโหลดตาราง
-                </Link>
-              ) : null}
-              {adminHref ? (
-                <Link href={adminHref} className="btn btn-ghost mb-2 w-full" data-testid="account-admin-link">
-                  {ADMIN_ICON}
-                  จัดการระบบ
-                </Link>
-              ) : null}
-              {helpHref ? (
-                <Link href={helpHref} className="btn btn-ghost mb-2 w-full" data-testid="account-help-link">
-                  {HELP_ICON}
-                  วิธีใช้งาน
-                </Link>
-              ) : null}
-              <SignOutButton showLabel />
-            </div>
-            <div className="no-popover-only shrink-0">
-              <SignOutButton />
-            </div>
-          </>
+          <AccountMenu
+            name={name}
+            role={role}
+            phone={phone}
+            image={image}
+            uploadHref={uploadHref}
+            adminHref={adminHref}
+            helpHref={helpHref}
+            placesHref={placesHref}
+          />
         ) : (
           <span className="flex shrink-0 items-center gap-2">
             <ProfileAvatar src={src} initial={initial} />
@@ -233,5 +196,102 @@ export function TopBar({
         )}
       </div>
     </header>
+  );
+}
+
+/**
+ * The avatar and its account menu (a popover, so a tap outside or Escape closes it without any script): who is signed
+ * in, the pages the person may open, and sign-out. The board's bar and the hospitals' pages share it.
+ */
+export function AccountMenu({
+  name,
+  role = null,
+  phone,
+  image,
+  uploadHref = null,
+  adminHref = null,
+  helpHref = null,
+  placesHref = null,
+}: {
+  name: string;
+  role?: string | null;
+  phone?: string;
+  image?: string | null;
+  uploadHref?: string | null;
+  adminHref?: string | null;
+  helpHref?: string | null;
+  placesHref?: string | null;
+}) {
+  const src = avatarSrc(image);
+  const initial = initialOf(name);
+  return (
+    <>
+      <button
+        type="button"
+        popoverTarget="account-menu"
+        aria-label={`บัญชี ${name}`}
+        data-testid="user-menu"
+        className="flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full sm:pr-3 sm:pl-1 sm:hover:bg-white/70"
+      >
+        <ProfileAvatar src={src} initial={initial} />
+        <span className="hidden max-w-56 truncate text-sm font-medium text-ink-2 sm:block" data-testid="user-name">
+          {name}
+        </span>
+      </button>
+      <div
+        id="account-menu"
+        popover="auto"
+        data-testid="account-menu"
+        className="menu fixed inset-auto top-[calc(max(0.5rem,env(safe-area-inset-top))+3.5rem)] right-4 sm:right-[max(1.5rem,calc((100vw-120rem)/2+1.5rem))] m-0 w-[min(18rem,calc(100vw-2rem))] p-2 sm:top-[calc(max(0.625rem,env(safe-area-inset-top))+3.75rem)]"
+      >
+        <div className="flex items-center gap-3 px-2 pt-1.5 pb-3">
+          <ProfileAvatar src={src} initial={initial} size={40} />
+          <div className="min-w-0">
+            <p className="text-sm leading-snug font-semibold break-words text-ink" data-testid="account-name">
+              {name}
+            </p>
+            {role ? (
+              <p className="text-xs leading-snug text-ink-2" data-testid="account-role">
+                {role}
+              </p>
+            ) : null}
+            {phone ? (
+              // The whole number, never cut off: it is what the session is bound to.
+              <p className="text-xs leading-snug whitespace-nowrap text-muted tabular-nums" data-testid="account-phone">
+                {phone}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        {placesHref ? (
+          <Link href={placesHref} className="btn btn-ghost mb-2 w-full" data-testid="account-places-link">
+            {PLACES_ICON}
+            เปลี่ยนโรงพยาบาล
+          </Link>
+        ) : null}
+        {uploadHref ? (
+          <Link href={uploadHref} className="btn btn-ghost mb-2 w-full" data-testid="account-upload-link">
+            {UPLOAD_ICON}
+            อัปโหลดตาราง
+          </Link>
+        ) : null}
+        {adminHref ? (
+          <Link href={adminHref} className="btn btn-ghost mb-2 w-full" data-testid="account-admin-link">
+            {ADMIN_ICON}
+            จัดการระบบ
+          </Link>
+        ) : null}
+        {helpHref ? (
+          <Link href={helpHref} className="btn btn-ghost mb-2 w-full" data-testid="account-help-link">
+            {HELP_ICON}
+            วิธีใช้งาน
+          </Link>
+        ) : null}
+        <SignOutButton showLabel />
+      </div>
+      <div className="no-popover-only shrink-0">
+        <SignOutButton />
+      </div>
+    </>
   );
 }

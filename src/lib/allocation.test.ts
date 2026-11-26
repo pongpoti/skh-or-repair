@@ -167,8 +167,8 @@ test("keeps the plan labels short", () => {
 
 test("uses the meaning-based department colours approved on 14 Nov 2026", () => {
   const list = {
-    GENSX: "#1E7B3C", SCOPE: "#6B7016", VASCULAR: "#2E4FA8", ORTHO: "#455A64", OBGYN: "#C2185B", EYE: "#0277BD",
-    URO: "#9A6B00", PLASTIC: "#A85C52", ENT: "#00838F", NEPHRO: "#6B4A2E", CHEST: "#5867B8", PEDSX: "#C25400",
+    GENSX: "#1E7B3C", SCOPE: "#6B7016", VASCULAR: "#2E4FA8", ORTHO: "#455A64", OBGYN: "#C2188F", EYE: "#0277BD",
+    URO: "#9A6B00", PLASTIC: "#A85C52", ENT: "#006064", NEPHRO: "#6B4A2E", CHEST: "#5867B8", PEDSX: "#C25400",
     NEURO: "#5E35B1", CVT: "#931A32", MAXILLO: "#8A5A83", INFECT: "#8E3E12", EMER: "#D32F2F", MINOR: "#5F7380",
     MIXED: "#5C5650", UNK: "#7A746C",
   };

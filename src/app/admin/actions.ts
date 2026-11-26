@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { bangkokParts } from "@/lib/days";
 import { HOLIDAYS_UNAVAILABLE, holidaysBetween } from "@/lib/holidays";
 import { PAST_LIMITS, pastLists, splitByDay } from "@/lib/past-lists";
+import { BOARD_PATH } from "@/lib/places";
 import { getRepairPeriods, saveRepairPeriods } from "@/lib/repair-store";
 import { addMx, removeMx, userIdOf } from "@/lib/roles";
 import { cleanFileName, errorKind } from "@/lib/safe-text";
@@ -49,7 +50,7 @@ async function signedInAdmin() {
  * this page. Revalidating them from the action shows the change at once to whoever opens or refreshes them.
  */
 function refreshPages(): void {
-  for (const path of ["/", "/upload", "/admin"]) revalidatePath(path);
+  for (const path of [BOARD_PATH, "/upload", "/admin"]) revalidatePath(path);
 }
 
 /**
