@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CLOSED_TEXT,
-  openRoomCount,
+  openRooms,
   roomDayText,
   THA_CHALOM_ROOM_LIST,
   thaChalomDay,
@@ -100,9 +100,9 @@ test("a room's day in words, and how many rooms are open", () => {
     "OR 4 · เช้า จักษุ · บ่าย โสต ศอ นาสิก",
     "ห้อง Scope · ว่าง",
   ]);
-  assert.equal(openRoomCount(wednesday), 3);
-  assert.equal(openRoomCount(thaChalomDay("2026-12-01")), 4);
-  assert.equal(openRoomCount(thaChalomDay("2026-12-04")), 2);
+  assert.deepEqual(openRooms(wednesday).map((entry) => entry.room.id), ["or-1", "or-2", "or-4"]);
+  assert.deepEqual(openRooms(thaChalomDay("2026-12-01")).map((entry) => entry.room.id), ["or-1", "or-2", "or-4", "scope"]);
+  assert.deepEqual(openRooms(thaChalomDay("2026-12-04")).map((entry) => entry.room.id), ["or-2", "or-4"]);
 });
 
 test("the picker offers today to 60 days ahead, workdays only", () => {

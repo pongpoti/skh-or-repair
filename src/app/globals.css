@@ -2101,63 +2101,6 @@ dialog[open]::backdrop {
 }
 
 /*
- * The hospitals' cards (components/place-picker.tsx; Pong, 26 Nov 2026): solid like the sign-in card, the hospital's
- * picture across the top, the whole card one link that lifts a little under a pointer and presses in on a tap.
- */
-.place-card {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 0.875rem;
-  box-shadow: 0 1px 2px rgb(41 29 20 / 0.05), 0 10px 24px -14px rgb(41 29 20 / 0.22);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-.place-card:active {
-  transform: scale(0.985);
-}
-@media (hover: hover) {
-  .place-card:hover {
-    border-color: var(--line-strong);
-    box-shadow: 0 1px 2px rgb(41 29 20 / 0.05), 0 20px 40px -16px rgb(41 29 20 / 0.3);
-    transform: translateY(-2px);
-  }
-  .place-card:hover .place-go {
-    background: var(--brand);
-    color: #fff;
-  }
-}
-.place-card:focus-visible {
-  outline-offset: 3px;
-}
-/* The picture: 2:1, the whole drawing, on every screen. */
-.place-art {
-  display: block;
-  aspect-ratio: 2 / 1;
-  border-bottom: 1px solid var(--line);
-}
-.place-go {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 999px;
-  background: var(--brand-tint);
-  color: var(--brand);
-  transition: background 0.15s ease, color 0.15s ease;
-}
-/* On the narrowest phones (320px) the name needs the arrow's room. */
-@media (max-width: 359px) {
-  .place-go {
-    display: none;
-  }
-}
-
-/*
  * The hospitals' switch in the boards' bar (components/place-tabs.tsx; Pong, 26 Nov 2026: "seamless navigation between
  * 2 places"): two halves on a sunk track, the board's own hospital raised like a card. A tapped name lights at once while
  * its board loads.
@@ -2260,21 +2203,3 @@ a.place-tab:has(.place-tab-label[data-pending]) {
   letter-spacing: 1px;
 }
 
-/*
- * รพ.ท่าฉลอม's list of rooms (components/tha-chalom-board.tsx): under the plan on a phone, on the page's surface with a
- * line above it; from 1024px the glass card รพ.สมุทรสาคร's board has its list of open rooms on.
- */
-.tc-rooms {
-  background: var(--surface);
-  border-top: 1px solid var(--line);
-}
-@media (min-width: 1024px) {
-  .tc-rooms {
-    background: var(--glass);
-    border: 1px solid var(--glass-edge);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-md), var(--highlight);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-  }
-}

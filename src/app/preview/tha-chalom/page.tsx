@@ -8,9 +8,9 @@ export const dynamic = "force-dynamic";
 
 /**
  * รพ.ท่าฉลอม's board without signing in, in development only, as an invented nurse sees it: today's day by the real clock
- * (no holidays), or ?date=YYYY-MM-DD within the next 60 days.
+ * (no holidays), or ?date=YYYY-MM-DD within the next 60 days. ?admin=1 shows the bar as an admin sees it, as on /preview.
  */
-export default async function PreviewThaChalomPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
+export default async function PreviewThaChalomPage({ searchParams }: { searchParams: Promise<{ date?: string; admin?: string }> }) {
   if (process.env.NODE_ENV !== "development") notFound();
   const params = await searchParams;
   const day = boardDayAt(new Date(), []);
@@ -27,7 +27,8 @@ export default async function PreviewThaChalomPage({ searchParams }: { searchPar
         phone="081-234-5678"
         image={null}
         pathname="/preview/tha-chalom"
-        placesHref="/preview/places"
+        adminHref={params.admin ? "/preview/admin" : null}
+        uploadHref={params.admin ? "/preview/upload" : null}
         datePick={datePick}
         place={{ current: "tha-chalom", hrefs: { skh: "/preview", "tha-chalom": "/preview/tha-chalom" } }}
       />
