@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BOARD_PATH, movedBoardHref, PLACES, PLACES_PATH, THA_CHALOM_PATH } from "./places.ts";
+import { BOARD_PATH, movedBoardHref, placeHref, PLACES, PLACES_PATH, THA_CHALOM_PATH } from "./places.ts";
 
 test("the two hospitals, รพ.สมุทรสาคร's board first (Pong, 26 Nov 2026)", () => {
   assert.deepEqual(
@@ -27,4 +27,11 @@ test("an address of the board from before goes on to /skh with its query; the pl
   assert.equal(movedBoardHref({ room: ["or-1", "or-2"] }), "/skh?room=or-1&room=or-2", "a repeated key stays repeated");
   assert.equal(movedBoardHref({ room: "a&b=c" }), "/skh?room=a%26b%3Dc", "values are encoded");
   assert.equal(movedBoardHref({ room: "" }), "/skh?room=", "an empty room is still the board's");
+});
+
+test("switching hospital keeps a picked day, and otherwise opens the other board's own day", () => {
+  assert.equal(placeHref(THA_CHALOM_PATH, "2026-12-03"), "/tha-chalom?date=2026-12-03");
+  assert.equal(placeHref(BOARD_PATH, "2026-12-03"), "/skh?date=2026-12-03");
+  assert.equal(placeHref(BOARD_PATH, null), "/skh");
+  assert.equal(placeHref(THA_CHALOM_PATH, null), "/tha-chalom");
 });

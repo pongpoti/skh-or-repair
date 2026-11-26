@@ -6,7 +6,6 @@ import {
   roomDayText,
   THA_CHALOM_ROOM_LIST,
   thaChalomDay,
-  thaChalomEyebrow,
   thaChalomPickedDay,
   thaChalomPickRange,
   type ThaChalomRoomDay,
@@ -118,9 +117,4 @@ test("the picker offers today to 60 days ahead, workdays only", () => {
   assert.equal(thaChalomPickedDay("2026-13-01", "2026-11-26", holidays), null);
   assert.equal(thaChalomPickedDay(["2026-11-27"], "2026-11-26", holidays), null);
   assert.equal(thaChalomPickedDay(undefined, "2026-11-26", holidays), null);
-});
-
-test("the bar names the hospital before the day", () => {
-  assert.equal(thaChalomEyebrow("today"), "รพ.ท่าฉลอม · ตารางผ่าตัดวันนี้");
-  assert.equal(thaChalomEyebrow("tomorrow"), "รพ.ท่าฉลอม · ตารางผ่าตัดถัดไป");
 });

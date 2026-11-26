@@ -1,6 +1,6 @@
 import { addDays } from "./days.ts";
 import { DEPARTMENTS, weekdayIndex, weekOfMonth, type Department, type DeptCode } from "./allocation.ts";
-import { boardEyebrow, PICK_AHEAD_DAYS, type BoardDayRelation } from "./board-day.ts";
+import { PICK_AHEAD_DAYS } from "./board-day.ts";
 import { isWorkday, type Holiday } from "./holidays.ts";
 
 /**
@@ -141,9 +141,4 @@ export function thaChalomPickedDay(value: unknown, today: string, holidays: read
   const { min, max } = thaChalomPickRange(today);
   if (value < min || value > max) return null;
   return isWorkday(value, holidays) ? value : null;
-}
-
-/** The top bar's line above the date: the hospital, then how the day stands to today (ตารางผ่าตัดวันนี้, ถัดไป). */
-export function thaChalomEyebrow(relation: BoardDayRelation): string {
-  return `รพ.ท่าฉลอม · ${boardEyebrow(relation)}`;
 }

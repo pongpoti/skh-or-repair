@@ -153,6 +153,7 @@ export default async function PreviewPage({
         // ?admin=1 shows the bar as an admin sees it.
         adminHref={params.admin ? "/preview/admin" : null}
         uploadHref={params.mx || params.admin ? "/upload" : null}
+        place={{ current: "skh", hrefs: { skh: "/preview", "tha-chalom": "/preview/tha-chalom" } }}
       />
       <SuiteBoard
         board={board}

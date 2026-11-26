@@ -2110,8 +2110,8 @@ dialog[open]::backdrop {
   overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 1.125rem;
-  box-shadow: 0 1px 2px rgb(41 29 20 / 0.05), 0 14px 34px -16px rgb(41 29 20 / 0.22);
+  border-radius: 0.875rem;
+  box-shadow: 0 1px 2px rgb(41 29 20 / 0.05), 0 10px 24px -14px rgb(41 29 20 / 0.22);
   transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
   -webkit-tap-highlight-color: transparent;
 }
@@ -2132,28 +2132,88 @@ dialog[open]::backdrop {
 .place-card:focus-visible {
   outline-offset: 3px;
 }
-/* The picture: 2:1, a little shorter on a small phone so both cards fit without scrolling. */
+/* The picture: 2:1, the whole drawing, on every screen. */
 .place-art {
   display: block;
   aspect-ratio: 2 / 1;
   border-bottom: 1px solid var(--line);
-}
-@media (max-height: 700px) and (max-width: 639px) {
-  .place-art {
-    aspect-ratio: 5 / 2;
-  }
 }
 .place-go {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: 999px;
   background: var(--brand-tint);
   color: var(--brand);
   transition: background 0.15s ease, color 0.15s ease;
+}
+/* On the narrowest phones (320px) the name needs the arrow's room. */
+@media (max-width: 359px) {
+  .place-go {
+    display: none;
+  }
+}
+
+/*
+ * The hospitals' switch in the boards' bar (components/place-tabs.tsx; Pong, 26 Nov 2026: "seamless navigation between
+ * 2 places"): two halves on a sunk track, the board's own hospital raised like a card. A tapped name lights at once while
+ * its board loads.
+ */
+.place-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 0.75rem;
+  background: rgb(41 29 20 / 0.06);
+}
+.place-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 2.375rem;
+  padding: 0 1rem;
+  border-radius: 0.5625rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 600;
+  color: var(--ink-3);
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.place-tab[aria-current="page"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgb(41 29 20 / 0.12);
+}
+@media (hover: hover) {
+  a.place-tab:hover {
+    color: var(--ink);
+    background: rgb(255 255 255 / 0.55);
+  }
+}
+a.place-tab:active,
+a.place-tab:has(.place-tab-label[data-pending]) {
+  color: var(--ink);
+  background: rgb(255 255 255 / 0.75);
+}
+.place-tab-label[data-pending] {
+  animation: place-tab-pending 0.9s ease-in-out infinite alternate;
+}
+@keyframes place-tab-pending {
+  to {
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .place-tab-label[data-pending] {
+    animation: none;
+  }
 }
 
 /*

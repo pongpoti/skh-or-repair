@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { ThaChalomBoard } from "@/components/tha-chalom-board";
 import { TopBar } from "@/components/top-bar";
-import { boardDayAt, relationTo } from "@/lib/board-day";
-import { thaChalomEyebrow, thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedule";
+import { boardDayAt, boardEyebrow, relationTo } from "@/lib/board-day";
+import { thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export default async function PreviewThaChalomPage({ searchParams }: { searchPar
     <div className="flex h-dvh flex-col overflow-hidden">
       <TopBar
         date={date}
-        eyebrow={thaChalomEyebrow(relationTo(date, day.today))}
+        eyebrow={boardEyebrow(relationTo(date, day.today))}
         name="ปราณี สายบุญ"
         role="พยาบาล · ห้องผ่าตัด"
         phone="081-234-5678"
@@ -29,6 +29,7 @@ export default async function PreviewThaChalomPage({ searchParams }: { searchPar
         pathname="/preview/tha-chalom"
         placesHref="/preview/places"
         datePick={datePick}
+        place={{ current: "tha-chalom", hrefs: { skh: "/preview", "tha-chalom": "/preview/tha-chalom" } }}
       />
       <ThaChalomBoard date={date} pick={datePick} pathname="/preview/tha-chalom" />
     </div>
