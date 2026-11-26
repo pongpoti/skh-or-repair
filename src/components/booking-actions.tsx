@@ -1,13 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useTransition, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, useTransition, type RefObject } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
 import { InlineStatus } from "@/components/inline-status";
-import { bookedRoom, bookingState, DRESSING_ROOM_NAME, editClosesOn, NOTE_ONLY_TEXT, scrubTag, STARTED_TEXT, UNDER_WAY, type AddedCase } from "@/lib/added-cases";
+import { bookedRoom, bookingState, editClosesOn, NO_OPERATION_LABEL, NOTE_ONLY_TEXT, STARTED_TEXT, UNDER_WAY, type AddedCase } from "@/lib/added-cases";
 import type { BoardRow } from "@/lib/board-rows";
 import { thaiDate } from "@/lib/days";
-import { displayHn } from "@/lib/hn";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, roomLabel } from "@/lib/rooms";
@@ -26,10 +25,13 @@ export type OwnBookings = {
   /** The holidays the 15:00 cut-off steps over, for when a booking closes (editClosesOn). */
   holidays: readonly Holiday[];
   periods: RepairPeriods;
-  /** Opens the booking form on this booking: its details, or its day (a move: the calendar opens). */
-  onEdit: (booking: AddedCase, focus: "details" | "date") => void;
+  /**
+   * Opens the booking form on this booking: its details, or its day (a move: the calendar opens). `back` brings the
+   * sheet it came from back (the form's ย้อนกลับ).
+   */
+  onEdit: (booking: AddedCase, focus: "details" | "date", back?: () => void) => void;
   /** Opens the booking form for a new booking of the same patient on another day (book again). */
-  onAgain: (booking: AddedCase) => void;
+  onAgain: (booking: AddedCase, back?: () => void) => void;
   onRemove: (id: string) => Promise<CaseResult>;
   /** Books a cancelled booking again in its old place in the queue, within minutes of the cancel (lib/cases.ts restoreCase). */
   onRestore: (id: string) => Promise<CaseResult>;
@@ -41,6 +43,13 @@ const SETTLE_MS = 350;
 /** The bottom sheet on a phone, a card in the middle from 640px (a computer, a tablet), over the room and its card. */
 const SHEET =
   "m-auto max-h-[calc(100dvh-1.5rem)] w-[min(27rem,calc(100%-1.5rem))] overflow-y-auto overscroll-contain rounded-[18px] border border-line bg-surface p-0 text-ink shadow-[0_24px_60px_rgb(41_29_20/0.3)] backdrop:bg-[rgb(36_28_22/0.35)] backdrop:backdrop-blur-[2px] max-sm:mb-0 max-sm:max-h-[calc(100dvh-2.5rem)] max-sm:w-full max-sm:max-w-full max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0";
+
+/** A left chevron: ย้อนกลับ, in the sheet's confirm step and in the booking form an action opened. */
+export const BACK_ICON = (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="m15 18-6-6 6-6" />
+  </svg>
+);
 
 /** A pencil over a line (Lucide "pen-line"): the row's จัดการ button. */
 export function ManageIcon({ size }: { size: number }) {
@@ -97,7 +106,6 @@ function ActionIcon({ name }: { name: keyof typeof ICONS }) {
 function Action({
   icon,
   label,
-  hint,
   onClick,
   danger = false,
   disabled = false,
@@ -105,7 +113,6 @@ function Action({
 }: {
   icon: keyof typeof ICONS;
   label: string;
-  hint?: string;
   onClick: () => void;
   danger?: boolean;
   disabled?: boolean;
@@ -115,10 +122,7 @@ function Action({
     <li>
       <button type="button" className={`booking-action${danger ? " booking-action-danger" : ""}`} onClick={onClick} disabled={disabled} data-testid={testId}>
         <ActionIcon name={icon} />
-        <span className="min-w-0 flex-1">
-          <span className="block text-base leading-6 font-semibold">{label}</span>
-          {hint ? <span className="block text-[0.8125rem] leading-5 text-ink-3">{hint}</span> : null}
-        </span>
+        <span className="min-w-0 flex-1 text-base leading-6 font-semibold">{label}</span>
       </button>
     </li>
   );
@@ -136,16 +140,18 @@ export function editDeadline(date: string, today: string, holidays: readonly Hol
 
 /**
  * The doctor's own booking with what they can do with it, opened by the จัดการ button on its row (components/case-list.tsx;
- * the judges' pick of three designs, 25 Nov 2026): a bottom sheet on a phone and a card in the middle on a computer, over
- * the room. It names the case (the room, its place in the queue and the day; the operation, the patient and the HN, the
- * room choice, the booking's time, the note), says until when it can change, then lists the actions:
+ * the judges' pick of three designs, 25 Nov 2026; made shorter on 26 Nov: "make it more concise. add back button"): a
+ * bottom sheet on a phone and a card in the middle on a computer, over the room. It names the case (its operation, then
+ * the room, its place in the queue and the day), says until when it can change, then lists the actions, one line each:
  *
- * - แก้ไขรายละเอียด: the booking form on this booking (the operation, HN, room, note). After 15:00 the day before, only the
- *   note (the HOSxP list is MX's by then).
+ * - แก้ไข: the booking form on this booking (the operation, HN, room, note). After 15:00 the day before, only the note
+ *   (แก้ไขหมายเหตุ; the HOSxP list is MX's by then).
  * - เลื่อนวัน: the same form with its calendar open. A new day puts the case at the back of that day's queue.
  * - จองซ้ำวันอื่น: a new booking of the same patient, room and note on another day (serial dressings).
- * - ยกเลิกจอง: apart from the others, with a step that asks again (ไม่ยกเลิก is the default), then เลิกทำ for a few minutes,
- *   which books it back in its old place.
+ * - ยกเลิกจอง: apart from the others, with a step that asks again (its back arrow, in focus, keeps the booking), then
+ *   เลิกทำ for a few minutes, which books it back in its old place.
+ *
+ * The form an action opens has a back arrow that brings this sheet back (`onReopen`).
  *
  * A case HOSxP says is under way or over keeps only จองซ้ำวันอื่น. Taps in the first moment of a step are ignored. The
  * sheet keeps the booking it opened with should a refresh take its row away (the cancel itself, or another device).
@@ -157,6 +163,7 @@ export function BookingSheet({
   own,
   opened,
   onClosed,
+  onReopen,
 }: {
   dialogRef: RefObject<HTMLDialogElement | null>;
   row: BoardRow | null;
@@ -165,6 +172,8 @@ export function BookingSheet({
   /** A new value each time the sheet opens, which starts it at its list of actions. */
   opened: number;
   onClosed: () => void;
+  /** Opens the sheet again on its booking, when it is still on the room's list: the form's back arrow. */
+  onReopen: () => void;
 }) {
   const router = useRouter();
   const [step, setStep] = useState<"menu" | "confirm" | "cancelled">("menu");
@@ -173,6 +182,9 @@ export function BookingSheet({
   const [pending, startTransition] = useTransition();
   const shownAt = useRef(0);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  // Its own id: the room's sheet and its full screen card each have a list, so two sheets live on the page at once, and
+  // the closed one keeps the heading of the booking it last showed.
+  const titleId = useId();
   const restoreRef = useRef<HTMLButtonElement>(null);
   const [prevOpened, setPrevOpened] = useState(opened);
   if (prevOpened !== opened) {
@@ -188,7 +200,7 @@ export function BookingSheet({
   const settled = () => performance.now() - shownAt.current >= SETTLE_MS;
   // A step that takes the focused button away (ไม่ยกเลิก, ยืนยันยกเลิก, เลิกทำ), or a wait that disables it, leaves the
   // focus inside the sheet: on เลิกทำ once a cancel is done (the one thing worth doing then), else on the sheet's title.
-  // The confirm step's ไม่ยกเลิก takes it itself (autoFocus); an opening sheet gets it from showModal.
+  // The confirm step's back arrow takes it itself (autoFocus); an opening sheet gets it from showModal.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog?.open || pending) return;
@@ -213,11 +225,11 @@ export function BookingSheet({
     run();
   }
 
-  function openForm(run: (item: AddedCase) => void) {
+  function openForm(run: (item: AddedCase, back: () => void) => void) {
     act(() => {
       if (!booking) return;
       close();
-      run(booking);
+      run(booking, onReopen);
     });
   }
 
@@ -266,7 +278,7 @@ export function BookingSheet({
   return (
     <dialog
       ref={dialogRef}
-      aria-labelledby="booking-sheet-title"
+      aria-labelledby={titleId}
       className={SHEET}
       onCancel={(event) => pending && event.preventDefault()}
       onClose={onClosed}
@@ -276,7 +288,9 @@ export function BookingSheet({
       onClick={(event) => {
         const outside = pressedOutside.current && event.target === event.currentTarget;
         pressedOutside.current = false;
-        if (outside && !pending) close();
+        // Not in the first moment either: the second tap of a double tap on what opened it (a row's จัดการ, the form's
+        // back arrow) lands on the backdrop.
+        if (outside && !pending && settled()) close();
       }}
       data-testid="booking-sheet"
       data-step={step}
@@ -284,10 +298,25 @@ export function BookingSheet({
       {booking ? (
         <div className="px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] min-[360px]:px-5 sm:pt-5 sm:pb-5">
           <span aria-hidden className="mx-auto mb-1.5 block h-1 w-10 rounded-full bg-line-strong sm:hidden" />
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 pt-1">
-              <h2 ref={titleRef} tabIndex={-1} id="booking-sheet-title" className="text-lg leading-snug font-bold text-ink outline-none">
-                {step === "confirm" ? "ยกเลิกการจองนี้?" : "การจองของฉัน"}
+          <div className="flex items-start gap-1">
+            {step === "confirm" ? (
+              // Back to the actions, keeping the booking: the safe answer, in focus.
+              <button
+                type="button"
+                className="btn btn-ghost -ml-2 size-11 min-h-0 shrink-0 rounded-full p-0"
+                aria-label="ย้อนกลับ"
+                title="ย้อนกลับ"
+                autoFocus
+                onClick={() => act(() => setStep("menu"))}
+                disabled={pending}
+                data-testid="booking-back"
+              >
+                {BACK_ICON}
+              </button>
+            ) : null}
+            <div className="min-w-0 flex-1 pt-1.5">
+              <h2 ref={titleRef} tabIndex={-1} id={titleId} className="line-clamp-2 text-lg leading-snug font-bold text-ink outline-none" data-testid="booking-sheet-title">
+                {step === "confirm" ? "ยกเลิกการจองนี้?" : (row?.procedure ?? booking.operation) || NO_OPERATION_LABEL}
               </h2>
               <p className="text-sm text-ink-2" data-testid="booking-sheet-where">
                 {heading}
@@ -295,10 +324,12 @@ export function BookingSheet({
             </div>
             <button
               type="button"
-              className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
+              className="btn btn-ghost -mr-2 size-11 min-h-0 shrink-0 rounded-full p-0"
               aria-label="ปิด"
+              title="ปิด"
               disabled={pending}
               onClick={close}
+              data-testid="booking-sheet-close"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M18 6 6 18" />
@@ -307,102 +338,46 @@ export function BookingSheet({
             </button>
           </div>
 
-          <dl className="case-note-details mt-3" data-testid="booking-sheet-details">
-            <dt>การผ่าตัด</dt>
-            <dd className="font-semibold text-ink">{row?.procedure ?? booking.operation}</dd>
-            {row?.patientName ? (
-              <>
-                <dt>ผู้ป่วย</dt>
-                <dd>{row.patientName}</dd>
-              </>
-            ) : null}
-            {booking.hn ? (
-              <>
-                <dt>HN</dt>
-                <dd className="tabular-nums">{displayHn(booking.hn)}</dd>
-              </>
-            ) : null}
-            {where?.dressing ? (
-              <>
-                <dt>ห้อง</dt>
-                <dd>
-                  {DRESSING_ROOM_NAME}
-                  {typeof booking.scrubDoes === "boolean" ? ` · ${scrubTag(booking.scrubDoes)}` : ""}
-                </dd>
-              </>
-            ) : null}
-            {row?.bookedAt ? (
-              <>
-                <dt>จองคิว</dt>
-                <dd className="tabular-nums">{row.bookedAt}</dd>
-              </>
-            ) : null}
-            {booking.note && step !== "confirm" ? (
-              <>
-                <dt>หมายเหตุ</dt>
-                <dd className="whitespace-pre-line">{booking.note}</dd>
-              </>
-            ) : null}
-          </dl>
-
           {step === "menu" ? (
             <>
+              <p className="mt-1 text-[0.8125rem] leading-5 text-ink-3" data-testid="booking-sheet-rule">
+                {underWay ? STARTED_TEXT : state === "open" ? editDeadline(booking.date, own.today, own.holidays) : NOTE_ONLY_TEXT}
+              </p>
               {done ? (
                 <InlineStatus tone="success" role="status" className="mt-3">
                   {done}
                 </InlineStatus>
               ) : null}
-              {underWay ? (
-                <p className="mt-3 text-[0.8125rem] leading-5 text-ink-3" data-testid="booking-sheet-rule">
-                  {STARTED_TEXT}
-                </p>
-              ) : (
-                <p className="mt-3 text-[0.8125rem] leading-5 text-ink-3" data-testid="booking-sheet-rule">
-                  {state === "open" ? editDeadline(booking.date, own.today, own.holidays) : NOTE_ONLY_TEXT}
-                </p>
-              )}
-              <ul className="booking-actions mt-2" data-testid="booking-actions">
+              <ul className="booking-actions mt-3" data-testid="booking-actions">
                 {underWay ? null : (
                   <>
                     <Action
                       icon="edit"
-                      label="แก้ไขรายละเอียด"
-                      hint={state === "open" ? "การผ่าตัด HN ห้อง หมายเหตุ" : "แก้ได้เฉพาะหมายเหตุ"}
-                      onClick={() => openForm((item) => own.onEdit(item, "details"))}
+                      label={state === "open" ? "แก้ไข" : "แก้ไขหมายเหตุ"}
+                      onClick={() => openForm((item, back) => own.onEdit(item, "details", back))}
                       disabled={pending}
                       testId="booking-edit"
                     />
                     <Action
                       icon="move"
                       label="เลื่อนวัน"
-                      hint="ต่อท้ายคิวของวันใหม่"
-                      onClick={() => openForm((item) => own.onEdit(item, "date"))}
+                      onClick={() => openForm((item, back) => own.onEdit(item, "date", back))}
                       disabled={pending}
                       testId="booking-move"
                     />
                   </>
                 )}
-                <Action
-                  icon="again"
-                  label="จองซ้ำวันอื่น"
-                  hint="ผู้ป่วยคนเดิม เช่น ล้างแผลซ้ำ"
-                  onClick={() => openForm(own.onAgain)}
-                  disabled={pending}
-                  testId="booking-again"
-                />
+                <Action icon="again" label="จองซ้ำวันอื่น" onClick={() => openForm(own.onAgain)} disabled={pending} testId="booking-again" />
               </ul>
               {underWay ? null : (
-                <ul className="booking-actions mt-4">
+                <ul className="booking-actions mt-2.5">
                   <Action icon="cancel" label="ยกเลิกจอง" onClick={() => act(() => setStep("confirm"))} danger disabled={pending} testId="booking-cancel" />
                 </ul>
               )}
-              <button type="button" className="btn btn-secondary mt-4 w-full" onClick={close} data-testid="booking-sheet-close">
-                ปิด
-              </button>
             </>
           ) : step === "confirm" ? (
             <>
-              <p className="mt-3 text-sm leading-6 text-ink-2" data-testid="booking-confirm-note">
+              <p className="mt-2 text-sm leading-6 text-ink-2" data-testid="booking-confirm-note">
                 {row?.source === "matched" ? "เคสนี้อยู่ในตาราง HOSxP แล้ว แจ้งห้องผ่าตัดด้วย" : "เลิกทำได้ภายใน 10 นาที"}
               </p>
               {error ? (
@@ -410,15 +385,9 @@ export function BookingSheet({
                   {error}
                 </InlineStatus>
               ) : null}
-              <div className="mt-4 flex flex-col gap-2">
-                <button type="button" className="btn btn-danger w-full" onClick={cancel} disabled={pending} aria-busy={pending} data-testid="booking-confirm">
-                  {pending ? "กำลังยกเลิก…" : "ยืนยันยกเลิก"}
-                </button>
-                {/* The safe answer is the default and the last, under the finger that tapped ยกเลิกจอง. */}
-                <button type="button" className="btn btn-secondary w-full" autoFocus onClick={() => act(() => setStep("menu"))} disabled={pending} data-testid="booking-keep">
-                  ไม่ยกเลิก
-                </button>
-              </div>
+              <button type="button" className="btn btn-danger mt-3 w-full" onClick={cancel} disabled={pending} aria-busy={pending} data-testid="booking-confirm">
+                {pending ? "กำลังยกเลิก…" : "ยืนยันยกเลิก"}
+              </button>
             </>
           ) : (
             <>
@@ -431,14 +400,9 @@ export function BookingSheet({
                   {done}
                 </InlineStatus>
               )}
-              <div className="mt-4 flex flex-col gap-2">
-                <button ref={restoreRef} type="button" className="btn btn-secondary w-full" onClick={restore} disabled={pending} aria-busy={pending} data-testid="booking-restore">
-                  {pending ? "กำลังจองคืน…" : "เลิกทำ จองคืนคิวเดิม"}
-                </button>
-                <button type="button" className="btn btn-primary w-full" onClick={close} disabled={pending} data-testid="booking-sheet-done">
-                  ปิด
-                </button>
-              </div>
+              <button ref={restoreRef} type="button" className="btn btn-secondary mt-3 w-full" onClick={restore} disabled={pending} aria-busy={pending} data-testid="booking-restore">
+                {pending ? "กำลังจองคืน…" : "เลิกทำ จองคืนคิวเดิม"}
+              </button>
             </>
           )}
         </div>

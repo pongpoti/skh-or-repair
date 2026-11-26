@@ -487,8 +487,8 @@ export function SuiteBoard({
             earliest: adding.earliest,
             holidays: adding.holidays,
             periods,
-            onEdit: (booking, focus) => setAddRequest({ mode: "edit", booking, focus }),
-            onAgain: (booking) => setAddRequest({ mode: "again", booking }),
+            onEdit: (booking, focus, back) => setAddRequest({ mode: "edit", booking, focus, back }),
+            onAgain: (booking, back) => setAddRequest({ mode: "again", booking, back }),
             onRemove: adding.onRemove,
             onRestore: adding.onRestore,
           }

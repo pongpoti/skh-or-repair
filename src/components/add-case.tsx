@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
+import { BACK_ICON } from "@/components/booking-actions";
 import { HnField } from "@/components/hn-field";
 import { InlineStatus } from "@/components/inline-status";
 import { ThaiDateField, type DayState } from "@/components/thai-date-field";
@@ -72,10 +73,11 @@ export type Doctor = { name: string; subtype: string | null };
  * (components/booking-actions.tsx): "edit" on that booking, its calendar open for a move (`focus: "date"`); "again", a
  * new booking of the same patient, room choice and note on another day.
  */
+/** `back`, from a row's จัดการ sheet: the form's back arrow closes it and opens that sheet again. */
 export type CaseRequest =
   | { mode: "new" }
-  | { mode: "edit"; booking: AddedCase; focus: "details" | "date" }
-  | { mode: "again"; booking: AddedCase };
+  | { mode: "edit"; booking: AddedCase; focus: "details" | "date"; back?: () => void }
+  | { mode: "again"; booking: AddedCase; back?: () => void };
 
 function DeptTag({ dept }: { dept: Department | null }) {
   // A little larger than it was, 12px and 13px from 400px wide (Pong, 15 Nov 2026: "slight increase txt size of dept
@@ -189,6 +191,8 @@ export function AddCase({
   const [mode, setMode] = useState<CaseRequest["mode"]>("new");
   // An edit opened to move the booking (เลื่อนวัน), which the title says.
   const [moving, setMoving] = useState(false);
+  // The back arrow of a form opened from a row's จัดการ sheet (CaseRequest `back`).
+  const [back, setBack] = useState<(() => void) | null>(null);
   const [editing, setEditing] = useState<AddedCase | null>(null);
   // Opens the calendar (a move): a new object each time.
   const [calendarOpen, setCalendarOpen] = useState<object | null>(null);
@@ -250,6 +254,8 @@ export function AddCase({
     const from = next.mode === "new" ? null : next.booking;
     const picked: RoomChoice = from ? bookedChoice(from, periods) : "dept";
     setMode(next.mode);
+    // Wrapped: a function given to a state setter is taken as an updater.
+    setBack(() => (next.mode === "new" ? null : (next.back ?? null)));
     setMoving(next.mode === "edit" && next.focus === "date");
     setEditing(next.mode === "edit" ? next.booking : null);
     let start = first;
@@ -503,7 +509,24 @@ export function AddCase({
     >
       <form onSubmit={save} noValidate>
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          {/* Opened from a row's จัดการ: back to its actions (Pong, 26 Nov 2026: "add back button"). */}
+          {back ? (
+            <button
+              type="button"
+              className="btn btn-ghost -mr-2 -ml-2 size-11 min-h-0 shrink-0 rounded-full p-0"
+              aria-label="ย้อนกลับ"
+              title="ย้อนกลับ"
+              disabled={pending}
+              onClick={() => {
+                ref.current?.close();
+                back();
+              }}
+              data-testid="add-case-back"
+            >
+              {BACK_ICON}
+            </button>
+          ) : null}
+          <div className="min-w-0 flex-1 pt-px">
             <h2 id="add-case-title" className="text-lg font-bold" data-mode={mode}>
               {title}
             </h2>
