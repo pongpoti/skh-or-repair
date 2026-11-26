@@ -27,6 +27,7 @@ import type { RepairPeriods } from "@/lib/repair";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { markTutorialSeen } from "@/lib/tutorial-store";
 import { workbookForDay } from "@/lib/workbook-store";
+import { BOARD_PATH } from "@/lib/places";
 
 /**
  * Every answer carries the doctor's own bookings from today on, so the form's list stays current. They carry the HN:
@@ -91,7 +92,7 @@ export async function addCase(input: unknown): Promise<CaseResult> {
     if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, await listCasesOn(pool, value.date), periods);
 
     await insertCase(pool, doctor.id, user.sub, value);
-    revalidatePath("/");
+    revalidatePath(BOARD_PATH);
     return { ok: true, mine: await listCasesBy(pool, doctor.id, today), message: bookedMessage(value) };
   } catch (error) {
     logFailure("Booking a room failed", error);
@@ -154,7 +155,7 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
     if (value.date === booking.date && value.date < earliest) {
       if (value.note === booking.note) return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
       if (!(await updateNote(pool, id, doctor.id, value.note))) return { ok: false, error: GONE, mine: await mine() };
-      revalidatePath("/");
+      revalidatePath(BOARD_PATH);
       return { ok: true, mine: await mine(), message: "บันทึกแล้ว" };
     }
     if (!value.dressing) {
@@ -171,7 +172,7 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
     const change = bookingChange(editing, value, periods);
     if (!change.changed) return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
     if (!(await updateCase(pool, id, doctor.id, value, change.requeue))) return { ok: false, error: GONE, mine: await mine() };
-    revalidatePath("/");
+    revalidatePath(BOARD_PATH);
     return { ok: true, mine: await mine(), message: editedMessage(value, booking, change) };
   } catch (error) {
     logFailure("Editing a booking failed", error);
@@ -195,7 +196,7 @@ export async function deleteCase(id: unknown): Promise<CaseResult> {
     if (booking && booking.date < today) return { ok: false, error: PAST, mine: await listCasesBy(pool, doctor.id, today) };
     if (booking && (await startedToday(pool, booking, today, doctor.id))) return { ok: false, error: STARTED_TEXT, mine: await listCasesBy(pool, doctor.id, today) };
     const removed = booking !== null && (await removeCase(pool, id, doctor.id));
-    revalidatePath("/");
+    revalidatePath(BOARD_PATH);
     const mine = await listCasesBy(pool, doctor.id, today);
     return removed ? { ok: true, mine, message: "ยกเลิกการจองแล้ว" } : { ok: true, mine, message: GONE };
   } catch (error) {
@@ -216,7 +217,7 @@ export async function undoCancel(id: unknown): Promise<CaseResult> {
     const { doctor, pool } = signed;
     const today = todayInBangkok();
     const restored = await restoreCase(pool, id, doctor.id, today);
-    revalidatePath("/");
+    revalidatePath(BOARD_PATH);
     const mine = await listCasesBy(pool, doctor.id, today);
     return restored
       ? { ok: true, mine, message: "จองคืนแล้ว คิวเดิม" }

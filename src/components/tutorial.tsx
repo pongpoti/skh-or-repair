@@ -16,6 +16,7 @@ import { boardNotices } from "@/lib/board-notices";
 import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import { isDressingCase } from "@/lib/placement";
+import { BOARD_PATH } from "@/lib/places";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, openRooms, roomLabel } from "@/lib/rooms";
 import {
@@ -348,7 +349,7 @@ export function Tutorial({
 
   function exit() {
     seen();
-    router.push("/");
+    router.push(BOARD_PATH);
   }
 
   /**

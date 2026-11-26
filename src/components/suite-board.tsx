@@ -17,6 +17,7 @@ import { allocationFor, readableTextOn, type Department } from "@/lib/allocation
 import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
 import { boardHref, thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
+import { BOARD_PATH } from "@/lib/places";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, isSelectableRoom, openRooms, roomLabel, type Room } from "@/lib/rooms";
 import { roomMark } from "@/lib/schedule";
@@ -348,7 +349,7 @@ export function SuiteBoard({
   today,
   periods,
   roomId = null,
-  pathname = "/",
+  pathname = BOARD_PATH,
   adding = null,
   casesUnavailable = false,
   notices: givenNotices,

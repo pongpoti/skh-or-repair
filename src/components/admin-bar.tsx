@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
 import { ProfileAvatar } from "@/components/profile-avatar";
+import { BOARD_PATH } from "@/lib/places";
 
 /**
  * The admin pages' bar: the mark, the page heading, a way back to the board, and who is signed in (a grey circle while
@@ -11,7 +12,7 @@ export function AdminBar({
   eyebrow = "ผู้ดูแลระบบ",
   name,
   image,
-  boardHref = "/",
+  boardHref = BOARD_PATH,
 }: {
   title: string;
   eyebrow?: string;

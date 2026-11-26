@@ -10,6 +10,7 @@ import { bangkokParts, now } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { thaiDate } from "@/lib/days";
 import { HOLIDAYS_UNAVAILABLE } from "@/lib/holidays";
+import { BOARD_PATH } from "@/lib/places";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { isMx } from "@/lib/roles";
 import { runUploadFlow } from "@/lib/upload-flow";
@@ -78,7 +79,7 @@ export async function uploadWorkbook(form: FormData): Promise<UploadResult> {
       cases: flow.cases,
     });
     // The board's next cycle and this page's latest upload.
-    revalidatePath("/");
+    revalidatePath(BOARD_PATH);
     revalidatePath("/upload");
 
     // An upload is the board's list from 16:00 of its day (lib/board-day.ts), so one made later shows at once.

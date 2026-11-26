@@ -16,6 +16,7 @@ import { db } from "@/lib/db";
 import { demoBoardRows, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
+import { BOARD_PATH, PLACES_PATH } from "@/lib/places";
 import type { RepairPeriods } from "@/lib/repair";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
@@ -26,7 +27,7 @@ import { tutorialSeen } from "@/lib/tutorial-store";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
 import { workbookFor, workbookForDay } from "@/lib/workbook-store";
-import { addCase, deleteCase, editCase, undoCancel } from "./actions";
+import { addCase, deleteCase, editCase, undoCancel } from "../actions";
 
 export const dynamic = "force-dynamic";
 
@@ -170,7 +171,7 @@ export default async function BoardPage({
     const shown = demoDay(params.half === "1" ? 1 : 2, { today: day.today, boardDate: day.boardDate, max: range.max, periods, holidays: closed });
     // A half with no day left (over, or only a weekend or holidays to go) goes back to /admin, where its button now
     // says so by the same rule, rather than to a day of the other half.
-    redirect(!shown ? "/admin" : shown !== day.boardDate ? `/?demo=1&date=${shown}` : "/?demo=1");
+    redirect(!shown ? "/admin" : shown !== day.boardDate ? `${BOARD_PATH}?demo=1&date=${shown}` : `${BOARD_PATH}?demo=1`);
   }
   const view: BoardDay =
     picked && picked !== day.boardDate ? { ...day, boardDate: picked, relation: relationTo(picked, day.today) } : day;
@@ -214,6 +215,8 @@ export default async function BoardPage({
         uploadHref={canUpload ? "/upload" : null}
         // The tutorial is the doctors' (Pong, 19 Nov 2026); admins may look at it too.
         helpHref={adding || admin ? "/tutorial" : null}
+        // The other hospital (Pong, 26 Nov 2026): the page that asks which, where every visit starts.
+        placesHref={PLACES_PATH}
         datePick={datePick}
       />
       <SuiteBoard

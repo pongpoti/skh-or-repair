@@ -8,6 +8,7 @@ import { doctorFor } from "@/lib/cases";
 import { bangkokParts, now } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
+import { BOARD_PATH } from "@/lib/places";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { practiceSubtype } from "@/lib/tutorial";
 import { fullName } from "@/lib/user-list";
@@ -32,7 +33,7 @@ export default async function TutorialPage({ searchParams }: { searchParams: Pro
   } catch (error) {
     console.error("[tutorial] doctor lookup failed:", (error as Error).message);
   }
-  if (!doctor && !admin) redirect("/");
+  if (!doctor && !admin) redirect(BOARD_PATH);
   const profile = await profileFor(user, user.name);
   const [periods, { date: today, minutes }] = await Promise.all([currentRepairPeriods(), Promise.resolve(bangkokParts(now()))]);
   const { holidays, unlisted } = await holidaysBetween(today, addDays(today, BOOK_AHEAD_DAYS));
