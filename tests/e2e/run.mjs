@@ -1255,7 +1255,7 @@ async function main() {
       await page.close();
     });
 
-    await t("the hospitals (Pong, 26 Nov 2026): / asks which; รพ.สมุทรสาคร opens the board at /skh, รพ.ท่าฉลอม its floor 5 plan; the ways back; an old board address goes on to /skh", async () => {
+    await t("the hospitals (Pong, 26 Nov 2026): / asks which; รพ.สมุทรสาคร opens the board at /skh, รพ.ท่าฉลอม its weekly table on its plan; the ways back; an old board address goes on to /skh", async () => {
       assert(ctxA, "signed-in context from the first-login test");
       const page = await ctxA.newPage();
       const csp = [];
@@ -1309,31 +1309,88 @@ async function main() {
       await places.click();
       await page.waitForURL(`${APP}/`);
 
-      // รพ.ท่าฉลอม: Pong's plan of floor 5 and nothing else, filling the screen under the bar
+      // รพ.ท่าฉลอม: the hospital's weekly table (Pong, 26 Nov 2026) on Pong's plan, with the list of rooms
       await cards.nth(1).click();
       await page.waitForURL(`${APP}/tha-chalom`);
       await page.waitForSelector('[data-testid="tha-chalom-plan"]');
-      assert((await plainText(page, '[data-testid="place-title"]')) === "รพ.ท่าฉลอม" && (await plainText(page, '[data-testid="place-eyebrow"]')) === "แปลนห้องผ่าตัด", "named in the bar");
-      const ors = await page.$$eval(".tcp-or", (els) => els.map((el) => [el.dataset.room, el.querySelector(".tcp-or-num").textContent, el.querySelector(".tcp-or-label").textContent]));
-      assert(JSON.stringify(ors) === JSON.stringify([1, 2, 3, 4].map((n) => [`or-${n}`, String(n), "OR"])), `four ORs: ${JSON.stringify(ors)}`);
+      const eyebrow = await plainText(page, '[data-testid="board-eyebrow"]');
+      assert(/^รพ\.ท่าฉลอม · ตารางผ่าตัด(วันนี้|ถัดไป)$/.test(eyebrow), `named in the bar: ${eyebrow}`);
+      assert((await page.locator('[data-testid="board-date-chevron"]').count()) === 1, "the date picks another day");
+      const orsOf = () =>
+        page.$$eval(".tcp-or", (els) =>
+          els.map((el) => [
+            el.dataset.room,
+            el.querySelector(".tcp-or-num").textContent,
+            el.dataset.state,
+            el.getAttribute("aria-label"),
+            [...el.querySelectorAll(".tcp-or-dept, .tcp-or-thai")].map((label) => label.textContent),
+          ]),
+        );
+      const ors = await orsOf();
+      assert(JSON.stringify(ors.map(([room, number]) => [room, number])) === JSON.stringify([1, 2, 3, 4].map((n) => [`or-${n}`, String(n)])), `four ORs: ${JSON.stringify(ors)}`);
+      // every weekday: OR 2 is ศัลยกรรมหลอดเลือด's, OR 3 is being turned into an intervention room
+      assert(JSON.stringify(ors[1].slice(2)) === JSON.stringify(["open", "OR 2 · ศัลยกรรมหลอดเลือด", ["VAS"]]), `OR 2: ${JSON.stringify(ors[1])}`);
+      assert(JSON.stringify(ors[2].slice(2)) === JSON.stringify(["closed", "OR 3 · ปรับปรุงเป็นห้อง Intervention", ["ปรับปรุง"]]), `OR 3: ${JSON.stringify(ors[2])}`);
       assert((await page.locator(".tcp-room, .tcp-grid-box").count()) === 15, "the other rooms as drawn");
-      for (const id of ["add-case-button", "board-eyebrow", "notice-strip", "upload-button"]) {
-        assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of the board: ${id}`);
+      const roomsOf = () =>
+        page.$$eval('[data-testid="tc-room"]', (els) => els.map((el) => [el.dataset.room, el.querySelector(".room-pill").getAttribute("title")]));
+      const rooms = await roomsOf();
+      assert(
+        JSON.stringify(rooms.map(([room]) => room)) === JSON.stringify(["or-1", "or-2", "or-3", "or-4", "scope"]),
+        `the list: OR 1 to 4 and the Scope room: ${JSON.stringify(rooms)}`,
+      );
+      // the list says what the plan shows
+      for (const [room, , , label] of ors) {
+        assert(rooms.find(([id]) => id === room)?.[1] === label, `${room} in the list as on the plan: ${label}`);
+      }
+      // a Wednesday (the first in the next weeks that is not a holiday): OR 4 is จักษุ's in the morning, โสต ศอ นาสิก's after
+      const shown = await page.getAttribute("header time", "datetime");
+      let wednesday = null;
+      for (let week = 0; week < 4 && !wednesday; week += 1) {
+        const day = new Date(`${shown}T00:00:00Z`);
+        day.setUTCDate(day.getUTCDate() + (((3 - day.getUTCDay() + 7) % 7) || 7) + week * 7);
+        const iso = day.toISOString().slice(0, 10);
+        await page.goto(`${APP}/tha-chalom?date=${iso}`, { waitUntil: "networkidle" });
+        if ((await page.getAttribute("header time", "datetime")) === iso) wednesday = iso;
+      }
+      assert(wednesday, "a Wednesday to pick");
+      const wed = await orsOf();
+      assert(JSON.stringify(wed[0].slice(2)) === JSON.stringify(["open", "OR 1 · ออร์โธปิดิกส์ (TKA)", ["ORTHO"]]), `OR 1 on a Wednesday: ${JSON.stringify(wed[0])}`);
+      assert(JSON.stringify(wed[3].slice(2)) === JSON.stringify(["open", "OR 4 · เช้า จักษุ · บ่าย โสต ศอ นาสิก", ["EYE", "ENT"]]), `OR 4 split: ${JSON.stringify(wed[3])}`);
+      assert((await page.locator('.tcp-or[data-room="or-4"].is-split').count()) === 1, "OR 4 drawn in two bands");
+      assert(
+        JSON.stringify((await roomsOf()).map(([, title]) => title)) ===
+          JSON.stringify(["OR 1 · ออร์โธปิดิกส์ (TKA)", "OR 2 · ศัลยกรรมหลอดเลือด", "OR 3 · ปรับปรุงเป็นห้อง Intervention", "OR 4 · เช้า จักษุ · บ่าย โสต ศอ นาสิก", "ห้อง Scope · ว่าง"]),
+        `the Wednesday's list: ${JSON.stringify(await roomsOf())}`,
+      );
+      assert((await plainText(page, '[data-testid="tc-open-count"]')) === "เปิด 3 ห้อง", "three rooms open on a Wednesday");
+      for (const id of ["add-case-button", "notice-strip", "upload-button", "room-overview", "admin-button"]) {
+        assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's board: ${id}`);
       }
       for (const width of [320, ...WIDTHS]) {
         const height = width === 1280 ? 900 : 780;
         await page.setViewportSize({ width, height });
         await noSideScroll(page, `รพ.ท่าฉลอม at ${width}px`);
         const plan = await page.locator('[data-testid="tha-chalom-plan"]').boundingBox();
+        const list = await page.locator('[data-testid="tc-rooms"]').boundingBox();
         const bar = await page.locator("header").boundingBox();
         assert(plan.y >= bar.y + bar.height - 0.5 && plan.y + plan.height <= height + 0.5 && plan.x >= 0 && plan.x + plan.width <= width + 0.5, `the plan fits at ${width}px: ${JSON.stringify(plan)}`);
-        assert(plan.width > Math.min(width, 1024) * 0.6, `the plan uses the screen at ${width}px: ${plan.width}`);
+        assert(list.y + list.height <= height + 0.5 && list.x + list.width <= width + 0.5, `the list in view at ${width}px: ${JSON.stringify(list)}`);
+        // under the plan on a phone, beside it on a computer
+        assert(width >= 1024 ? list.x >= plan.x + plan.width - 0.5 : list.y >= plan.y + plan.height - 0.5, `the list's place at ${width}px`);
       }
+      await page.setViewportSize({ width: 360, height: 640 });
+      const small = await page.locator('[data-testid="tc-rooms"]').boundingBox();
+      assert(small.y + small.height <= 640.5, `every room in view on a small phone: ${JSON.stringify(small)}`);
       await page.setViewportSize({ width: 390, height: 844 });
       await shoot(page, "tha-chalom", { full: false });
-      // the back arrow and the logo both go to the choice
-      assert((await page.getAttribute('header a[aria-label="ORSKH.APP หน้าแรก"]', "href")) === "/", "the logo goes to the choice");
-      await page.click('[data-testid="place-back"]');
+      // the logo goes to ท่าฉลอม's own day, as รพ.สมุทรสาคร's goes to its board; the account menu goes back to the choice
+      assert((await page.getAttribute('header a[aria-label="ORSKH.APP หน้าแรก"]', "href")) === "/tha-chalom", "the logo goes to ท่าฉลอม's day");
+      await page.click('[data-testid="user-menu"]');
+      const back = page.locator('[data-testid="account-places-link"]');
+      await back.waitFor({ state: "visible" });
+      assert((await back.getAttribute("href")) === "/", "เปลี่ยนโรงพยาบาล in ท่าฉลอม's menu");
+      await back.click();
       await page.waitForURL(`${APP}/`);
       await page.waitForSelector('[data-testid="place-card"]');
 

@@ -1,18 +1,35 @@
+import type { CSSProperties } from "react";
+import { readableTextOn } from "@/lib/allocation";
+import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha-chalom-schedule";
+
 /**
- * รพ.ท่าฉลอม's OR suite, floor 5, as Pong drew it (26 Nov 2026, "Below is SVG layout of OR ท่าฉลอม ... Just simply show
- * layout. Do nothing for now"): four ORs round the corridor, the scrub areas (gridded), the small rooms and the sterile
- * supply. Nothing on it is tapped yet. The colours are the board's plan's own (globals.css .tcp-*); the classes are
- * prefixed, so the drawing's names (room, frame) never meet the app's.
+ * รพ.ท่าฉลอม's OR suite as Pong drew it (26 Nov 2026, "Below is SVG layout of OR ท่าฉลอม"): four ORs round the corridor,
+ * the scrub areas (gridded), the small rooms and the sterile supply. Given a day of the weekly schedule
+ * (lib/tha-chalom-schedule.ts), each OR takes its department's colour and label, as on รพ.สมุทรสาคร's plan: split
+ * between morning (above) and afternoon (below) when they differ, the board's closed-room stripes for OR 3 while it is
+ * turned into an intervention room, and plain for a room no one has (ว่าง). Without a day the ORs keep Pong's brown and
+ * "OR". Nothing on it is tapped. The colours are the board's plan's own (globals.css .tcp-*); the classes are prefixed,
+ * so the drawing's names (room, frame) never meet the app's.
  */
 
-type Or = { id: string; number: string; d: string; x: number; ringY: number };
+type Or = {
+  id: string;
+  number: string;
+  d: string;
+  /** Where the number's ring sits, as drawn. */
+  x: number;
+  ringY: number;
+  /** The OR's top and bottom edges, for the bands of a split room. */
+  top: number;
+  bottom: number;
+};
 
-/** Each OR: its chamfered outline, and where its number sits (the white ring, the number, OR under it). */
+/** Each OR: its chamfered outline, and where its number sits (the white ring, the number, its label under it). */
 const ORS: readonly Or[] = [
-  { id: "or-1", number: "1", d: "M153,62 H262 L280,80 V219 L262,237 H153 L135,219 V80 Z", x: 207.5, ringY: 131.5 },
-  { id: "or-2", number: "2", d: "M401,62 H504 L522,80 V227 L504,245 H401 L383,227 V80 Z", x: 452.5, ringY: 135.5 },
-  { id: "or-3", number: "3", d: "M544,62 H666 L684,80 V227 L666,245 H544 L526,227 V80 Z", x: 605, ringY: 135.5 },
-  { id: "or-4", number: "4", d: "M514,358 H670 L688,376 V492 L670,510 H514 L496,492 V376 Z", x: 592, ringY: 416 },
+  { id: "or-1", number: "1", d: "M153,62 H262 L280,80 V219 L262,237 H153 L135,219 V80 Z", x: 207.5, ringY: 131.5, top: 62, bottom: 237 },
+  { id: "or-2", number: "2", d: "M401,62 H504 L522,80 V227 L504,245 H401 L383,227 V80 Z", x: 452.5, ringY: 135.5, top: 62, bottom: 245 },
+  { id: "or-3", number: "3", d: "M544,62 H666 L684,80 V227 L666,245 H544 L526,227 V80 Z", x: 605, ringY: 135.5, top: 62, bottom: 245 },
+  { id: "or-4", number: "4", d: "M514,358 H670 L688,376 V492 L670,510 H514 L496,492 V376 Z", x: 592, ringY: 416, top: 358, bottom: 510 },
 ];
 
 /** The other rooms, as drawn: `grid` is a scrub area (the gridded floor). */
@@ -34,13 +51,94 @@ const ROOMS: readonly { x: number; y: number; w: number; h: number; grid?: true;
   { x: 190, y: 465, w: 80, h: 98 },
 ];
 
-export function ThaChalomPlan({ className }: { className?: string }) {
+/** A room no one has: the board's empty-room floor. */
+const FREE_FILL = "var(--fp-or)";
+
+/** A half's floor colour: the department's, the closed stripes, or the plain floor. */
+function fillOf(use: ThaChalomUse): string {
+  if (use.kind === "dept") return use.dept.color;
+  return use.kind === "closed" ? "url(#tcp-closed)" : FREE_FILL;
+}
+
+/** The label under the number: the department's short label (ORTHO, VAS), ปรับปรุง, or ว่าง. */
+function Label({ use, x, y }: { use: ThaChalomUse; x: number; y: number }) {
+  if (use.kind === "dept") {
+    return (
+      <text className="tcp-or-dept" x={x} y={y} style={{ fill: readableTextOn(use.dept.color) }}>
+        {use.dept.label}
+      </text>
+    );
+  }
+  return (
+    <text className={use.kind === "closed" ? "tcp-or-thai tcp-closed-text" : "tcp-or-thai"} x={x} y={y}>
+      {use.kind === "closed" ? "ปรับปรุง" : "ว่าง"}
+    </text>
+  );
+}
+
+function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
+  if (!entry) {
+    return (
+      <g className="tcp-or" data-room={or.id}>
+        <path className="tcp-or-shape" d={or.d} />
+        <circle className="tcp-or-ring" cx={or.x} cy={or.ringY} r="30" />
+        <text className="tcp-or-num" x={or.x} y={or.ringY + 12.2}>
+          {or.number}
+        </text>
+        <text className="tcp-or-label" x={or.x} y={or.ringY + 58}>
+          OR
+        </text>
+      </g>
+    );
+  }
+
+  const state = entry.am.kind === "closed" ? "closed" : entry.am.kind === "free" && entry.pm.kind === "free" ? "free" : "open";
+  const fill = entry.split ? `url(#tcp-split-${or.id})` : fillOf(entry.am);
+  // A split room's ring sits on the seam, half way down, with the morning's label above it and the afternoon's below.
+  const middle = (or.top + or.bottom) / 2;
+  const ringY = entry.split ? middle : or.ringY;
+  return (
+    <g
+      className={`tcp-or is-${state}${entry.split ? " is-split" : ""}`}
+      data-room={or.id}
+      data-state={state}
+      role="img"
+      aria-label={roomDayText(entry)}
+      style={{ "--tcp-fill": fill } as CSSProperties}
+    >
+      {entry.split ? (
+        <defs>
+          <linearGradient id={`tcp-split-${or.id}`} x1="0" y1={or.top} x2="0" y2={or.bottom} gradientUnits="userSpaceOnUse">
+            <stop offset="0.5" style={{ stopColor: entry.am.kind === "dept" ? entry.am.dept.color : FREE_FILL }} />
+            <stop offset="0.5" style={{ stopColor: entry.pm.kind === "dept" ? entry.pm.dept.color : FREE_FILL }} />
+          </linearGradient>
+        </defs>
+      ) : null}
+      <path className="tcp-or-shape" d={or.d} />
+      <circle className="tcp-or-ring" cx={or.x} cy={ringY} r="30" />
+      <text className="tcp-or-num" x={or.x} y={ringY + 12.2}>
+        {or.number}
+      </text>
+      {entry.split ? (
+        <>
+          <Label use={entry.am} x={or.x} y={(or.top + ringY - 30) / 2} />
+          <Label use={entry.pm} x={or.x} y={(ringY + 30 + or.bottom) / 2} />
+        </>
+      ) : (
+        <Label use={entry.am} x={or.x} y={or.ringY + 58} />
+      )}
+    </g>
+  );
+}
+
+export function ThaChalomPlan({ className, day = null }: { className?: string; day?: readonly ThaChalomRoomDay[] | null }) {
+  const byId = new Map((day ?? []).map((entry) => [entry.room.id as string, entry]));
   return (
     <svg
       viewBox="104.5 31.5 614 578.25"
       preserveAspectRatio="xMidYMid meet"
       className={className}
-      role="img"
+      role={day ? "group" : "img"}
       aria-label="แปลนห้องผ่าตัด รพ.ท่าฉลอม: ห้องผ่าตัด 1 ถึง 4"
       data-testid="tha-chalom-plan"
     >
@@ -48,6 +146,11 @@ export function ThaChalomPlan({ className }: { className?: string }) {
         <pattern id="tcp-grid" width="8" height="8" patternUnits="userSpaceOnUse">
           <rect width="8" height="8" fill="#fbf7f1" />
           <path d="M8 0H0V8" fill="none" stroke="#e3dace" strokeWidth="1" />
+        </pattern>
+        {/* A room closed for works: the board's muted taupe stripes (floor-plan.tsx fp-closed), at this plan's scale. */}
+        <pattern id="tcp-closed" width="12" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="12" height="12" fill="var(--fp-closed)" />
+          <line x1="0" y1="0" x2="0" y2="12" stroke="var(--fp-closed-line)" strokeWidth="3" />
         </pattern>
       </defs>
       <rect className="tcp-frame" x="108" y="35" width="607" height="571.25" rx="4" />
@@ -64,16 +167,7 @@ export function ThaChalomPlan({ className }: { className?: string }) {
         />
       ))}
       {ORS.map((or) => (
-        <g key={or.id} className="tcp-or" data-room={or.id}>
-          <path className="tcp-or-shape" d={or.d} />
-          <circle className="tcp-or-ring" cx={or.x} cy={or.ringY} r="30" />
-          <text className="tcp-or-num" x={or.x} y={or.ringY + 12.2}>
-            {or.number}
-          </text>
-          <text className="tcp-or-label" x={or.x} y={or.ringY + 58}>
-            OR
-          </text>
-        </g>
+        <OrRoom key={or.id} or={or} entry={day ? (byId.get(or.id) ?? null) : null} />
       ))}
     </svg>
   );

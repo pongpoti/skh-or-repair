@@ -11,6 +11,7 @@ import { CaseList, isCaseBubbleOpen } from "@/components/case-list";
 import { DaySwipe } from "@/components/day-swipe";
 import { FloorPlan, UNALLOCATED_FILL } from "@/components/floor-plan";
 import { NoTableIcon } from "@/components/no-table-icon";
+import { RoomPill, type RoomPillPart } from "@/components/room-pill";
 import type { AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
@@ -99,40 +100,15 @@ function deptFace(dept: Department | null): { color: string; name: string } {
   return dept ? { color: dept.color, name: dept.name } : { color: UNALLOCATED_FILL, name: "ไม่จัดสรร" };
 }
 
-/**
- * A room's badge in the list of open rooms (Pong, 18 Nov 2026: "merge room number & name", style A of the samples): one
- * capsule, "OR 9" in a darker part of the department's colour, then the department's name. A room split between two
- * departments shows เช้า and บ่าย parts, each in its own colour. A name too long for the line ends in an ellipsis; the
- * badge's title holds it in full.
- */
-function RoomPill({ room, allocation }: { room: Room; allocation: ReturnType<typeof allocationFor> }) {
-  const parts = allocation?.split
+/** A room's badge in the list of open rooms (components/room-pill.tsx): its department, or เช้า and บ่าย parts. */
+function RoomPillFor({ room, allocation }: { room: Room; allocation: ReturnType<typeof allocationFor> }) {
+  const parts: RoomPillPart[] = allocation?.split
     ? [
         { part: "เช้า", ...deptFace(allocation.am) },
         { part: "บ่าย", ...deptFace(allocation.pm) },
       ]
     : [{ part: null, ...deptFace(allocation?.am ?? null) }];
-  const title = parts.map(({ part, name }) => (part ? `${part} ${name}` : name)).join(" · ");
-  return (
-    <span
-      className={`room-pill ${parts.length > 1 ? "room-pill-split" : ""}`}
-      title={`${roomLabel(room)} · ${title}`}
-      style={{ "--room": parts[0].color, "--room-pm": parts[parts.length - 1].color } as CSSProperties}
-      data-testid={`room-pill-${room.id}`}
-    >
-      <span className="room-pill-no" style={{ color: readableTextOn(parts[0].color) }} aria-hidden>
-        <span className="room-pill-or">OR</span>
-        {room.number}
-      </span>
-      <span className="sr-only">{roomLabel(room)}</span>
-      {parts.map(({ part, color, name }) => (
-        <span key={part ?? "day"} className="room-pill-dept" style={{ color: readableTextOn(color) }}>
-          {part ? <span className="room-pill-part">{part}</span> : null}
-          <span className="room-pill-name">{name}</span>
-        </span>
-      ))}
-    </span>
-  );
+  return <RoomPill prefix="OR" number={room.number} label={roomLabel(room)} parts={parts} testId={`room-pill-${room.id}`} />;
 }
 
 /**
@@ -182,7 +158,7 @@ function RoomOverview({
               >
                 {/* The warning sits right after the badge, as in the samples. */}
                 <span className="flex min-w-0 flex-1 items-center gap-2.5">
-                  <RoomPill room={room} allocation={allocation} />
+                  <RoomPillFor room={room} allocation={allocation} />
                   {mismatch ? (
                     <span className="shrink-0 text-late" title="ข้อมูลไม่ตรงกับการจอง">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

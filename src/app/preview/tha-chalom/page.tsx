@@ -1,23 +1,36 @@
 import { notFound } from "next/navigation";
-import { PlaceBar } from "@/components/place-bar";
-import { ThaChalomPlan } from "@/components/tha-chalom-plan";
+import { ThaChalomBoard } from "@/components/tha-chalom-board";
+import { TopBar } from "@/components/top-bar";
+import { boardDayAt, relationTo } from "@/lib/board-day";
+import { thaChalomEyebrow, thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedule";
 
 export const dynamic = "force-dynamic";
 
-/** รพ.ท่าฉลอม's page without signing in, in development only, as an invented nurse sees it. */
-export default function PreviewThaChalomPage() {
+/**
+ * รพ.ท่าฉลอม's board without signing in, in development only, as an invented nurse sees it: today's day by the real clock
+ * (no holidays), or ?date=YYYY-MM-DD within the next 60 days.
+ */
+export default async function PreviewThaChalomPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   if (process.env.NODE_ENV !== "development") notFound();
+  const params = await searchParams;
+  const day = boardDayAt(new Date(), []);
+  const range = thaChalomPickRange(day.today);
+  const date = thaChalomPickedDay(params.date, day.today, []) ?? day.boardDate;
+  const datePick = { today: day.today, current: day.boardDate, ...range, holidays: [], unlisted: [] };
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <PlaceBar
-        eyebrow="แปลนห้องผ่าตัด"
-        title="รพ.ท่าฉลอม"
-        back={{ href: "/preview/places", label: "เลือกโรงพยาบาล" }}
-        account={{ name: "ปราณี สายบุญ", role: "พยาบาล · ห้องผ่าตัด", phone: "081-234-5678", image: null }}
+      <TopBar
+        date={date}
+        eyebrow={thaChalomEyebrow(relationTo(date, day.today))}
+        name="ปราณี สายบุญ"
+        role="พยาบาล · ห้องผ่าตัด"
+        phone="081-234-5678"
+        image={null}
+        pathname="/preview/tha-chalom"
+        placesHref="/preview/places"
+        datePick={datePick}
       />
-      <main className="flex min-h-0 flex-1 items-center justify-center overflow-hidden px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:p-6">
-        <ThaChalomPlan className="h-full max-h-full w-full max-w-[64rem]" />
-      </main>
+      <ThaChalomBoard date={date} pick={datePick} pathname="/preview/tha-chalom" />
     </div>
   );
 }

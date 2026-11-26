@@ -2164,8 +2164,29 @@ dialog[open]::backdrop {
 .tcp-corridor { fill: var(--fp-outer); }
 .tcp-room { fill: var(--fp-support); stroke: var(--fp-wall); stroke-width: 1.5; }
 .tcp-grid-box { fill: url(#tcp-grid); stroke: var(--fp-detail); stroke-width: 1.5; }
-.tcp-or-shape { fill: var(--brand-top); stroke: var(--fp-wall); stroke-width: 3; }
+/* An OR takes the day's department colour (--tcp-fill) when the page has a day; Pong's brown otherwise. */
+.tcp-or-shape { fill: var(--tcp-fill, var(--brand-top)); stroke: var(--fp-wall); stroke-width: 3; }
 .tcp-or-ring { fill: #fff; }
+.tcp-or.is-open .tcp-or-ring,
+.tcp-or.is-free .tcp-or-ring { stroke: var(--fp-wall); stroke-width: 2; }
+.tcp-or.is-closed .tcp-or-shape { stroke: var(--fp-closed-wall); }
+.tcp-or.is-closed .tcp-or-ring { fill: var(--fp-closed-badge); stroke: var(--fp-closed-wall); stroke-width: 2; }
+.tcp-or.is-closed .tcp-or-num { fill: var(--fp-closed-ink); }
+/* The department's short label (ORTHO, VAS): Latin capitals, so a little spacing is safe. */
+.tcp-or-dept {
+  font: 700 24px var(--font-inter), var(--font-thai), system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+  letter-spacing: 0.5px;
+}
+/* ว่าง and ปรับปรุง: Thai, so no letter-spacing. */
+.tcp-or-thai {
+  fill: var(--fp-muted);
+  font: 700 23px var(--font-thai), var(--font-inter), system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.tcp-or-thai.tcp-closed-text { fill: var(--fp-closed-ink); }
 .tcp-or-num {
   fill: var(--ink);
   font: 700 34px var(--font-inter), var(--font-thai), system-ui, sans-serif;
@@ -2177,4 +2198,23 @@ dialog[open]::backdrop {
   text-anchor: middle;
   dominant-baseline: central;
   letter-spacing: 1px;
+}
+
+/*
+ * รพ.ท่าฉลอม's list of rooms (components/tha-chalom-board.tsx): under the plan on a phone, on the page's surface with a
+ * line above it; from 1024px the glass card รพ.สมุทรสาคร's board has its list of open rooms on.
+ */
+.tc-rooms {
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+@media (min-width: 1024px) {
+  .tc-rooms {
+    background: var(--glass);
+    border: 1px solid var(--glass-edge);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-md), var(--highlight);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+  }
 }

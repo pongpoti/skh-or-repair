@@ -21,7 +21,7 @@ export type Place = {
 export const PLACES_PATH = "/";
 /** รพ.สมุทรสาคร's board (it was `/` until 26 Nov 2026). */
 export const BOARD_PATH = "/skh";
-/** รพ.ท่าฉลอม: its OR suite's plan, floor 5 (components/tha-chalom-plan.tsx). */
+/** รพ.ท่าฉลอม: its board, the weekly table on its OR suite's plan (components/tha-chalom-board.tsx). */
 export const THA_CHALOM_PATH = "/tha-chalom";
 
 /** The OR rooms on รพ.ท่าฉลอม's plan. */
