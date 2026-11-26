@@ -32,6 +32,15 @@ export const PLACES: readonly Place[] = [
   { id: "tha-chalom", name: "รพ.ท่าฉลอม", detail: `ห้องผ่าตัด ${THA_CHALOM_ROOMS} ห้อง`, href: THA_CHALOM_PATH },
 ];
 
+/**
+ * A hospital's board from the other's bar (Pong, 26 Nov 2026: "Try create seamless navigation between 2 places"): the
+ * same day when one was picked in the calendar or by a swipe (`?date=`, which the other board takes if it offers that
+ * day), else the plain address, whose own day is the same at both (lib/board-day.ts, 16:00 turnover).
+ */
+export function placeHref(href: string, pickedDate: string | null): string {
+  return pickedDate ? `${href}?date=${pickedDate}` : href;
+}
+
 /** The board's own address keys (a room, a day, the admins' test modes). */
 const BOARD_KEYS = ["room", "date", "demo", "sim", "half", "notices"] as const;
 

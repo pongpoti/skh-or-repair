@@ -1280,25 +1280,34 @@ async function main() {
         `the cards: ${JSON.stringify(listed)}`,
       );
       assert((await page.locator('[data-testid="place-card"] .place-art svg').count()) === 2, "a picture of each hospital");
-      // a phone shows both cards whole, with no scrolling, the small one too
-      for (const [width, height] of [[390, 844], [375, 667], [360, 640]]) {
+      // a phone shows both cards whole, with no scrolling, the small one too; side by side and the same size on every
+      // screen (Pong, 26 Nov 2026: "Place card size are inconsistent and too large")
+      const sizes = [];
+      for (const [width, height] of [[390, 844], [375, 667], [360, 640], [1280, 900]]) {
         await page.setViewportSize({ width, height });
-        const last = await cards.nth(1).boundingBox();
+        const [first, last] = [await cards.nth(0).boundingBox(), await cards.nth(1).boundingBox()];
         assert(last && last.y + last.height <= height, `both cards in view at ${width}×${height}: ${JSON.stringify(last)}`);
+        assert(Math.abs(first.y - last.y) < 1 && last.x > first.x + first.width, `side by side at ${width}px`);
+        assert(Math.abs(first.width - last.width) < 1 && Math.abs(first.height - last.height) < 1, `the same size at ${width}px: ${JSON.stringify([first, last])}`);
+        assert(first.width <= 172 && first.height <= 160, `small cards at ${width}px: ${JSON.stringify(first)}`);
+        sizes.push(Math.round(first.width));
       }
+      assert(sizes[0] === sizes[3], `as wide on a phone as on a computer: ${JSON.stringify(sizes)}`);
       await page.setViewportSize({ width: 390, height: 844 });
       await touchTargets(page, "the hospitals");
       await shoot(page, "places", { full: false });
-      // side by side on a computer
-      await page.setViewportSize({ width: 1280, height: 900 });
-      const [a, b] = [await cards.nth(0).boundingBox(), await cards.nth(1).boundingBox()];
-      assert(Math.abs(a.y - b.y) < 1 && b.x > a.x + a.width, "side by side on a computer");
-      await page.setViewportSize({ width: 390, height: 844 });
 
       // รพ.สมุทรสาคร: the board, whose account menu goes back to the choice
       await cards.nth(0).click();
       await page.waitForURL(`${APP}/skh`);
       await page.waitForSelector('[data-testid="board-eyebrow"]');
+      // the bar's switch: รพ.สมุทรสาคร lit, รพ.ท่าฉลอม one tap away (Pong, 26 Nov 2026: "seamless navigation between 2 places")
+      const tabsOf = () =>
+        page.$$eval('[data-testid="place-tab"]', (els) => els.map((el) => [el.dataset.place, el.textContent.trim(), el.getAttribute("href"), el.getAttribute("aria-current")]));
+      assert(
+        JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "รพ.สมุทรสาคร", null, "page"], ["tha-chalom", "รพ.ท่าฉลอม", "/tha-chalom", null]]),
+        `the switch on รพ.สมุทรสาคร's board: ${JSON.stringify(await tabsOf())}`,
+      );
       await page.click('[data-testid="user-menu"]');
       const places = page.locator('[data-testid="account-places-link"]');
       await places.waitFor({ state: "visible" });
@@ -1314,7 +1323,11 @@ async function main() {
       await page.waitForURL(`${APP}/tha-chalom`);
       await page.waitForSelector('[data-testid="tha-chalom-plan"]');
       const eyebrow = await plainText(page, '[data-testid="board-eyebrow"]');
-      assert(/^รพ\.ท่าฉลอม · ตารางผ่าตัด(วันนี้|ถัดไป)$/.test(eyebrow), `named in the bar: ${eyebrow}`);
+      assert(/^ตารางผ่าตัด(วันนี้|ถัดไป)$/.test(eyebrow), `the day as on รพ.สมุทรสาคร's board: ${eyebrow}`);
+      assert(
+        JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "รพ.สมุทรสาคร", "/skh", null], ["tha-chalom", "รพ.ท่าฉลอม", null, "page"]]),
+        `the switch names the hospital: ${JSON.stringify(await tabsOf())}`,
+      );
       assert((await page.locator('[data-testid="board-date-chevron"]').count()) === 1, "the date picks another day");
       const orsOf = () =>
         page.$$eval(".tcp-or", (els) =>
@@ -1364,6 +1377,17 @@ async function main() {
         `the Wednesday's list: ${JSON.stringify(await roomsOf())}`,
       );
       assert((await plainText(page, '[data-testid="tc-open-count"]')) === "เปิด 3 ห้อง", "three rooms open on a Wednesday");
+      // a picked day goes along to the other hospital and back
+      assert(JSON.stringify((await tabsOf()).map(([, , href]) => href)) === JSON.stringify([`/skh?date=${wednesday}`, null]), `the switch keeps the day: ${JSON.stringify(await tabsOf())}`);
+      await page.click('[data-testid="place-tab"][data-place="skh"]');
+      await page.waitForURL(`${APP}/skh?date=${wednesday}`);
+      await page.waitForSelector('[data-testid="place-tab"][data-place="skh"][aria-current="page"]');
+      assert((await page.getAttribute("header time", "datetime")) === wednesday, "รพ.สมุทรสาคร's board on the same Wednesday");
+      assert(JSON.stringify((await tabsOf()).map(([, , href]) => href)) === JSON.stringify([null, `/tha-chalom?date=${wednesday}`]), `and back: ${JSON.stringify(await tabsOf())}`);
+      await page.click('[data-testid="place-tab"][data-place="tha-chalom"]');
+      await page.waitForURL(`${APP}/tha-chalom?date=${wednesday}`);
+      await page.waitForSelector('[data-testid="place-tab"][data-place="tha-chalom"][aria-current="page"]');
+      assert((await page.getAttribute("header time", "datetime")) === wednesday, "ท่าฉลอม on the same Wednesday again");
       for (const id of ["add-case-button", "notice-strip", "upload-button", "room-overview", "admin-button"]) {
         assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's board: ${id}`);
       }

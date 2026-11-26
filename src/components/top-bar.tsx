@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BoardDatePicker, type DatePick } from "@/components/board-date-picker";
 import { BrandMark } from "@/components/brand-mark";
+import { PlaceTabs, type PlaceSwitch } from "@/components/place-tabs";
 import { ProfileAvatar } from "@/components/profile-avatar";
 import { SignOutButton } from "@/components/sign-out-button";
 import { avatarSrc, initialOf } from "@/lib/avatar";
@@ -68,6 +69,7 @@ export function TopBar({
   helpHref = null,
   placesHref = null,
   datePick = null,
+  place = null,
 }: {
   /** The person's full name (claimed user, else the LINE name). */
   name: string;
@@ -93,6 +95,8 @@ export function TopBar({
   placesHref?: string | null;
   /** When given, the date is a button that opens a calendar to show the board of another day (BoardDatePicker). */
   datePick?: DatePick | null;
+  /** On a hospital's board: the switch to the other hospital's board (PlaceTabs). */
+  place?: PlaceSwitch | null;
 }) {
   const src = avatarSrc(image);
   const initial = initialOf(name);
@@ -112,7 +116,9 @@ export function TopBar({
 
   return (
     <header className="appbar z-30">
-      <div className="mx-auto flex w-full max-w-[120rem] items-center gap-3 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 sm:px-6 sm:pt-[max(0.625rem,env(safe-area-inset-top))] sm:pb-2.5">
+      {/* With the hospitals' switch, the bar wraps on a phone: the switch takes a second line (order-last), and the date's
+          zero basis keeps the first line whole. */}
+      <div className="mx-auto flex w-full max-w-[120rem] flex-wrap items-center gap-x-3 gap-y-2 px-4 lg:flex-nowrap pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 sm:px-6 sm:pt-[max(0.625rem,env(safe-area-inset-top))] sm:pb-2.5">
         <Link href={pathname} className="flex min-h-11 shrink-0 items-center rounded-xl" aria-label="ORSKH.APP หน้าแรก">
           <BrandMark className="h-10 w-10 rounded-xl transition-[filter] hover:brightness-115" />
         </Link>
@@ -149,6 +155,17 @@ export function TopBar({
             <h1 className={`truncate ${HEADING}`}>{when}</h1>
           )}
         </div>
+        {place ? (
+          // A line of its own under 1024px (at most 26rem wide, centred on a tablet), beside the date from 1024px.
+          <div className="order-last basis-full lg:order-none lg:basis-auto">
+            <PlaceTabs
+              {...place}
+              // A day picked in the calendar or by a swipe goes along; the boards' own day is the same at both.
+              pickedDate={datePick && date !== datePick.current ? date : null}
+              className="mx-auto max-w-[26rem] lg:max-w-none"
+            />
+          </div>
+        ) : null}
         {uploadHref ? (
           // Like the admin button: the account menu's link stands in below 390px, and below 450px when the admin
           // button is there too, so the date keeps its year. The label needs a wider screen with two buttons.

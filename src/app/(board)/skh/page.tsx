@@ -218,6 +218,8 @@ export default async function BoardPage({
         // The other hospital (Pong, 26 Nov 2026): the page that asks which, where every visit starts.
         placesHref={PLACES_PATH}
         datePick={datePick}
+        // One tap to รพ.ท่าฉลอม's board on the same day (Pong, 26 Nov 2026: "seamless navigation between 2 places").
+        place={{ current: "skh" }}
       />
       <SuiteBoard
         board={board}

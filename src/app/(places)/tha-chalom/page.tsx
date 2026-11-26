@@ -3,12 +3,12 @@ import { ThaChalomBoard } from "@/components/tha-chalom-board";
 import { TopBar } from "@/components/top-bar";
 import { profileFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
-import { loadBoardDay, nextBoardRefresh, relationTo } from "@/lib/board-day";
+import { boardEyebrow, loadBoardDay, nextBoardRefresh, relationTo } from "@/lib/board-day";
 import { now } from "@/lib/clock";
 import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
 import { PLACES_PATH, THA_CHALOM_PATH } from "@/lib/places";
-import { thaChalomEyebrow, thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedule";
+import { thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -16,8 +16,9 @@ export const dynamic = "force-dynamic";
  * รพ.ท่าฉลอม's board (Pong, 26 Nov 2026: first its plan alone, "Just simply show layout", then the hospital's weekly
  * table): the day's OR schedule on Pong's plan, with the list of rooms (components/tha-chalom-board.tsx). The day turns
  * over at 16:00 as on รพ.สมุทรสาคร's board (lib/board-day.ts), skipping weekends and holidays, and the date in the bar
- * picks another (?date=YYYY-MM-DD, today to 60 days ahead), as a swipe across the plan does. The account menu's
- * เปลี่ยนโรงพยาบาล goes back to the choice of hospital. No cases and no bookings yet.
+ * picks another (?date=YYYY-MM-DD, today to 60 days ahead), as a swipe across the plan does. The bar's switch goes to
+ * รพ.สมุทรสาคร's board on the same day, and the account menu's เปลี่ยนโรงพยาบาล back to the choice of hospital. No cases
+ * and no bookings yet.
  */
 export default async function ThaChalomPage({ searchParams }: { searchParams: Promise<{ date?: string | string[] }> }) {
   const user = await requireUser();
@@ -37,7 +38,7 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
       <BoardRefresh renderId={crypto.randomUUID()} delayMs={nextBoardRefresh(at).getTime() - at.getTime()} />
       <TopBar
         date={date}
-        eyebrow={thaChalomEyebrow(relationTo(date, day.today))}
+        eyebrow={boardEyebrow(relationTo(date, day.today))}
         name={profile.name}
         role={profile.role}
         phone={user.phone ? formatPhone(user.phone) : undefined}
@@ -45,6 +46,8 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
         pathname={THA_CHALOM_PATH}
         placesHref={PLACES_PATH}
         datePick={datePick}
+        // The switch in the bar names the hospital (Pong, 26 Nov 2026) and goes to รพ.สมุทรสาคร's board on the same day.
+        place={{ current: "tha-chalom" }}
       />
       <ThaChalomBoard date={date} pick={datePick} />
     </div>
