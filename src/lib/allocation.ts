@@ -65,7 +65,7 @@ export const DEPARTMENTS: Record<DeptCode, Department> = {
   EYE: dept("EYE", "จักษุ", "#0277BD"), // the iris
   URO: dept("URO", "ศัลยกรรมทางเดินปัสสาวะ", "#9A6B00"), // urine
   PLASTIC: dept("PLASTIC", "ศัลยกรรมตกแต่ง", "#A85C52", "PLAST"), // skin
-  ENT: dept("ENT", "โสต ศอ นาสิก", "#037C76"), // breath through nose and throat; a greener teal, clear of EYE's blue (Pong, 26 Nov 2026)
+  ENT: dept("ENT", "โสต ศอ นาสิก", "#006064"), // breath through nose and throat; a deep teal, darker than GENSX's green and EYE's blue (Pong, 26 Nov 2026)
   NEPHRO: dept("NEPHRO", "อายุรกรรมโรคไต", "#6B4A2E", "NEPHR"), // a kidney bean
   /** No period in the schedule: the pulmonologists in the admin list, who set cases in OR 4 on Mondays (GUESTS). */
   CHEST: dept("CHEST", "อายุรกรรมโรคปอด", "#5867B8"), // air and the lungs
