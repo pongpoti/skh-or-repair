@@ -564,7 +564,7 @@ test("รพ.ท่าฉลอม's rows: its bookings in the rooms they were b
       [`bk-${untimed.id}`, "or-1", 3, null],
     ],
   );
-  assert.ok(rows.every((row) => row.source === "booking" && row.flag === null && row.status === "scheduled"));
+  assert.ok(rows.every((row) => row.source === "booking" && row.flag === null && row.status === "scheduled" && row.place === "tha-chalom"));
   // the viewer's own booking: its HN and its id for the row's actions; another doctor's neither
   const mine = rows.find((row) => row.id === `bk-${late.id}`);
   assert.deepEqual([mine?.hn, mine?.bookingId, mine?.note], [late.hn, late.id, "ขอ C-arm"]);

@@ -843,7 +843,8 @@ export function AddCase({
                   setTime(next);
                   edited("time");
                 }}
-                readOnly={locked}
+                // รพ.ท่าฉลอม has no dressing room to fall back on: a day without the department's room has no time to pick.
+                readOnly={locked || (tc && !room.ok)}
                 clash={clash}
                 invalid={invalid === "time"}
                 describedBy={describe("time")}

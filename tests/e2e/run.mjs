@@ -4679,6 +4679,7 @@ async function main() {
       // Wednesday: OR 1 is orthopaedics', and no other room is lent
       assert((await dateValue(page, "case-date")) === "2026-12-02", "the first day that can be booked");
       assert((await page.locator(`${FORM} [data-testid="day-slot"]:enabled`).count()) === 0, "no time on a day without the department's room");
+      assert((await textOf(page, FORM)).includes("ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น"), "and it says so");
       await page.click('[data-testid="case-day-next"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="case-date"]')?.dataset.value === "2026-12-03");
       await dayViewRead(page);
@@ -4699,7 +4700,9 @@ async function main() {
       );
       const saved = (await db.query("SELECT place, room_id, start_min, end_min FROM cases WHERE hn = $1 AND removed_at IS NULL", [HN_TC])).rows;
       assert(JSON.stringify(saved) === JSON.stringify([{ place: "tha-chalom", room_id: "or-1", start_min: 540, end_min: 600 }]), JSON.stringify(saved));
-      // the form's list is the doctor's bookings at this hospital
+      // back on the day view: the booking is the doctor's own block, at its time
+      await page.waitForSelector(`${FORM} [data-testid="day-booking"][data-own][data-start="540"]`, { state: "visible" });
+      // the form's list (shown on its second step) holds the doctor's bookings at this hospital
       assert((await textOf(page, '[data-testid="my-case-hn"]')) === `HN ${HN_TC}`, "the booking in the form's own list");
       await page.click('[data-testid="add-case-close"]');
       await page.waitForSelector(`${FORM}:not([open])`, { state: "attached" });
@@ -4707,7 +4710,8 @@ async function main() {
       // OR 1 on the plan opens its cases: the booking, with its time and the doctor's own actions
       await page.click('.tcp-or[data-room="or-1"] .tcp-or-shape');
       await page.waitForSelector(".room-sheet.is-open .case-row");
-      assert(new URL(page.url()).searchParams.get("room") === "or-1", page.url());
+      // the address follows the room (router.replace, as on รพ.สมุทรสาคร's board)
+      await page.waitForURL((u) => new URL(u).searchParams.get("room") === "or-1");
       assert((await page.locator('.tcp-or[data-room="or-1"].is-selected').count()) === 1, "OR 1 marked open on the plan");
       assert((await textOf(page, '.room-sheet [data-testid="row-hn"]')) === `HN ${HN_TC}`, "the doctor sees their patient's HN");
       assert((await textOf(page, '.room-sheet [data-testid="row-time"]')).startsWith("09:00–10:00"), await textOf(page, '.room-sheet [data-testid="row-time"]'));
@@ -4865,11 +4869,15 @@ async function main() {
           assert((await textOf(page, '[data-testid="coach-title"]')) === "ปุ่มจัดการ", "the bubble names it");
         },
         booked: async () => {
+          // the coach lights the practice booking once the day view has it again
+          await page.waitForSelector(".coach-hole");
           // the confetti, mid-fall
           await page.waitForTimeout(700);
           await page.screenshot({ path: join(SCREENS, "tutorial-booked.png") });
           shots.push("tutorial-booked.png");
-          assert((await textOf(page, '[data-testid="my-case-hn"]')) === "HN 1234567", "the practice booking in the form's own list");
+          // the coach lights the practice booking, the doctor's own block on the day view the form is back on
+          assert(await page.locator('[data-testid="day-booking"][data-own]').isVisible(), "the practice booking on the day view");
+          assert((await page.locator(".coach-hole").count()) === 1 && (await page.locator(".coach-dim").count()) === 0, "lit by the coach");
           assert((await page.getAttribute('[data-testid="coach-bubble"] [data-testid="mascot"]', "data-mood")) === "cheer", "the mascot cheers the booking");
         },
         mismatch: async () => {

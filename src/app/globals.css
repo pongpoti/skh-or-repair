@@ -2236,7 +2236,11 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 .tcp-scope.is-selected .tcp-scope-tag { fill: var(--brand); stroke: #fff; stroke-width: 2; }
 .tcp-or.is-selected .tcp-or-num,
 .tcp-scope.is-selected .tcp-scope-name { fill: #fff; }
-.tcp-or-shape:focus-visible { outline: none; stroke: var(--focus); stroke-width: 5; }
+/* Above the selected room's outline, so a room the keyboard is on shows it whether or not it is open. */
+.tcp-or .tcp-or-shape:focus-visible,
+.tcp-scope .tcp-or-shape:focus-visible,
+.tcp-or.is-selected .tcp-or-shape:focus-visible,
+.tcp-scope.is-selected .tcp-or-shape:focus-visible { outline: none; stroke: var(--focus); stroke-width: 5; }
 
 /*
  * รพ.ท่าฉลอม's plan on its board fills the swipe area as รพ.สมุทรสาคร's does, with the same margins (Pong, 27 Nov 2026:
@@ -2275,7 +2279,7 @@ a.place-tab:has(.place-tab-label[data-pending]) {
   text-align: right;
   font-size: 0.6875rem;
   line-height: 1rem;
-  color: var(--muted);
+  color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
 /* The day before and after: one pill of two 44px buttons, on the date field's right edge. */
@@ -2301,7 +2305,8 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 .day-arrow:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; border-radius: 999px; }
 .day-slot-button {
   position: absolute;
-  inset: 0 0 0 var(--gutter);
+  /* 1px under the half hour's line, so its hover fill never hides it. */
+  inset: 1px 0 0 var(--gutter);
   cursor: pointer;
   border-radius: 0;
 }

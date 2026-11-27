@@ -2,6 +2,7 @@ import { NO_OPERATION_LABEL, UNDER_WAY, bookedAtText, bookedRoom, timeOf, type A
 import { rangeText } from "./booking-time.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
+import type { PlaceId } from "./places.ts";
 import { isDressingCase, placeAll, roomsHeldBy, type RoomChoice } from "./placement.ts";
 import type { RepairPeriods } from "./repair.ts";
 import { roomUse } from "./rooms.ts";
@@ -64,6 +65,8 @@ export type BoardRow = Operation & {
    * of where it came from. Left out in every other room.
    */
   doneBy?: DoneBy;
+  /** รพ.ท่าฉลอม's rows say so (thaChalomRows), for their rooms' names; รพ.สมุทรสาคร's leave it out. */
+  place?: PlaceId;
 };
 
 /**
@@ -426,6 +429,7 @@ export function thaChalomRows(date: string, bookings: readonly AddedCase[], view
       ...when(booking),
       ...timeText(booking),
       ...noteOf(booking),
+      place: "tha-chalom",
     };
   });
 }
