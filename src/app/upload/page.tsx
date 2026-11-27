@@ -27,7 +27,7 @@ import {
   type MatchReport,
 } from "@/lib/upload-flow";
 import { casesOf, latestUpload, type Upload } from "@/lib/workbook-store";
-import { XLS_MESSAGE, XLSX_LIMITS } from "@/lib/xlsx";
+import { XLSX_LIMITS } from "@/lib/xlsx";
 import { uploadWorkbook } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -105,7 +105,7 @@ export default async function UploadPage() {
             // A new id for every render: a page brought back by Back keeps its own (components/board-refresh.tsx).
             refreshId={crypto.randomUUID()}
             refreshInMs={nextWindowChange(at).getTime() - at.getTime()}
-            rules={{ maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE }}
+            rules={{ maxBytes: XLSX_LIMITS.maxFileBytes }}
             onUpload={uploadWorkbook}
           />
           {latest ? (

@@ -18,7 +18,7 @@ import { DEMO_MIN_CASES, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { BOARD_PATH } from "@/lib/places";
 import { shortThaiDate } from "@/lib/repair";
-import { XLS_MESSAGE, XLSX_LIMITS } from "@/lib/xlsx";
+import { XLSX_LIMITS } from "@/lib/xlsx";
 import { addStaff, grantMx, importPastLists, revokeMx, saveRepair } from "./actions";
 import { loadPastListView, loadPeople, loadRepairView } from "./data";
 
@@ -101,7 +101,7 @@ export default async function AdminPage() {
             </div>
           </AdminSection>
           {/* Past days' HOSxP lists for the board's calendar (Pong, 19 Nov 2026: "No case shown on Jan, why ?"). */}
-          <PastListsSection initial={past} rules={{ maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE }} onImport={importPastLists} />
+          <PastListsSection initial={past} rules={{ maxBytes: XLSX_LIMITS.maxFileBytes }} onImport={importPastLists} />
           {/* Simulated bookings on the imported lists (Pong, 22 Nov 2026: "Try create booking case of each day on Oct 2026
               using similar hosxp cases"): the board's /?sim=1, from 1 Oct 2026 (lib/sim-bookings.ts). */}
           <AdminSection

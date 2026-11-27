@@ -18,7 +18,7 @@ import { addUser, checkNewUser } from "@/lib/user-admin";
 import { fullName, getListedUser } from "@/lib/user-list";
 import { thaiDateSpan } from "@/lib/workbook";
 import { savePastLists } from "@/lib/workbook-store";
-import { readXlsx, XLS_MESSAGE, XLSX_LIMITS } from "@/lib/xlsx";
+import { readXlsx, XLSX_LIMITS } from "@/lib/xlsx";
 import { mxMembersFrom, pastListViewFrom, repairViewFrom, staffFrom, type MxView, type PastListView, type RepairView, type StaffView } from "./data";
 
 type Refused = { ok: false; error: string };
@@ -164,7 +164,7 @@ export async function importPastLists(form: FormData): Promise<PastListsResult> 
     const user = await signedInAdmin();
     if (!user) return NOT_ADMIN;
     const file = form.get("file");
-    const problem = fileProblem(file instanceof File ? file : null, { maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE });
+    const problem = fileProblem(file instanceof File ? file : null, { maxBytes: XLSX_LIMITS.maxFileBytes });
     if (problem || !(file instanceof File)) return { ok: false, error: problem ?? "เลือกไฟล์ก่อน" };
 
     const book = readXlsx(new Uint8Array(await file.arrayBuffer()), PAST_LIMITS);

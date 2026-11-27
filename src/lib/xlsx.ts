@@ -1,7 +1,9 @@
 import { inflateRawSync } from "node:zlib";
+import { readXlsBook } from "./xls.ts";
 
 /**
- * A small .xlsx reader with no dependencies, for the HOSxP OR export that MX uploads.
+ * A small Excel reader with no dependencies, for the HOSxP OR export that MX uploads: .xlsx here, the old binary .xls
+ * (Excel 97–2003) in lib/xls.ts, and the Excel 2003 XML workbook that some programs save under an .xls name.
  *
  * Why not a library: the official SheetJS build is only on its own CDN (unreachable here) and the npm `xlsx` 0.18.5
  * has known CVEs. An .xlsx is a zip of XML parts, and the export is one sheet of text, numbers and dates, so the zip's
@@ -41,7 +43,10 @@ export const XLSX_LIMITS: XlsxLimits = {
 };
 
 export type XlsxError =
-  | "xls"
+  /** An .xls from Excel 95 or before (BIFF5 and older), which keeps its text in old code pages. */
+  | "old-xls"
+  /** A web page saved under an .xls name, as some programs export. */
+  | "html"
   | "encrypted"
   | "not-xlsx"
   | "corrupt"
@@ -54,16 +59,16 @@ export type XlsxResult =
   | { ok: true; sheetName: string; rows: XlsxCell[][]; date1904: boolean }
   | { ok: false; error: XlsxError; message: string };
 
-/** Also for the upload form, which refuses a file named .xls before reading it. */
-export const XLS_MESSAGE = "ไฟล์เป็น .xls หรือมีรหัสผ่าน เปิดใน Excel แล้วบันทึกเป็น .xlsx แบบไม่มีรหัสผ่าน";
-
 function messageFor(error: XlsxError, limits: XlsxLimits): string {
   switch (error) {
-    case "xls":
+    case "old-xls":
+      return "ไฟล์ .xls รุ่นเก่าเกินไป เปิดใน Excel แล้วบันทึกเป็น .xlsx";
+    case "html":
+      return "ไฟล์นี้เป็นหน้าเว็บ ไม่ใช่ไฟล์ Excel เปิดใน Excel แล้วบันทึกเป็น .xlsx";
     case "encrypted":
-      return XLS_MESSAGE;
+      return "ไฟล์มีรหัสผ่าน เปิดใน Excel แล้วบันทึกแบบไม่มีรหัสผ่าน";
     case "not-xlsx":
-      return "ไฟล์นี้ไม่ใช่ .xlsx เปิดใน Excel แล้วบันทึกเป็น .xlsx";
+      return "ไฟล์นี้ไม่ใช่ไฟล์ Excel เปิดใน Excel แล้วบันทึกเป็น .xlsx";
     case "corrupt":
       return "เปิดไฟล์ไม่ได้ ไฟล์อาจเสีย บันทึกเป็น .xlsx ใหม่แล้วลองอีกครั้ง";
     case "too-large":
@@ -84,11 +89,21 @@ class XlsxFail extends Error {
   }
 }
 
-/** Read the sheet named `operation` (or the first sheet) of an .xlsx file. Values are raw: dates stay Excel serials. */
+/**
+ * Read the sheet named `operation` (or the first sheet) of an Excel file: .xlsx, .xls (Excel 97–2003) or an Excel
+ * 2003 XML workbook, told apart by their first bytes, not their name. Values are raw: dates stay Excel serials.
+ */
 export function readXlsx(data: Uint8Array | ArrayBuffer, options: Partial<XlsxLimits> = {}): XlsxResult {
   const limits = { ...XLSX_LIMITS, ...options };
   try {
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    if (bytes.length > limits.maxFileBytes) throw new XlsxFail("too-large");
+    if (startsWith(bytes, OLE_MAGIC)) {
+      const read = readXlsBook(bytes, limits);
+      if (!read.ok) throw new XlsxFail(read.error);
+      return { ok: true, ...read.book };
+    }
+    if (!startsWith(bytes, [0x50, 0x4b])) return { ok: true, ...readXmlBook(bytes, limits) };
     return { ok: true, ...readBook(bytes, limits) };
   } catch (error) {
     // Anything unexpected is a file we cannot read, never a crash of the upload.
@@ -115,8 +130,6 @@ const partKey = (name: string) => name.replace(/\\/g, "/").replace(/^\/+/, "").t
 
 function openZip(bytes: Uint8Array, limits: XlsxLimits): Zip {
   if (bytes.length > limits.maxFileBytes) throw new XlsxFail("too-large");
-  // Old .xls files and password-protected .xlsx files are both OLE compound documents.
-  if (startsWith(bytes, OLE_MAGIC)) throw new XlsxFail("xls");
   if (!startsWith(bytes, [0x50, 0x4b, 0x03, 0x04]) && !startsWith(bytes, [0x50, 0x4b, 0x05, 0x06])) {
     throw new XlsxFail("not-xlsx");
   }
@@ -511,4 +524,121 @@ function readBook(bytes: Uint8Array, limits: XlsxLimits): { sheetName: string; r
   const sheetData = readEntry(zip, resolvePart(workbookPath, target.target));
   if (!sheetData) throw new XlsxFail("no-sheet");
   return { sheetName: wanted.name, rows: readSheet(decodeText(sheetData), shared, limits), date1904 };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Excel 2003 XML ("XML Spreadsheet"), which some programs save under an .xls name
+
+/**
+ * A file that is neither a zip nor a compound file: an Excel 2003 XML workbook is read, a web page saved as .xls gets
+ * its own message, and anything else is not an Excel file.
+ */
+function readXmlBook(bytes: Uint8Array, limits: XlsxLimits): { sheetName: string; rows: XlsxCell[][]; date1904: boolean } {
+  let xml: string;
+  try {
+    xml = decodeText(bytes).replace(/^\uFEFF/, "");
+  } catch {
+    throw new XlsxFail("not-xlsx");
+  }
+  const head = xml.slice(0, 8192).trimStart().toLowerCase();
+  if (/^<(!doctype html|html|table|meta|head|body)[\s>]/.test(head) || /<html[\s>]/.test(head)) throw new XlsxFail("html");
+  if (!head.startsWith("<") || !head.includes("urn:schemas-microsoft-com:office:spreadsheet")) throw new XlsxFail("not-xlsx");
+
+  type XmlSheet = { name: string; grid: XlsxCell[][] };
+  const sheets: XmlSheet[] = [];
+  let sheet: XmlSheet | null = null;
+  let inTable = false;
+  let row = -1;
+  let column = -1;
+  // The cell being read: its column (a merged cell keeps its value in its first column), its type and its text.
+  let cell: { at: number; type: string; text: string; inData: boolean } | null = null;
+  const store = (at: number, value: XlsxCell) => {
+    if (!sheet || value === null || value === "") return;
+    if (row + 1 > limits.maxRows) throw new XlsxFail("too-many-rows");
+    if (at + 1 > limits.maxColumns) throw new XlsxFail("too-many-columns");
+    (sheet.grid[row] ??= [])[at] = value;
+  };
+  /** ss:Index and friends, 1-based; null when missing or not a whole number. */
+  const indexOf = (found: Record<string, string>, name: string) => {
+    const value = Number(found[`ss:${name}`] ?? found[name]);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  };
+  walkXml(xml, {
+    open(name, attrs) {
+      if (name === "Worksheet") {
+        const found = attributes(attrs);
+        sheet = { name: found["ss:Name"] ?? found.Name ?? "", grid: [] };
+        sheets.push(sheet);
+      } else if (name === "Table" && sheet) {
+        inTable = true;
+        row = -1;
+      } else if (name === "Row" && inTable) {
+        const index = indexOf(attributes(attrs), "Index");
+        row = index ? index - 1 : row + 1;
+        column = -1;
+      } else if (name === "Cell" && inTable) {
+        const found = attributes(attrs);
+        const index = indexOf(found, "Index");
+        column = index ? index - 1 : column + 1;
+        cell = { at: column, type: "", text: "", inData: false };
+        // The next cell starts after a merge.
+        column += indexOf(found, "MergeAcross") ?? 0;
+      } else if (name === "Data" && cell) {
+        const found = attributes(attrs);
+        cell.type = found["ss:Type"] ?? found.Type ?? "String";
+        cell.inData = true;
+      }
+    },
+    text(text) {
+      if (cell?.inData) cell.text += text;
+    },
+    close(name) {
+      if (name === "Data" && cell) cell.inData = false;
+      else if (name === "Cell" && cell) {
+        if (cell.type) store(cell.at, xmlCellValue(cell.type, cell.text));
+        cell = null;
+      } else if (name === "Table") inTable = false;
+      else if (name === "Worksheet") sheet = null;
+    },
+  });
+
+  const wanted = sheets.find((item) => item.name.trim().toLowerCase() === "operation") ?? sheets[0];
+  if (!wanted) throw new XlsxFail("no-sheet");
+  return {
+    sheetName: wanted.name,
+    rows: Array.from(wanted.grid, (cells) => (cells ? Array.from(cells, (value) => value ?? null) : [])),
+    // DateTime cells are written as dates, and turned into 1900-system serials here whatever the workbook's setting.
+    date1904: false,
+  };
+}
+
+/** Days from 30 Dec 1899, Excel's 1900 date system (which counts a 29 Feb 1900 that never was). */
+function serialOf(iso: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?/.exec(iso.trim());
+  if (!match) return null;
+  const [year, month, day, hh, mm, ss] = match.slice(1).map((part) => Number(part ?? 0));
+  const days = Date.UTC(year, month - 1, day) / 86400000 - Date.UTC(1899, 11, 30) / 86400000;
+  if (!Number.isFinite(days)) return null;
+  // 1899-12-31 is day 1 in Excel's own count, but Date.UTC counts it as 1 from 30 Dec; dates before 1 Mar 1900 sit
+  // one day lower in Excel because of its leap-year bug.
+  const fixed = days < 61 ? days - 1 : days;
+  return fixed + (hh * 3600 + mm * 60 + ss) / 86400;
+}
+
+function xmlCellValue(type: string, text: string): XlsxCell {
+  switch (type) {
+    case "Number": {
+      if (text.trim() === "") return null;
+      const number = Number(text);
+      return Number.isFinite(number) ? number : null;
+    }
+    case "DateTime":
+      return serialOf(text);
+    case "Boolean":
+      return text.trim() === "1" || text.trim().toLowerCase() === "true";
+    case "Error":
+      return null;
+    default:
+      return decodeOfficeEscapes(text);
+  }
 }

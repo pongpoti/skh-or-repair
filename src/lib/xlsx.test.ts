@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { crc32, deflateRawSync } from "node:zlib";
-import { readXlsx, XLS_MESSAGE, XLSX_LIMITS, type XlsxResult } from "./xlsx.ts";
+import { readXlsx, XLSX_LIMITS, type XlsxCell, type XlsxResult } from "./xlsx.ts";
 
 const FIXTURE = readFileSync(new URL("../../tests/fixtures/sample-or-export.xlsx", import.meta.url));
 
@@ -179,12 +179,214 @@ test("falls back to the first sheet when none is named operation", () => {
   assert.deepEqual(result.rows, [[1, 2]]);
 });
 
-test("refuses an old .xls or a password-protected file, asking for .xlsx", () => {
+// ---------------------------------------------------------------------------------------------------------------
+// .xls (Excel 97–2003) and Excel 2003 XML (Pong, 27 Nov 2026: "accept xls")
+
+const fixture = (name: string) => readFileSync(new URL(`../../tests/fixtures/${name}`, import.meta.url));
+
+/** Both reads, cell for cell (numbers to within rounding). */
+function assertSameRows(a: XlsxResult, b: XlsxResult) {
+  assert.ok(a.ok && b.ok);
+  assert.equal(b.sheetName, a.sheetName);
+  assert.equal(b.date1904, a.date1904);
+  assert.equal(b.rows.length, a.rows.length);
+  a.rows.forEach((row, r) => {
+    const other = b.rows[r];
+    assert.equal(other.length, row.length, `row ${r + 1} length`);
+    row.forEach((cell, c) => {
+      if (typeof cell === "number" && typeof other[c] === "number") assert.ok(Math.abs(cell - (other[c] as number)) < 1e-9, `row ${r + 1} col ${c + 1}`);
+      else assert.equal(other[c], cell, `row ${r + 1} col ${c + 1}`);
+    });
+  });
+}
+
+test("an .xls saved from the made-up exports reads the same as the .xlsx", () => {
+  // Made with LibreOffice from the .xlsx fixtures (tests/e2e/make-xls.py).
+  for (const name of ["sample-or-export", "e2e-or-export"]) {
+    assertSameRows(readXlsx(fixture(`${name}.xlsx`)), readXlsx(fixture(`${name}.xls`)));
+  }
+});
+
+test("an .xls with long shared strings, numbers, dates, booleans and formulas", () => {
+  const result = readXlsx(fixture("xls-long-strings.xls"));
+  assert.ok(result.ok);
+  // The second sheet is the one named operation.
+  assert.equal(result.sheetName, "operation");
+  assert.equal(result.rows.length, 401);
+  assert.deepEqual(result.rows[0], ["ข้อความ", "รหัส", "จำนวน", "วันที่", "ใช่", "สูตรข้อความ", "สูตรเลข", "สูตรจริงเท็จ"]);
+  const day0 = Date.UTC(1899, 11, 30);
+  for (let i = 1; i <= 400; i += 1) {
+    const row: XlsxCell[] = result.rows[i];
+    const amount = i % 2 ? i * 1.25 : i;
+    const serial = (Date.UTC(2026, 10, 1 + (i % 28)) - day0) / 86_400_000 + ((8 + (i % 9)) * 60 + ((i * 7) % 60)) / 1440;
+    assert.equal(row[0], `ทดสอบข้อความยาว ${i} ` + "ข".repeat(i % 50), `row ${i} text`);
+    assert.equal(row[1], `case-${i}`);
+    assert.equal(row[2], amount);
+    assert.ok(Math.abs((row[3] as number) - serial) < 1e-6, `row ${i} date`);
+    assert.equal(row[4], i % 2 === 0);
+    assert.equal(row[5], `case-${i}-x`);
+    assert.equal(row[6], amount * 2);
+    assert.equal(row[7], amount > 100);
+  }
+});
+
+/** A compound file with 512-byte sectors: one FAT sector, one directory sector, then each stream (4 KB or more, or empty). */
+function compound(streams: { name: string; data: Uint8Array }[]): Buffer {
+  const sector = 512;
+  const sizes = streams.map((stream) => Math.ceil(stream.data.length / sector));
+  const total = 2 + sizes.reduce((sum, n) => sum + n, 0);
+  assert.ok(total <= 128);
+  const header = Buffer.alloc(sector, 0);
+  Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(header, 0);
+  header.writeUInt16LE(0x3e, 0x18);
+  header.writeUInt16LE(3, 0x1a);
+  header.writeUInt16LE(0xfffe, 0x1c);
+  header.writeUInt16LE(9, 0x1e);
+  header.writeUInt16LE(6, 0x20);
+  header.writeUInt32LE(1, 0x2c); // FAT sectors
+  header.writeUInt32LE(1, 0x30); // directory start
+  header.writeUInt32LE(4096, 0x38);
+  header.writeUInt32LE(0xfffffffe, 0x3c); // no mini FAT
+  header.writeUInt32LE(0xfffffffe, 0x44); // no DIFAT
+  for (let n = 0; n < 109; n += 1) header.writeUInt32LE(n === 0 ? 0 : 0xffffffff, 0x4c + n * 4);
+  const fat = Buffer.alloc(sector, 0xff);
+  fat.writeUInt32LE(0xfffffffd, 0);
+  fat.writeUInt32LE(0xfffffffe, 4);
+  const directory = Buffer.alloc(sector, 0);
+  const entry = (index: number, name: string, type: number, start: number, size: number, child = 0xffffffff, right = 0xffffffff) => {
+    const at = index * 128;
+    const encoded = Buffer.from(`${name}\0`, "utf16le");
+    encoded.copy(directory, at);
+    directory.writeUInt16LE(encoded.length, at + 0x40);
+    directory[at + 0x42] = type;
+    directory.writeUInt32LE(0xffffffff, at + 0x44);
+    directory.writeUInt32LE(right, at + 0x48);
+    directory.writeUInt32LE(child, at + 0x4c);
+    directory.writeUInt32LE(start, at + 0x74);
+    directory.writeUInt32LE(size, at + 0x78);
+  };
+  entry(0, "Root Entry", 5, 0xfffffffe, 0, streams.length ? 1 : 0xffffffff);
+  const bodies: Buffer[] = [];
+  let next = 2;
+  streams.forEach((stream, index) => {
+    const count = sizes[index];
+    entry(index + 1, stream.name, 2, count ? next : 0xfffffffe, stream.data.length, 0xffffffff, index + 1 < streams.length ? index + 2 : 0xffffffff);
+    for (let n = 0; n < count; n += 1) fat.writeUInt32LE(n === count - 1 ? 0xfffffffe : next + n + 1, (next + n) * 4);
+    const body = Buffer.alloc(count * sector, 0);
+    Buffer.from(stream.data).copy(body);
+    bodies.push(body);
+    next += count;
+  });
+  return Buffer.concat([header, fat, directory, ...bodies]);
+}
+
+/** A BIFF record: type, length, data. */
+const record = (type: number, data: number[] | Buffer = []) => {
+  const body = Buffer.from(data);
+  const head = Buffer.alloc(4);
+  head.writeUInt16LE(type, 0);
+  head.writeUInt16LE(body.length, 2);
+  return Buffer.concat([head, body]);
+};
+const padded = (...records: Buffer[]) => {
+  const data = Buffer.concat(records);
+  return Buffer.concat([data, Buffer.alloc(Math.max(0, 4096 - data.length))]);
+};
+const bof = (version: number) => record(0x0809, [version & 0xff, version >> 8, 0x05, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+test("refuses an Excel 95 .xls, a password-protected .xls or .xlsx, and other compound files", () => {
+  const empty = new Uint8Array(0);
+  // Excel 5 to 95 keep the workbook in a "Book" stream.
+  const old = failure(readXlsx(compound([{ name: "Book", data: empty }])));
+  assert.equal(old.error, "old-xls");
+  assert.match(old.message, /\.xlsx/);
+  // A BIFF5 workbook under the new name.
+  assert.equal(failure(readXlsx(compound([{ name: "Workbook", data: padded(bof(0x0500), record(0x000a)) }]))).error, "old-xls");
+  // A password on an .xls: FILEPASS in the globals.
+  const locked = failure(readXlsx(compound([{ name: "Workbook", data: padded(bof(0x0600), record(0x002f, [1, 0, 1, 0]), record(0x000a)) }])));
+  assert.equal(locked.error, "encrypted");
+  assert.match(locked.message, /รหัสผ่าน/);
+  // A password on an .xlsx: the package is encrypted inside a compound file.
+  assert.equal(failure(readXlsx(compound([{ name: "EncryptionInfo", data: empty }, { name: "EncryptedPackage", data: empty }]))).error, "encrypted");
+  // A Word 97 document, say.
+  assert.equal(failure(readXlsx(compound([{ name: "WordDocument", data: empty }]))).error, "not-xlsx");
+  // The signature alone.
   const ole = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(512)]);
-  const result = failure(readXlsx(ole));
-  assert.equal(result.error, "xls");
-  assert.equal(result.message, XLS_MESSAGE);
-  assert.match(result.message, /\.xlsx/);
+  assert.equal(failure(readXlsx(ole)).error, "corrupt");
+  // A workbook with no sheet.
+  assert.equal(failure(readXlsx(compound([{ name: "Workbook", data: padded(bof(0x0600), record(0x000a)) }]))).error, "no-sheet");
+});
+
+test("a damaged .xls is refused, never a crash", () => {
+  const good = fixture("e2e-or-export.xls");
+  assert.equal(failure(readXlsx(good.subarray(0, 600))).error, "corrupt");
+  assert.equal(failure(readXlsx(good.subarray(0, Math.floor(good.length / 2)))).error, "corrupt");
+  // A FAT chain that loops on itself.
+  const looped = compound([{ name: "Workbook", data: padded(bof(0x0600), record(0x000a)) }]);
+  looped.writeUInt32LE(2, 512 + 2 * 4);
+  assert.equal(failure(readXlsx(looped)).error, "corrupt");
+  // Flipped bytes anywhere past the header: whatever comes back is a result, not a throw.
+  for (let at = 512; at < good.length; at += 397) {
+    const damaged = Buffer.from(good);
+    damaged[at] ^= 0xff;
+    const result = readXlsx(damaged);
+    assert.equal(typeof result.ok, "boolean");
+  }
+});
+
+test("an .xls is held to the same row and column caps", () => {
+  assert.equal(failure(readXlsx(fixture("xls-long-strings.xls"), { maxRows: 100 })).error, "too-many-rows");
+  assert.equal(failure(readXlsx(fixture("xls-long-strings.xls"), { maxColumns: 5 })).error, "too-many-columns");
+  assert.equal(failure(readXlsx(fixture("xls-long-strings.xls"), { maxFileBytes: 1000 })).error, "too-large");
+});
+
+test("an Excel 2003 XML workbook saved as .xls", () => {
+  const xml = `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+ <Worksheet ss:Name="อื่น"><Table><Row><Cell><Data ss:Type="String">no</Data></Cell></Row></Table></Worksheet>
+ <Worksheet ss:Name="operation">
+  <Table>
+   <Row><Cell><Data ss:Type="String">ID</Data></Cell><Cell><Data ss:Type="String">HN</Data></Cell><Cell ss:Index="4"><Data ss:Type="String">วันที่</Data></Cell></Row>
+   <Row ss:Index="3">
+    <Cell ss:MergeAcross="1"><Data ss:Type="String">A &amp; B</Data></Cell>
+    <Cell><Data ss:Type="Number">0012</Data></Cell>
+    <Cell><Data ss:Type="DateTime">2026-11-30T09:30:00.000</Data></Cell>
+    <Cell><Data ss:Type="DateTime">1899-12-31T13:15:00.000</Data></Cell>
+    <Cell><Data ss:Type="Boolean">1</Data></Cell>
+    <Cell><Data ss:Type="Error">#N/A</Data></Cell>
+    <Cell><Data ss:Type="String"></Data></Cell>
+    <Cell ss:Index="10"><Data ss:Type="String">ข_x000D_ค</Data></Cell>
+   </Row>
+  </Table>
+ </Worksheet>
+</Workbook>`;
+  const result = readXlsx(Buffer.from(xml, "utf8"));
+  assert.ok(result.ok);
+  assert.equal(result.sheetName, "operation");
+  assert.equal(result.date1904, false);
+  assert.deepEqual(result.rows[0], ["ID", "HN", null, "วันที่"]);
+  assert.deepEqual(result.rows[1], []);
+  const row = result.rows[2];
+  assert.equal(row[0], "A & B");
+  assert.equal(row[1], null);
+  assert.equal(row[2], 12);
+  // 30 Nov 2026 is serial 46356 in Excel's 1900 system; a time alone sits on 31 Dec 1899, day 0.
+  assert.ok(Math.abs((row[3] as number) - (46356 + 9.5 / 24)) < 1e-9);
+  assert.ok(Math.abs((row[4] as number) - 13.25 / 24) < 1e-9);
+  assert.equal(row[5], true);
+  assert.equal(row[6], null);
+  assert.equal(row[9], "ข\rค");
+  assert.equal(row.length, 10);
+});
+
+test("a web page or plain text saved as .xls is refused with its own message", () => {
+  const html = failure(readXlsx(Buffer.from("<html><body><table><tr><td>HN</td></tr></table></body></html>")));
+  assert.equal(html.error, "html");
+  assert.match(html.message, /หน้าเว็บ/);
+  assert.equal(failure(readXlsx(Buffer.from("\uFEFF<!DOCTYPE html>\n<html>"))).error, "html");
+  assert.equal(failure(readXlsx(Buffer.from("ID\tHN\n1\t2\n"))).error, "not-xlsx");
+  assert.equal(failure(readXlsx(Buffer.from("<?xml version=\"1.0\"?><root/>"))).error, "not-xlsx");
 });
 
 test("refuses a truncated or damaged file", () => {
@@ -242,8 +444,8 @@ test("hostile XML stays linear: a long unclosed tag, a long attribute run", () =
   assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
 });
 
-test("refuses what is not an .xlsx, and never throws", () => {
-  assert.equal(failure(readXlsx(Buffer.from("<html><table><tr><td>ID</td></tr></table></html>"))).error, "not-xlsx");
+test("refuses what is not an Excel file, and never throws", () => {
+  assert.equal(failure(readXlsx(Buffer.from("<html><table><tr><td>ID</td></tr></table></html>"))).error, "html");
   assert.equal(failure(readXlsx(new Uint8Array(0))).error, "not-xlsx");
   assert.equal(failure(readXlsx(new ArrayBuffer(3))).error, "not-xlsx");
   // A zip that is not a workbook (a .docx, a plain archive).

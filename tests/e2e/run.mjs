@@ -149,6 +149,8 @@ const NOW_FILE = join(tmpdir(), `orskh-e2e-now-${APP_PORT}.txt`);
 const BOT_TOKEN = randomBytes(12).toString("hex");
 const E2E_WORKBOOK = join(repoRoot, "tests", "fixtures", "e2e-or-export.xlsx");
 const SAMPLE_WORKBOOK = join(repoRoot, "tests", "fixtures", "sample-or-export.xlsx");
+// The same file saved as Excel 97–2003 by LibreOffice (tests/e2e/make-xls.py): MX may upload HOSxP's .xls as it comes.
+const E2E_WORKBOOK_XLS = join(repoRoot, "tests", "fixtures", "e2e-or-export.xls");
 // Invented people of the users list, each given their name by hand (README: a claim without the claim page): the
 // nurses by a number, the doctors by email (doctors sign in by email only; `userId` is filled in when the claims are
 // made). The admin's claim is held by the admin's LINE account, so /admin can name who saved the repair's dates.
@@ -2851,7 +2853,7 @@ async function main() {
       await page.click(`${FORM} [data-testid="case-when-change"]`);
       await page.waitForSelector(`${FORM} [data-testid="case-time-section"]`);
     };
-    // An old binary .xls starts with the OLE signature D0 CF 11 E0.
+    // An .xls starts with the OLE signature D0 CF 11 E0; the signature alone is a broken file.
     const OLE = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504)]);
     const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -3907,7 +3909,7 @@ async function main() {
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
     });
 
-    await t("MX upload: closed before 15:00; .xls refused; a file of other days refused; refused by the server at 16:00; accepted in the window, with its summary", async () => {
+    await t("MX upload: closed before 15:00; a broken .xls refused; a file of other days refused; refused by the server at 16:00; accepted in the window, with its summary", async () => {
       setNow("2026-11-16T14:30:00+07:00");
       const ctx = await contextAs(RP.mx);
       const page = await ctx.newPage();
@@ -3942,20 +3944,24 @@ async function main() {
       // the picker speaks Thai (Pong, 17 Nov 2026: "translate upload input to Thai"), the file's name once one is chosen
       assert((await textOf(page, '[data-testid="upload-picker"]')).includes("เลือกไฟล์"), "a Thai เลือกไฟล์ button");
       assert((await textOf(page, '[data-testid="upload-file-name"]')) === "ยังไม่ได้เลือกไฟล์", "no file yet");
-      // an .xls is refused by its name before it is sent
+      // a .csv is refused by its name before it is sent; an .xls is not (Pong, 27 Nov 2026: "accept xls")
+      await page.setInputFiles('[data-testid="upload-file"]', { name: "or-export.csv", mimeType: "text/csv", buffer: Buffer.from("ID,HN\n") });
+      await page.waitForSelector("#upload-file-problem");
+      assert((await textOf(page, "#upload-file-problem")) === "ใช้ไฟล์ Excel (.xlsx หรือ .xls) จาก HOSxP เท่านั้น", `csv by name: ${await textOf(page, "#upload-file-problem")}`);
       await page.setInputFiles('[data-testid="upload-file"]', { name: "or-export.xls", mimeType: "application/vnd.ms-excel", buffer: OLE });
       assert((await textOf(page, '[data-testid="upload-file-name"]')) === "or-export.xls", "the chosen file's name");
-      await page.waitForSelector("#upload-file-problem");
-      assert((await textOf(page, "#upload-file-problem")).includes("บันทึกเป็น .xlsx"), `xls by name: ${await textOf(page, "#upload-file-problem")}`);
-      // an .xls renamed .xlsx is refused by the server, which reads the file itself
-      assert((await send({ name: "or-export.xlsx", mimeType: XLSX_TYPE, buffer: OLE })).includes("บันทึกเป็น .xlsx"), "renamed xls refused");
+      assert((await page.locator("#upload-file-problem").count()) === 0, "an .xls passes the form's check");
+      assert((await page.getAttribute('[data-testid="upload-file"]', "accept")).includes(".xls,"), "the picker offers .xls");
+      // the server reads the file itself: a broken .xls is refused, whatever its name says
+      assert((await send({ name: "or-export.xls", mimeType: "application/vnd.ms-excel", buffer: OLE })).includes("เปิดไฟล์ไม่ได้"), "broken xls refused");
+      assert((await send({ name: "or-export.xlsx", mimeType: XLSX_TYPE, buffer: OLE })).includes("เปิดไฟล์ไม่ได้"), "broken file renamed .xlsx refused");
       // the whole sample holds several days: refused, and the message names the day it must be
       const several = await send(SAMPLE_WORKBOOK);
       assert(several.includes("ต้องเป็นตารางวันที่ 17 พ.ย. 2569 เท่านั้น"), `a file of other days: ${several}`);
       // one short line however many days the file holds (Pong, 17 Nov 2026: "concise alert message")
       assert(!several.includes(",") && several.length < 120, `a span of days, not a list: ${several}`);
-      // the right file, but 16:00 has struck by the time it is sent: the server's clock decides
-      await page.setInputFiles('[data-testid="upload-file"]', E2E_WORKBOOK);
+      // the right file, saved as .xls, but 16:00 has struck by the time it is sent: the server's clock decides
+      await page.setInputFiles('[data-testid="upload-file"]', E2E_WORKBOOK_XLS);
       setNow("2026-11-16T16:00:00+07:00");
       await page.click('[data-testid="upload-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"]')?.textContent?.includes("15:00–16:00"));
@@ -4002,7 +4008,7 @@ async function main() {
       const up = (await db.query("SELECT id, cycle_day::text AS c, target_date::text AS t, uploaded_by, uploader_name, file_name, total_rows, kept, placed FROM workbook_uploads")).rows;
       assert(
         up.length === 1 && up[0].c === "2026-11-16" && up[0].t === "2026-11-17" && up[0].uploaded_by === RP.mx.sub && up[0].uploader_name === RP.mx.name &&
-          up[0].file_name === "e2e-or-export.xlsx" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 8,
+          up[0].file_name === "e2e-or-export.xls" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 8,
         `upload row: ${JSON.stringify(up)}`,
       );
       const cases = (

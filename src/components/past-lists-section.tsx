@@ -79,7 +79,7 @@ export function PastListsSection({
         <div>
           <label className="block">
             <span id="past-file-hint" className="block text-xs text-muted">
-              ไฟล์ .xlsx ไม่เกิน {megabytes(rules.maxBytes)}
+              ไฟล์ .xlsx หรือ .xls ไม่เกิน {megabytes(rules.maxBytes)}
             </span>
             <span className={`file-picker mt-1.5 ${pending ? "file-picker-disabled" : ""}`}>
               <input

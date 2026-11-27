@@ -16,7 +16,7 @@ import { isMx } from "@/lib/roles";
 import { runUploadFlow } from "@/lib/upload-flow";
 import { cleanFileName, errorKind } from "@/lib/safe-text";
 import { saveUpload } from "@/lib/workbook-store";
-import { XLS_MESSAGE, XLSX_LIMITS } from "@/lib/xlsx";
+import { XLSX_LIMITS } from "@/lib/xlsx";
 import { fileProblem } from "./file-check";
 
 /** The page shows the saved upload itself (it is revalidated), so an answer is one line. */
@@ -25,7 +25,7 @@ export type UploadResult = { ok: true; message: string } | { ok: false; error: s
 const NOT_ALLOWED: UploadResult = { ok: false, error: "อัปโหลดได้เฉพาะผู้จัดการตาราง (MX) และผู้ดูแลระบบ" };
 const FAILED: UploadResult = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
 
-const RULES = { maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE };
+const RULES = { maxBytes: XLSX_LIMITS.maxFileBytes };
 
 /**
  * Uploads MX's HOSxP file for the next workday. Server actions can be called by anyone who can reach the site, so the
