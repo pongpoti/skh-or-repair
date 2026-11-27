@@ -24,7 +24,7 @@ function partsOf(entry: ThaChalomRoomDay): RoomPillPart[] {
  * board is (Pong, 27 Nov 2026: "Arrange component of ท่าฉลอม exact same as สมทุรสาคร"; components/suite-board.tsx): the
  * floor plan alone on a phone, each OR in its department's colour, which a sideways swipe moves to the workday before or
  * after; from 1024px the list of the day's open rooms beside it, on the same glass card as รพ.สมุทรสาคร's ห้องที่เปิด, the
- * Scope room among them on the days it is in use (it is not on the plan). No cases and no bookings yet: nothing on it
+ * Scope room among them on the days it is in use. No cases and no bookings yet: nothing on it
  * is tapped.
  */
 export function ThaChalomBoard({ date, pick, pathname = THA_CHALOM_PATH }: { date: string; pick: DatePick | null; pathname?: string }) {

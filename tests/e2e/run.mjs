@@ -1313,7 +1313,9 @@ async function main() {
       // every weekday: OR 2 is ศัลยกรรมหลอดเลือด's, OR 3 is being turned into an intervention room
       assert(JSON.stringify(ors[1].slice(2)) === JSON.stringify(["open", "OR 2 · ศัลยกรรมหลอดเลือด", ["VAS"]]), `OR 2: ${JSON.stringify(ors[1])}`);
       assert(JSON.stringify(ors[2].slice(2)) === JSON.stringify(["closed", "OR 3 · ปรับปรุงเป็นห้อง Intervention", ["ปรับปรุง"]]), `OR 3: ${JSON.stringify(ors[2])}`);
-      assert((await page.locator(".tcp-room, .tcp-grid-box").count()) === 15, "the other rooms as drawn");
+      assert((await page.locator(".tcp-room, .tcp-grid-box").count()) === 14, "the other rooms as drawn");
+      // the Scope room, the square by the corridor's foot (Pong, 27 Nov 2026: "The circle room is scope")
+      assert((await page.locator('.tcp-scope[data-room="scope"] .tcp-scope-name').textContent()) === "Scope", "the Scope room on the plan");
       const roomsOf = () =>
         page.$$eval('[data-testid="tc-room"]', (els) => els.map((el) => [el.dataset.room, el.querySelector(".room-pill").getAttribute("title")]));
       const rooms = await roomsOf();
@@ -1348,6 +1350,19 @@ async function main() {
         `the Wednesday's list: ${JSON.stringify(await roomsOf())}`,
       );
       assert((await plainText(page, '[data-testid="tc-open-count"]')) === "3 ห้อง", "three rooms open on a Wednesday");
+      const scopeOn = () =>
+        page.$eval('.tcp-scope[data-room="scope"]', (el) => [el.dataset.state, el.getAttribute("aria-label"), [...el.querySelectorAll(".tcp-or-dept, .tcp-or-thai")].map((label) => label.textContent)]);
+      assert(JSON.stringify(await scopeOn()) === JSON.stringify(["free", "ห้อง Scope · ว่าง", ["ว่าง"]]), `the Scope room on a Wednesday: ${JSON.stringify(await scopeOn())}`);
+      // the next day, a Thursday: the Scope room is ตา's, on the plan and in the list
+      const thursday = new Date(`${wednesday}T00:00:00Z`);
+      thursday.setUTCDate(thursday.getUTCDate() + 1);
+      const thu = thursday.toISOString().slice(0, 10);
+      await page.goto(`${APP}/tha-chalom?date=${thu}`, { waitUntil: "networkidle" });
+      if ((await page.getAttribute("header time", "datetime")) === thu) {
+        assert(JSON.stringify(await scopeOn()) === JSON.stringify(["open", "ห้อง Scope · จักษุ", ["EYE"]]), `the Scope room on a Thursday: ${JSON.stringify(await scopeOn())}`);
+        assert((await page.locator('[data-testid="tc-room"][data-room="scope"]').count()) === 1, "the Scope room in the Thursday's list");
+      }
+      await page.goto(`${APP}/tha-chalom?date=${wednesday}`, { waitUntil: "networkidle" });
       // a picked day goes along to the other hospital and back
       assert(JSON.stringify((await tabsOf()).map(([, , href]) => href)) === JSON.stringify([`/skh?date=${wednesday}`, null]), `the switch keeps the day: ${JSON.stringify(await tabsOf())}`);
       await page.click('[data-testid="place-tab"][data-place="skh"]');

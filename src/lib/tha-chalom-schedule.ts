@@ -36,7 +36,7 @@ export type ThaChalomRoom = {
   prefix: "OR" | null;
 };
 
-/** The rooms in the table's order: OR 1 to 4 on the plan, then the Scope room (not on Pong's plan). */
+/** The rooms in the table's order: OR 1 to 4, then the Scope room (Pong, 27 Nov 2026: the square by the corridor's foot). */
 export const THA_CHALOM_ROOM_LIST: readonly ThaChalomRoom[] = [
   { id: "or-1", number: "1", name: "OR 1", prefix: "OR" },
   { id: "or-2", number: "2", name: "OR 2", prefix: "OR" },
