@@ -5,17 +5,23 @@ import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { AddCase, type CaseRequest } from "@/components/add-case";
 import type { OwnBookings } from "@/components/booking-actions";
 import type { DatePick } from "@/components/board-date-picker";
+import { BoardNotices } from "@/components/board-notices";
 import { CaseList, isCaseBubbleOpen } from "@/components/case-list";
 import { DaySwipe } from "@/components/day-swipe";
 import { RoomPill, type RoomPillPart } from "@/components/room-pill";
 import { CLOSE_ICON, EXPAND_ICON, isPopoverOpen, PLUS, RoomCard, RoomHead, SHRINK_ICON, type CaseAdding } from "@/components/suite-board";
 import { ThaChalomPlan } from "@/components/tha-chalom-plan";
+import type { BoardNotice } from "@/lib/board-notices";
 import type { BoardRow } from "@/lib/board-rows";
 import { boardHref, thaiDate } from "@/lib/days";
 import { THA_CHALOM_PATH } from "@/lib/places";
 import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "@/lib/repair";
 import { openRooms, thaChalomAllocation, thaChalomDay, usageText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha-chalom-schedule";
 
+
+/** ท่าฉลอม's notice strip has no notices (ThaChalomBoard). */
+const NO_NOTICES: readonly BoardNotice[] = [];
+const noNotice = () => {};
 /** A free half's badge: the plan's light floor, with dark text. */
 const FREE_COLOR = "#E6DCCF";
 /** OR 3 under works: the board's closed-room taupe. */
@@ -140,6 +146,10 @@ export function ThaChalomBoard({
     <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="relative mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col overflow-hidden sm:px-3 lg:flex-row lg:gap-6 lg:px-6 lg:pt-3 lg:pb-4">
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:overflow-visible">
+          {/* รพ.สมุทรสาคร's notice strip, the same height, so the plan sits where its plan does (Pong, 27 Nov 2026: "No
+              booking button and notification bar on ท่าฉลอม"). Empty: its one notice, no HOSxP list yet, has no meaning
+              here, where the day's cases are its bookings. */}
+          <BoardNotices notices={NO_NOTICES} openId={null} onOpenChange={noNotice} />
           {/* The plan stops above the จองห้อง button and its glow, as on รพ.สมุทรสาคร's board. */}
           <DaySwipe
             day={date}

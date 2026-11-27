@@ -1389,11 +1389,15 @@ async function main() {
       await page.waitForURL(`${APP}/tha-chalom?date=${wednesday}`);
       await page.waitForSelector('[data-testid="place-tab"][data-place="tha-chalom"][aria-current="page"]');
       assert((await page.getAttribute("header time", "datetime")) === wednesday, "ท่าฉลอม on the same Wednesday again");
-      // a nurse books nothing (the doctors book, below); no notices and no HOSxP list here; the bar and its menu are
-      // รพ.สมุทรสาคร's, for the same person
-      for (const id of ["add-case-button", "notice-strip", "room-overview"]) {
+      // a nurse books nothing (the doctors book, below); no HOSxP list here; the bar and its menu are รพ.สมุทรสาคร's, for
+      // the same person
+      for (const id of ["add-case-button", "room-overview"]) {
         assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's: ${id}`);
       }
+      // รพ.สมุทรสาคร's notice strip above the plan (Pong, 27 Nov 2026: "No booking button and notification bar on
+      // ท่าฉลอม"), empty: its one notice (no HOSxP list yet) means nothing here
+      assert((await page.locator('[data-testid="notice-strip"]').count()) === 1, "the notice strip");
+      assert((await page.locator("[data-notice-id]").count()) === 0, "with no notices");
       const tcMenu = await menuLinks();
       assert(JSON.stringify(tcMenu) === JSON.stringify(skhMenu), `the same account menu: ${JSON.stringify(tcMenu)} / ${JSON.stringify(skhMenu)}`);
       // the logo goes to ท่าฉลอม's own day, as รพ.สมุทรสาคร's goes to its board
@@ -1409,10 +1413,12 @@ async function main() {
         const plan = await page.locator('[data-testid="tha-chalom-plan"]').boundingBox();
         const list = await page.locator('[data-testid="tc-rooms"]').boundingBox();
         const bar = await page.locator("header").boundingBox();
+        const strip = await page.locator('[data-testid="notice-strip"]').boundingBox();
+        assert(strip.y >= bar.y + bar.height - 0.5 && strip.y - (bar.y + bar.height) <= 12.5 && strip.height >= 56, `the strip under the bar at ${width}px: ${JSON.stringify([bar, strip])}`);
         assert(plan.y >= bar.y + bar.height - 0.5 && plan.y + plan.height <= height + 0.5 && plan.x >= 0 && plan.x + plan.width <= width + 0.5, `the plan fits at ${width}px: ${JSON.stringify(plan)}`);
         if (width < 1024) {
           assert(list === null, `no list on a phone at ${width}px: ${JSON.stringify(list)}`);
-          assert(plan.y - (bar.y + bar.height) <= 8, `the plan right under the bar at ${width}px: ${JSON.stringify([bar, plan])}`);
+          assert(plan.y >= strip.y + strip.height - 0.5 && plan.y - (strip.y + strip.height) <= 8, `the plan right under the strip at ${width}px: ${JSON.stringify([strip, plan])}`);
           // as wide as the screen with รพ.สมุทรสาคร's margins (Pong, 27 Nov 2026: "same screen margin like สมุทรสาคร"):
           // the plan 4px in from each side, its frame a few px further (6px at 390px, as รพ.สมุทรสาคร's)
           const frame = await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox();
