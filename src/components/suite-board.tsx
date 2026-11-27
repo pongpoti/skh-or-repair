@@ -63,14 +63,14 @@ export type CaseAdding = {
   onDay: (date: string) => Promise<DayResult>;
 };
 
-const PLUS = (
+export const PLUS = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
     <path d="M12 5v14M5 12h14" />
   </svg>
 );
 
 /** Whether a popover (the account menu) is open. False where the Popover API is missing, since nothing can be open. */
-function isPopoverOpen(): boolean {
+export function isPopoverOpen(): boolean {
   try {
     return document.querySelector(":popover-open") !== null;
   } catch {
@@ -182,19 +182,19 @@ function RoomOverview({
   );
 }
 
-const EXPAND_ICON = (
+export const EXPAND_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
   </svg>
 );
 
-const SHRINK_ICON = (
+export const SHRINK_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
   </svg>
 );
 
-const CLOSE_ICON = (
+export const CLOSE_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
     <path d="M6 6l12 12M18 6L6 18" />
   </svg>
@@ -203,10 +203,10 @@ const CLOSE_ICON = (
 /**
  * The top of a room's list, in the sheet and in the full screen card alike: the room's name, how many cases, the no-table
  * mark, the department badges on their own line, and the buttons (`children`) at the right, over a wash of the
- * department's colour.
+ * department's colour. รพ.ท่าฉลอม's board (components/tha-chalom-board.tsx) has the same.
  */
-function RoomHead({
-  room,
+export function RoomHead({
+  title,
   count,
   allocation,
   noTable,
@@ -216,7 +216,8 @@ function RoomHead({
   handle = false,
   children,
 }: {
-  room: Room;
+  /** The room's name: "OR 4". */
+  title: string;
   count: number;
   allocation: ReturnType<typeof allocationFor>;
   noTable: boolean;
@@ -241,7 +242,7 @@ function RoomHead({
           ) : null}
           <div className="flex min-h-11 items-center gap-2.5">
             <h2 ref={headingRef} id={headingId} tabIndex={-1} className="text-xl leading-snug font-bold text-ink outline-none">
-              {roomLabel(room)}
+              {title}
             </h2>
             <span className="count-tag">
               <span className="tabular-nums">{count}</span> รายการ
@@ -286,7 +287,7 @@ const ROOM_CARD =
  * read across and then down, so a computer's width shows twice as many. The shrink button, Escape or
  * a tap outside the card closes it, back to the sheet as it was, the focus on the button that opened it.
  */
-function RoomCard({ onClose, headingRef, children }: { onClose: () => void; headingRef: RefObject<HTMLHeadingElement | null>; children: ReactNode }) {
+export function RoomCard({ onClose, headingRef, children }: { onClose: () => void; headingRef: RefObject<HTMLHeadingElement | null>; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   // Whether the press began on the backdrop: a selection dragged out past the card ends with a click on the dialog
   // itself, which must not close it.
@@ -547,7 +548,7 @@ export function SuiteBoard({
           {open ? (
             <div className="flex min-h-0 flex-1 flex-col">
               {room ? (
-                <RoomHead room={room} count={cases.length} allocation={allocation} noTable={noTable} headingRef={headingRef} handle>
+                <RoomHead title={roomLabel(room)} count={cases.length} allocation={allocation} noTable={noTable} headingRef={headingRef} handle>
                   {/* The room's list in a floating card in the middle of the screen (RoomCard). */}
                   <button
                     type="button"
@@ -578,7 +579,7 @@ export function SuiteBoard({
               {full && room ? (
                 <RoomCard onClose={() => setFull(false)} headingRef={cardHeadingRef}>
                   <RoomHead
-                    room={room}
+                    title={roomLabel(room)}
                     count={cases.length}
                     allocation={allocation}
                     noTable={noTable}

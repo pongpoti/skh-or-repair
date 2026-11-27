@@ -1,5 +1,5 @@
 import { addDays } from "./days.ts";
-import { DEPARTMENTS, weekdayIndex, weekOfMonth, type Department, type DeptCode } from "./allocation.ts";
+import { DEPARTMENTS, weekdayIndex, weekOfMonth, type Department, type DeptCode, type RoomAllocation } from "./allocation.ts";
 import { PICK_AHEAD_DAYS } from "./board-day.ts";
 import { isWorkday, type Holiday } from "./holidays.ts";
 
@@ -118,6 +118,42 @@ export function usageText(use: ThaChalomUse): string {
 export function roomDayText(entry: ThaChalomRoomDay): string {
   const parts = entry.split ? [`เช้า ${usageText(entry.am)}`, `บ่าย ${usageText(entry.pm)}`] : [usageText(entry.am)];
   return [entry.room.name, ...parts].join(" · ");
+}
+
+/** The ids of รพ.ท่าฉลอม's rooms, as its bookings store them (cases.room_id with cases.place 'tha-chalom'). */
+export const THA_CHALOM_ROOM_IDS: readonly string[] = THA_CHALOM_ROOM_LIST.map((room) => room.id);
+
+/** A room of รพ.ท่าฉลอม by its id, or null. */
+export function thaChalomRoom(id: string | null | undefined): ThaChalomRoom | null {
+  return THA_CHALOM_ROOM_LIST.find((room) => room.id === id) ?? null;
+}
+
+/** A room's name as the booking form and the messages say it: "OR 4", or "ห้อง Scope"; the id for an unknown one. */
+export function thaChalomRoomName(id: string): string {
+  return thaChalomRoom(id)?.name ?? id;
+}
+
+/**
+ * The room a booking at รพ.ท่าฉลอม takes on `date` (Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also", then on the
+ * decision card "No, own department's room only"): the room the hospital's table gives the doctor's department that day,
+ * for the whole day or one half of it (OR 4 on a Wednesday: EYE in the morning, ENT in the afternoon). Null on a day the
+ * department has no room there (no borrowing a ว่าง room, and no dressing room), on a weekend, and for no department.
+ */
+export function thaChalomBookingRoom(dept: DeptCode | null, date: string): string | null {
+  if (!dept) return null;
+  const held = (use: ThaChalomUse) => use.kind === "dept" && use.dept.code === dept;
+  return thaChalomDay(date).find((entry) => held(entry.am) || held(entry.pm))?.room.id ?? null;
+}
+
+/** Who holds a room at รพ.ท่าฉลอม on `date`, in รพ.สมุทรสาคร's shape (lib/allocation.ts), for the badges; null when no one does. */
+export function thaChalomAllocation(roomId: string, date: string): RoomAllocation | null {
+  const entry = thaChalomDay(date).find((item) => item.room.id === roomId);
+  if (!entry) return null;
+  const owner = (use: ThaChalomUse) => (use.kind === "dept" ? use.dept : null);
+  const am = owner(entry.am);
+  const pm = owner(entry.pm);
+  if (!am && !pm) return null;
+  return { am, pm, split: am?.code !== pm?.code, repair: false };
 }
 
 /** The day's open rooms, in the list's order: the ones a department has for at least half of the day. */

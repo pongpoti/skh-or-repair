@@ -1298,14 +1298,16 @@ async function main() {
         `the switch names the hospital: ${JSON.stringify(await tabsOf())}`,
       );
       assert((await page.locator('[data-testid="board-date-chevron"]').count()) === 1, "the date picks another day");
+      // an open room is a button that opens its cases (its floor carries its name and day, and ไม่มีเคส when empty);
+      // the others are pictures named the same way
       const orsOf = () =>
         page.$$eval(".tcp-or", (els) =>
           els.map((el) => [
             el.dataset.room,
             el.querySelector(".tcp-or-num").textContent,
             el.dataset.state,
-            el.getAttribute("aria-label"),
-            [...el.querySelectorAll(".tcp-or-dept, .tcp-or-thai")].map((label) => label.textContent),
+            (el.getAttribute("aria-label") ?? el.querySelector(".tcp-or-shape").getAttribute("aria-label")).replace(/ · ไม่มีเคส$/, ""),
+            [...el.querySelectorAll(".tcp-or-dept, .tcp-or-thai")].map((item) => item.textContent),
           ]),
         );
       const ors = await orsOf();
@@ -1313,6 +1315,11 @@ async function main() {
       // every weekday: OR 2 is ศัลยกรรมหลอดเลือด's, OR 3 is being turned into an intervention room
       assert(JSON.stringify(ors[1].slice(2)) === JSON.stringify(["open", "OR 2 · ศัลยกรรมหลอดเลือด", ["VAS"]]), `OR 2: ${JSON.stringify(ors[1])}`);
       assert(JSON.stringify(ors[2].slice(2)) === JSON.stringify(["closed", "OR 3 · ปรับปรุงเป็นห้อง Intervention", ["ปรับปรุง"]]), `OR 3: ${JSON.stringify(ors[2])}`);
+      assert(
+        JSON.stringify(await page.$$eval('.tcp-or-shape[role="button"]', (els) => els.map((el) => el.closest("[data-room]").dataset.room))) ===
+          JSON.stringify(ors.filter(([, , state]) => state === "open").map(([room]) => room).concat((await page.locator('.tcp-scope.is-open').count()) ? ["scope"] : [])),
+        "the open rooms, and only they, open their cases",
+      );
       assert((await page.locator(".tcp-room, .tcp-grid-box").count()) === 14, "the other rooms as drawn");
       // turned a quarter clockwise (Pong, 27 Nov 2026): ORs 1 to 3 down the right, OR 4 at the foot on the left
       const orBox = async (id) => page.locator(`.tcp-or[data-room="${id}"] .tcp-or-shape`).boundingBox();
@@ -1353,9 +1360,13 @@ async function main() {
           JSON.stringify(["OR 1 · ออร์โธปิดิกส์ (TKA)", "OR 2 · ศัลยกรรมหลอดเลือด", "OR 4 · เช้า จักษุ · บ่าย โสต ศอ นาสิก"]),
         `the Wednesday's list: ${JSON.stringify(await roomsOf())}`,
       );
-      assert((await plainText(page, '[data-testid="tc-open-count"]')) === "3 ห้อง", "three rooms open on a Wednesday");
+      assert((await plainText(page, '[data-testid="tc-open-count"]')) === "3 ห้อง · 0 รายการ", "three rooms open on a Wednesday, no bookings");
       const scopeOn = () =>
-        page.$eval('.tcp-scope[data-room="scope"]', (el) => [el.dataset.state, el.getAttribute("aria-label"), [...el.querySelectorAll(".tcp-or-dept, .tcp-or-thai")].map((label) => label.textContent)]);
+        page.$eval('.tcp-scope[data-room="scope"]', (el) => [
+          el.dataset.state,
+          (el.getAttribute("aria-label") ?? el.querySelector(".tcp-or-shape").getAttribute("aria-label")).replace(/ · ไม่มีเคส$/, ""),
+          [...el.querySelectorAll(".tcp-or-dept, .tcp-or-thai")].map((item) => item.textContent),
+        ]);
       assert(JSON.stringify(await scopeOn()) === JSON.stringify(["free", "ห้อง Scope · ว่าง", ["ว่าง"]]), `the Scope room on a Wednesday: ${JSON.stringify(await scopeOn())}`);
       // the next day, a Thursday: the Scope room is ตา's, on the plan and in the list
       const thursday = new Date(`${wednesday}T00:00:00Z`);
@@ -1378,9 +1389,10 @@ async function main() {
       await page.waitForURL(`${APP}/tha-chalom?date=${wednesday}`);
       await page.waitForSelector('[data-testid="place-tab"][data-place="tha-chalom"][aria-current="page"]');
       assert((await page.getAttribute("header time", "datetime")) === wednesday, "ท่าฉลอม on the same Wednesday again");
-      // no cases and no bookings at รพ.ท่าฉลอม yet; the bar and its menu are รพ.สมุทรสาคร's, for the same person
+      // a nurse books nothing (the doctors book, below); no notices and no HOSxP list here; the bar and its menu are
+      // รพ.สมุทรสาคร's, for the same person
       for (const id of ["add-case-button", "notice-strip", "room-overview"]) {
-        assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's cases: ${id}`);
+        assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's: ${id}`);
       }
       const tcMenu = await menuLinks();
       assert(JSON.stringify(tcMenu) === JSON.stringify(skhMenu), `the same account menu: ${JSON.stringify(tcMenu)} / ${JSON.stringify(skhMenu)}`);
@@ -1414,7 +1426,7 @@ async function main() {
       }
       // the list's card where รพ.สมุทรสาคร's ห้องที่เปิด is, the same size, at 1280px
       assert(WIDTHS.at(-1) === 1280, "measured at 1280px");
-      const tcList = await page.locator('[data-testid="tc-rooms"]').boundingBox();
+      const tcList = await page.locator("aside[data-room-view]").boundingBox();
       await page.setViewportSize({ width: 390, height: 844 });
       await shoot(page, "tha-chalom", { full: false });
       await page.setViewportSize({ width: 1280, height: 900 });
@@ -4646,6 +4658,88 @@ async function main() {
       assert(errors.length === 0, `page errors: ${errors.join("; ")}`);
       await ctx.close();
       await db.query("DELETE FROM cases WHERE surgeon_id = $1 AND op_date BETWEEN '2026-12-01' AND '2026-12-04'", [dr]);
+    });
+
+    await t("รพ.ท่าฉลอม: a doctor books their department's room in its table with the same form; its rooms open their booked cases; each hospital's bookings stay on its own board", async () => {
+      // Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also", then on the decision card "No, own department's room only".
+      // Tuesday 1 Dec 2026 at 10:00: Wednesday is the first day that can be booked. Doctor Y is a general surgeon, whose
+      // room at รพ.ท่าฉลอม is OR 1 on Tuesdays and Thursdays only.
+      setNow("2026-12-01T10:00:00+07:00");
+      const HN_TC = "7300001";
+      const ctx = await contextAs(RP.drY);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/tha-chalom?date=2026-12-03`, { waitUntil: "networkidle" });
+      await page.waitForSelector('[data-testid="add-case-button"]');
+      await touchTargets(page, "รพ.ท่าฉลอม, a doctor");
+      await page.click('[data-testid="add-case-button"]');
+      await page.waitForSelector(`${FORM}[open]`);
+      await dayViewRead(page);
+      // Wednesday: OR 1 is orthopaedics', and no other room is lent
+      assert((await dateValue(page, "case-date")) === "2026-12-02", "the first day that can be booked");
+      assert((await page.locator(`${FORM} [data-testid="day-slot"]:enabled`).count()) === 0, "no time on a day without the department's room");
+      await page.click('[data-testid="case-day-next"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="case-date"]')?.dataset.value === "2026-12-03");
+      await dayViewRead(page);
+      assert((await textOf(page, '[data-testid="case-day-room"]')) === "เวลาผ่าตัด · OR 1", await textOf(page, '[data-testid="case-day-room"]'));
+      await ownerShot(page, "tha-chalom-booking-time.png");
+      await toDetails(page, 540);
+      await page.fill(`${FORM} input[data-testid="case-hn"]`, HN_TC);
+      await page.fill('[data-testid="case-operation"]', "Lap chole");
+      // the department's room alone: no dressing room to pick here
+      assert((await page.locator('[data-testid="case-room-dressing"]').count()) === 0, "no dressing room at รพ.ท่าฉลอม");
+      assert((await textOf(page, '[data-testid="case-room-dept-name"]')) === "OR 1", await textOf(page, '[data-testid="case-room-dept-name"]'));
+      assert((await page.getAttribute('[data-testid="case-room"]', "data-room-id")) === "or-1", "OR 1");
+      await ownerShot(page, "tha-chalom-booking-form.png");
+      await page.click('[data-testid="case-submit"]');
+      await page.waitForFunction(
+        (want) => document.querySelector('[data-testid="add-case-dialog"] .inline-status-success')?.textContent?.trim() === want,
+        "จอง OR 1 วันพฤหัสบดีที่ 3 ธ.ค. 2569 แล้ว",
+      );
+      const saved = (await db.query("SELECT place, room_id, start_min, end_min FROM cases WHERE hn = $1 AND removed_at IS NULL", [HN_TC])).rows;
+      assert(JSON.stringify(saved) === JSON.stringify([{ place: "tha-chalom", room_id: "or-1", start_min: 540, end_min: 600 }]), JSON.stringify(saved));
+      // the form's list is the doctor's bookings at this hospital
+      assert((await textOf(page, '[data-testid="my-case-hn"]')) === `HN ${HN_TC}`, "the booking in the form's own list");
+      await page.click('[data-testid="add-case-close"]');
+      await page.waitForSelector(`${FORM}:not([open])`, { state: "attached" });
+
+      // OR 1 on the plan opens its cases: the booking, with its time and the doctor's own actions
+      await page.click('.tcp-or[data-room="or-1"] .tcp-or-shape');
+      await page.waitForSelector(".room-sheet.is-open .case-row");
+      assert(new URL(page.url()).searchParams.get("room") === "or-1", page.url());
+      assert((await page.locator('.tcp-or[data-room="or-1"].is-selected').count()) === 1, "OR 1 marked open on the plan");
+      assert((await textOf(page, '.room-sheet [data-testid="row-hn"]')) === `HN ${HN_TC}`, "the doctor sees their patient's HN");
+      assert((await textOf(page, '.room-sheet [data-testid="row-time"]')).startsWith("09:00–10:00"), await textOf(page, '.room-sheet [data-testid="row-time"]'));
+      await ownerShot(page, "tha-chalom-room.png");
+      await page.click('.room-sheet [data-testid="row-manage"]');
+      await page.waitForSelector('[data-testid="booking-sheet"][open][data-step="menu"]');
+      assert(
+        (await textOf(page, '[data-testid="booking-sheet-where"]')) === "OR 1 · ลำดับ 1 · วันพฤหัสบดีที่ 3 ธ.ค. 2569",
+        await textOf(page, '[data-testid="booking-sheet-where"]'),
+      );
+      await page.click('[data-testid="booking-sheet-close"]');
+      await page.waitForSelector('[data-testid="booking-sheet"]:not([open])', { state: "attached" });
+      // a room with no department that day opens nothing
+      assert((await page.locator('.tcp-or[data-room="or-3"] .tcp-or-shape[role="button"]').count()) === 0, "OR 3 under works opens nothing");
+
+      // on a computer the open rooms' list counts the cases and opens a room too
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.goto(`${APP}/tha-chalom?date=2026-12-03`, { waitUntil: "networkidle" });
+      assert((await plainText(page, '[data-testid="tc-open-count"]')) === "4 ห้อง · 1 รายการ", await plainText(page, '[data-testid="tc-open-count"]'));
+      await page.click('[data-testid="tc-open-or-1"]');
+      await page.waitForSelector(".room-sheet.is-open .case-row");
+      await page.setViewportSize({ width: 390, height: 844 });
+
+      // another doctor and a nurse see the booking on รพ.ท่าฉลอม's board, without its HN; รพ.สมุทรสาคร's board has none of it
+      const nurse = (await htmlAs(RP.nurse, "/tha-chalom?date=2026-12-03&room=or-1")).html;
+      assert(nurse.includes("Lap chole") && !nurse.includes(HN_TC), "the nurse sees the case, not the HN");
+      const skh = (await htmlAs(RP.drY, "/skh?date=2026-12-03")).html;
+      assert(!skh.includes(HN_TC), "nothing of it on รพ.สมุทรสาคร's board, nor in its form's list");
+
+      assert(errors.length === 0, `page errors: ${errors.join("; ")}`);
+      await ctx.close();
+      await db.query("DELETE FROM cases WHERE hn = $1", [HN_TC]);
     });
 
     await t("doctors' tutorial: a doctor's first visit opens it once; a practice booking on a made-up day, before and after the 16:00 upload, every symbol explained; nothing saved", async () => {

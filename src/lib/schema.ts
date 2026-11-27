@@ -296,6 +296,22 @@ BEGIN
   END IF;
 END $$;
 
+-- The hospital of the booking (Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also"; lib/places.ts): 'skh' for
+-- รพ.สมุทรสาคร, 'tha-chalom' for รพ.ท่าฉลอม. room_id is one of that hospital's rooms: OR 1 to OR 13 at รพ.สมุทรสาคร, OR 1
+-- to OR 4 or the Scope room at รพ.ท่าฉลอม (lib/tha-chalom-schedule.ts). Every booking made before is at รพ.สมุทรสาคร.
+-- Applied to existing databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'place' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN place text NOT NULL DEFAULT 'skh' CONSTRAINT cases_place_check CHECK (place IN ('skh', 'tha-chalom'));
+    ALTER TABLE cases DROP CONSTRAINT IF EXISTS cases_room_id_check;
+    ALTER TABLE cases ADD CONSTRAINT cases_place_room_check CHECK (
+      (place = 'skh' AND room_id ~ '^or-([1-9]|1[0-3])$') OR
+      (place = 'tha-chalom' AND room_id IN ('or-1', 'or-2', 'or-3', 'or-4', 'scope'))
+    );
+  END IF;
+END $$;
+
 -- The ventilation repair's two halves, which an admin can move on /admin (lib/repair-store.ts; the room layout of each
 -- half is in lib/repair.ts). Seeded once with the planned dates; a saved row is never overwritten by the seed.
 -- updated_by is the LINE sub of the admin who saved it (NULL for the seed).

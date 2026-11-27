@@ -112,11 +112,11 @@ export function DayView({
       ) : null}
       <div
         className={`day-grid relative rounded-xl border bg-white ${invalid ? "border-[var(--stop)]" : "border-line"}`}
-        style={{ height: HEIGHT + 16, "--half-hour": `${HALF_HOUR}px`, "--gutter": GUTTER } as React.CSSProperties}
+        style={{ height: HEIGHT + 24, "--half-hour": `${HALF_HOUR}px`, "--gutter": GUTTER } as React.CSSProperties}
         aria-describedby={describedBy}
       >
-        {/* The half hours, each a tap target, labelled on the left as Google Calendar's hours. */}
-        <ol className="absolute inset-x-0 top-2" style={{ height: HEIGHT }} aria-label="ช่วงเวลา">
+        {/* The half hours, each a tap target; the hours named on the left as Google Calendar's, and 08:30 where the day starts. */}
+        <ol className="absolute inset-x-0 top-3" style={{ height: HEIGHT }} aria-label="ช่วงเวลา">
           {Array.from({ length: SLOTS }, (_, index) => {
             const start = DAY_START + index * 30;
             const free = tapTime(start, busy);
@@ -127,9 +127,11 @@ export function DayView({
                 style={{ top: index * HALF_HOUR, height: HALF_HOUR }}
                 data-hour={start % 60 === 0 || undefined}
               >
-                <span className="day-hour" aria-hidden="true">
-                  {clockText(start)}
-                </span>
+                {start % 60 === 0 || start === DAY_START ? (
+                  <span className="day-hour" aria-hidden="true">
+                    {clockText(start)}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className="day-slot-button"
@@ -148,7 +150,7 @@ export function DayView({
         </ol>
 
         {/* The bookings already there, side by side where they overlap (a department's two rooms). */}
-        <div className="pointer-events-none absolute top-2 right-1.5" style={{ left: GUTTER, height: HEIGHT }}>
+        <div className="pointer-events-none absolute top-3 right-1.5" style={{ left: GUTTER, height: HEIGHT }}>
           {lanes(timed).map(({ item, lane, of }) => {
             const height = (item.end - item.start) * PER_MINUTE - 2;
             return (
@@ -178,7 +180,7 @@ export function DayView({
         {value ? (
           <div
             className={`day-pick${readOnly ? " is-fixed" : ""}${clash ? " is-clash" : ""}`}
-            style={{ top: top(value.start) + 8 + 1, height: (value.end - value.start) * PER_MINUTE - 2, left: GUTTER }}
+            style={{ top: top(value.start) + 12 + 1, height: (value.end - value.start) * PER_MINUTE - 2, left: GUTTER }}
             data-testid="day-pick"
             data-start={value.start}
             data-end={value.end}

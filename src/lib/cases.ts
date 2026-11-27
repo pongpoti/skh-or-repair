@@ -1,6 +1,7 @@
 import "server-only";
 import type { Pool, PoolClient } from "pg";
 import type { AddedCase, CaseInput } from "./added-cases";
+import type { PlaceId } from "./places";
 import type { Shift } from "./schedule";
 import { fullName, userForPhone, userForSession, type ListedUser, type SessionIdentity } from "./user-list";
 
@@ -34,11 +35,12 @@ interface CaseRow {
   edited_at: Date | null;
   start_min: number | null;
   end_min: number | null;
+  place: PlaceId;
 }
 
 const COLUMNS =
   "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.operation, c.shift, c.dressing, c.scrub_does, c.note, " +
-  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.queued_at AS booked_at, c.edited_at, c.start_min, c.end_min";
+  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.queued_at AS booked_at, c.edited_at, c.start_min, c.end_min, c.place";
 
 function toCase(r: CaseRow): AddedCase {
   return {
@@ -64,6 +66,8 @@ function toCase(r: CaseRow): AddedCase {
     // Both or neither (db/schema.sql cases_time_check).
     start: r.start_min,
     end: r.end_min,
+    // รพ.ท่าฉลอม's bookings say so; รพ.สมุทรสาคร's leave it out, as they always have.
+    ...(r.place === "tha-chalom" ? { place: r.place } : {}),
   };
 }
 
@@ -76,7 +80,6 @@ export async function doctorFor(pool: Q, who: string | SessionIdentity): Promise
   return user?.type === "DR" ? user : null;
 }
 
-/** Every case on one day, in queue order (the earliest queue time first). */
 /**
  * Runs `fn` in a transaction that holds the day's lock: the check that a time is free in its room and the save that takes
  * it (app/(board)/actions.ts) never interleave with another booking's for that day.
@@ -97,21 +100,22 @@ export async function withDayLock<T>(pool: Pool, date: string, fn: (client: Pool
   }
 }
 
-export async function listCasesOn(pool: Q, date: string): Promise<AddedCase[]> {
+/** Every case on one day at one hospital (รพ.สมุทรสาคร unless `place` says otherwise), in queue order. */
+export async function listCasesOn(pool: Q, date: string, place: PlaceId = "skh"): Promise<AddedCase[]> {
   const { rows } = await pool.query<CaseRow>(
     `SELECT ${COLUMNS} FROM cases c JOIN users u ON u.id = c.surgeon_id
-     WHERE c.op_date = $1 AND c.removed_at IS NULL ORDER BY c.queued_at, c.id`,
-    [date],
+     WHERE c.op_date = $1 AND c.place = $2 AND c.removed_at IS NULL ORDER BY c.queued_at, c.id`,
+    [date, place],
   );
   return rows.map(toCase);
 }
 
-/** One doctor's cases from `from` (YYYY-MM-DD) on, by day, then in queue order. */
-export async function listCasesBy(pool: Q, surgeonId: string, from: string): Promise<AddedCase[]> {
+/** One doctor's cases at one hospital (รพ.สมุทรสาคร unless `place` says otherwise) from `from` (YYYY-MM-DD) on, by day, then in queue order. */
+export async function listCasesBy(pool: Q, surgeonId: string, from: string, place: PlaceId = "skh"): Promise<AddedCase[]> {
   const { rows } = await pool.query<CaseRow>(
     `SELECT ${COLUMNS} FROM cases c JOIN users u ON u.id = c.surgeon_id
-     WHERE c.surgeon_id = $1 AND c.op_date >= $2 AND c.removed_at IS NULL ORDER BY c.op_date, c.queued_at, c.id`,
-    [surgeonId, from],
+     WHERE c.surgeon_id = $1 AND c.op_date >= $2 AND c.place = $3 AND c.removed_at IS NULL ORDER BY c.op_date, c.queued_at, c.id`,
+    [surgeonId, from, place],
   );
   return rows.map(toCase);
 }
@@ -131,8 +135,8 @@ export async function addedToday(pool: Q, surgeonId: string): Promise<number> {
  */
 export async function insertCase(pool: Q, surgeonId: string, lineSub: string, input: CaseInput): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, note, surgeon_id, line_sub, start_min, end_min)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id::text AS id`,
+    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, note, surgeon_id, line_sub, start_min, end_min, place)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id::text AS id`,
     [
       input.date,
       input.roomId,
@@ -146,6 +150,7 @@ export async function insertCase(pool: Q, surgeonId: string, lineSub: string, in
       lineSub,
       input.start,
       input.end,
+      input.place ?? "skh",
     ],
   );
   return rows[0].id;
