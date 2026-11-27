@@ -279,6 +279,23 @@ BEGIN
 END $$;
 CREATE INDEX IF NOT EXISTS cases_day_queue_idx ON cases (op_date, queued_at) WHERE removed_at IS NULL;
 
+-- The booking's time on its day (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar"):
+-- start_min and end_min are minutes after midnight, Thailand time, on 15-minute steps from 08:30 (510) to 15:30 (930),
+-- the end after the start (lib/booking-time.ts). Both NULL for a booking made before the form asked. Two bookings in one
+-- room never share a minute (app/(board)/actions.ts checks it under an advisory lock on the day). Applied to existing
+-- databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'start_min' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN start_min smallint, ADD COLUMN end_min smallint;
+    ALTER TABLE cases ADD CONSTRAINT cases_time_check CHECK (
+      (start_min IS NULL AND end_min IS NULL) OR
+      (start_min IS NOT NULL AND end_min IS NOT NULL AND start_min >= 510 AND end_min <= 930 AND start_min < end_min
+       AND start_min % 15 = 0 AND end_min % 15 = 0)
+    );
+  END IF;
+END $$;
+
 -- The ventilation repair's two halves, which an admin can move on /admin (lib/repair-store.ts; the room layout of each
 -- half is in lib/repair.ts). Seeded once with the planned dates; a saved row is never overwritten by the seed.
 -- updated_by is the LINE sub of the admin who saved it (NULL for the seed).

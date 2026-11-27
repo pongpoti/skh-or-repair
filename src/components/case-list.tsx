@@ -68,6 +68,16 @@ export function NoteIcon({ size }: { size: number }) {
   );
 }
 
+/** A clock, before a booking's time on its row. */
+function ClockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
 /** An icon's bubble is open in the room's list (the scrim's tap then closes only it, like the account menu). */
 export function isCaseBubbleOpen(): boolean {
   return document.querySelector("[data-case-bubble]") !== null;
@@ -345,6 +355,13 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
               <p className="case-line text-ink-2" data-testid="row-surgeon">
                 <span className="case-one-line">{item.surgeon}</span>
               </p>
+              {/* The booked time (Pong, 27 Nov 2026: picked on the booking form's day view), for everyone. */}
+              {item.time ? (
+                <p className="case-line flex items-center gap-1.5 font-semibold text-ink-2 tabular-nums" data-testid="row-time">
+                  <ClockIcon />
+                  {item.time} น.
+                </p>
+              ) : null}
               {item.bookedAt ? (
                 <p className="mt-0.5 text-xs text-muted tabular-nums" data-testid="row-booked-at">
                   วันเวลาที่จองคิว : {item.bookedAt}
@@ -480,6 +497,12 @@ function NoteDialog({ dialogRef, row, onClosed }: { dialogRef: React.RefObject<H
             ) : null}
             <dt>ศัลยแพทย์</dt>
             <dd>{row.surgeon}</dd>
+            {row.time ? (
+              <>
+                <dt>เวลา</dt>
+                <dd className="tabular-nums">{row.time} น.</dd>
+              </>
+            ) : null}
             {row.bookedAt ? (
               <>
                 <dt>จองคิว</dt>

@@ -48,7 +48,10 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
     const dressing = scrubDoes !== null;
     // Booked a week before, an hour apart, oldest first as the database lists them.
     const bookedAt = new Date(`${addDays(date, -7)}T${String(8 + id).padStart(2, "0")}:15:00+07:00`).toISOString();
-    return { id: String(id), date, roomId, hn, operation, shift: "in", dressing, scrubDoes, note, surgeonId, surgeon, subtype: "GENSX", bookedAt };
+    // An hour each from 08:30 in booking order, so the day view and the rows show times.
+    const start = 8 * 60 + 30 + (id - 1) * 60;
+    const time = start + 60 <= 15 * 60 + 30 ? { start, end: start + 60 } : { start: null, end: null };
+    return { id: String(id), date, roomId, hn, operation, shift: "in", dressing, scrubDoes, note, surgeonId, surgeon, subtype: "GENSX", bookedAt, ...time };
   };
   const dressingRoom = roomsHeldBy("INFECT", date, periods)[0] ?? room(0);
 

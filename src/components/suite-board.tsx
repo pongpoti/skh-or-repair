@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import type { CaseResult } from "@/app/(board)/actions";
+import type { CaseResult, DayResult } from "@/app/(board)/actions";
 import { AddCase, type CaseRequest, type Doctor } from "@/components/add-case";
 import type { OwnBookings } from "@/components/booking-actions";
 import type { DatePick } from "@/components/board-date-picker";
@@ -59,6 +59,8 @@ export type CaseAdding = {
   onRemove: (id: string) => Promise<CaseResult>;
   /** Books back a booking cancelled moments ago, in its old place (app/(board)/actions.ts undoCancel). */
   onRestore: (id: string) => Promise<CaseResult>;
+  /** One day's bookings, every room's, for the booking form's day view (app/(board)/actions.ts dayBookings). */
+  onDay: (date: string) => Promise<DayResult>;
 };
 
 const PLUS = (
@@ -644,6 +646,7 @@ export function SuiteBoard({
           onAdd={adding.onAdd}
           onEdit={adding.onEdit}
           onRemove={adding.onRemove}
+          onDay={adding.onDay}
         />
       ) : null}
     </main>

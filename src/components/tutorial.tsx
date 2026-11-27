@@ -3,16 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { seeTutorial, type CaseResult } from "@/app/(board)/actions";
+import { seeTutorial, type CaseResult, type DayResult } from "@/app/(board)/actions";
 import { NoteIcon } from "@/components/case-list";
 import { CaseSymbol } from "@/components/case-source";
 import { NoTableIcon } from "@/components/no-table-icon";
 import { Mascot, talkFor, type MascotMood } from "@/components/mascot";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
-import { bookedMessage, bookingChange, checkCase, editedMessage, type AddedCase } from "@/lib/added-cases";
+import { bookedMessage, bookingChange, checkCase, daySlots, editedMessage, timeClash, timeOf, type AddedCase } from "@/lib/added-cases";
 import { allocationFor, DEPARTMENTS, INSTRUMENT_ROOM, readableTextOn, RECOVERY_ROOM, type Department } from "@/lib/allocation";
 import { boardNotices } from "@/lib/board-notices";
+import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import { isDressingCase } from "@/lib/placement";
@@ -254,13 +255,20 @@ export function Tutorial({
     [phase, day],
   );
 
+  // The made-up bookings of the day, whose times the practice booking cannot take.
+  const made = useMemo(() => tutorialCases({ date: day, today, periods, doctor, mine: null }).bookings, [day, today, periods, doctor]);
+  const madeOn = useCallback((date: string) => (date === day ? made : []), [day, made]);
+
   // The practice booking stays in this page: the form's save and cancel are stood in for here, with the same checks.
   const onAdd = useCallback(
     async (input: unknown): Promise<CaseResult> => {
       const checked = checkCase(input, { today, earliest: day, periods, subtype: doctor.subtype, holidays });
       await new Promise((resolve) => setTimeout(resolve, 450));
-      if (!checked.ok) return { ok: false, error: checked.error };
+      if (!checked.ok) return { ok: false, error: checked.error, field: checked.field };
       const { value } = checked;
+      if (timeClash(timeOf(value), value.roomId, value.date, madeOn(value.date), periods)) {
+        return { ok: false, error: TIME_TAKEN_TEXT, field: "time" };
+      }
       const booking: AddedCase = {
         ...value,
         id: TUTORIAL_ME,
@@ -272,7 +280,7 @@ export function Tutorial({
       setMine(booking);
       return { ok: true, mine: [booking], message: bookedMessage(value) };
     },
-    [today, day, periods, doctor, holidays],
+    [today, day, periods, doctor, holidays, madeOn],
   );
   // The row's จัดการ edits it the same way; the coach never sends the doctor there, so these only stand in.
   const onEdit = useCallback(
@@ -281,7 +289,10 @@ export function Tutorial({
       const editing = { ...mine, subtype: doctor.subtype };
       const checked = checkCase(input, { today, earliest: day, periods, subtype: doctor.subtype, holidays, editing });
       await new Promise((resolve) => setTimeout(resolve, 450));
-      if (!checked.ok) return { ok: false, error: checked.error };
+      if (!checked.ok) return { ok: false, error: checked.error, field: checked.field };
+      if (timeClash(timeOf(checked.value), checked.value.roomId, checked.value.date, madeOn(checked.value.date), periods, id)) {
+        return { ok: false, error: TIME_TAKEN_TEXT, field: "time" };
+      }
       const change = bookingChange(editing, checked.value, periods);
       if (!change.changed) return { ok: true, mine: [mine], message: "ไม่มีอะไรเปลี่ยน" };
       const now = new Date().toISOString();
@@ -289,7 +300,7 @@ export function Tutorial({
       setMine(booking);
       return { ok: true, mine: [booking], message: editedMessage(checked.value, mine, change) };
     },
-    [mine, today, day, periods, doctor, holidays],
+    [mine, today, day, periods, doctor, holidays, madeOn],
   );
   const cancelled = useRef<AddedCase | null>(null);
   const onRemove = useCallback(async (): Promise<CaseResult> => {
@@ -304,15 +315,23 @@ export function Tutorial({
     setMine(back);
     return { ok: true, mine: [back], message: "จองคืนแล้ว คิวเดิม" };
   }, []);
+  // The form's day view: the made-up bookings, and the practice one.
+  const onDay = useCallback(
+    async (date: string): Promise<DayResult> => ({
+      ok: true,
+      date,
+      slots: daySlots([...madeOn(date), ...(mine && mine.date === date ? [mine] : [])], periods, TUTORIAL_ME),
+    }),
+    [madeOn, mine, periods],
+  );
   const mineList = useMemo(() => (mine ? [mine] : []), [mine]);
   const adding: CaseAdding = useMemo(
-    () => ({ doctor, today, earliest: day, holidays, unlisted, mine: mineList, onAdd, onEdit, onRemove, onRestore }),
-    [doctor, today, day, holidays, unlisted, mineList, onAdd, onEdit, onRemove, onRestore],
+    () => ({ doctor, today, earliest: day, holidays, unlisted, mine: mineList, onAdd, onEdit, onRemove, onRestore, onDay }),
+    [doctor, today, day, holidays, unlisted, mineList, onAdd, onEdit, onRemove, onRestore, onDay],
   );
 
   // The rooms the steps point at.
   const roomId = practiceRoom(doctor.subtype, day, periods) ?? "or-12";
-  const made = useMemo(() => tutorialCases({ date: day, today, periods, doctor, mine: null }).bookings, [day, today, periods, doctor]);
   const goneRoom = made.find((item) => item.id === "tutorial-gone")?.roomId ?? null;
   const dressingRoom = made.find((item) => item.id === "tutorial-dressing")?.roomId ?? null;
   const label = (id: string | null) => {
@@ -452,6 +471,17 @@ function buildSteps({
     closeRoom();
     openForm();
   };
+  // The rest of the form, after the day view: a time (the first free one) and ต่อไป, once the form is open.
+  const details = () => {
+    closeRoom();
+    if (!dialogOpen("add-case-dialog")) {
+      openForm();
+      return;
+    }
+    if (find("[data-testid=case-hn-card]")) return;
+    if (!find("[data-testid=day-pick]")) find("[data-testid=day-slot]:enabled")?.click();
+    window.setTimeout(() => find("[data-testid=case-next]")?.click(), 120);
+  };
   return [
     { id: "welcome", chapter: 0, card: "welcome" },
 
@@ -527,6 +557,30 @@ function buildSteps({
       scroll: "center",
     },
     {
+      id: "form-time",
+      chapter: 1,
+      title: "เลือกเวลา",
+      body: "แตะเวลาที่ว่าง ได้ 1 ชั่วโมง ลากจุดบนหรือล่างเพื่อปรับ ช่องที่มีชื่อคือเวลาที่มีคนจองแล้ว",
+      target: () => find("[data-testid=day-view]"),
+      mode: "do",
+      done: () => find("[data-testid=day-pick]") !== null,
+      setup: form,
+      scroll: "center",
+      example: { label: "เลือกเวลาตัวอย่าง", fill: () => find("[data-testid=day-slot]:enabled")?.click() },
+    },
+    {
+      id: "form-next",
+      chapter: 1,
+      title: "กดต่อไป",
+      body: "แตะ ต่อไป เพื่อใส่รายละเอียดเคส",
+      target: () => find("[data-testid=case-next]"),
+      mode: "tap",
+      hand: "tap",
+      done: () => find("[data-testid=case-hn-card]") !== null,
+      setup: form,
+      scroll: "nearest",
+    },
+    {
       id: "form-hn",
       chapter: 1,
       title: "HN ผู้ป่วย",
@@ -534,7 +588,7 @@ function buildSteps({
       target: () => find("[data-testid=case-hn-card]"),
       mode: "do",
       done: () => (find("[data-testid=case-hn]") as HTMLInputElement | null)?.value.length === 7,
-      setup: form,
+      setup: details,
       scroll: "center",
       focus: () => find("[data-testid=case-hn]"),
       example: { label: "ใส่ HN ตัวอย่าง", fill: () => fill(find("[data-testid=case-hn]") as HTMLInputElement | null, EXAMPLE_HN) },
@@ -547,7 +601,7 @@ function buildSteps({
       target: () => find("#case-operation")?.parentElement ?? null,
       mode: "do",
       done: () => ((find("#case-operation") as HTMLInputElement | null)?.value.trim().length ?? 0) > 0,
-      setup: form,
+      setup: details,
       scroll: "center",
       focus: () => find("#case-operation"),
       example: { label: "ใส่ตัวอย่าง", fill: () => fill(find("#case-operation") as HTMLInputElement | null, EXAMPLE_OPERATION) },
@@ -560,7 +614,7 @@ function buildSteps({
         ? `บทเรียนนี้ใช้ ${roomName} เป็นตัวอย่าง ถ้าเป็นเคสทำแผล เลือกห้องทำแผล แล้วตอบว่าฝาก scrub ทำไหม`
         : `${roomName} คือห้องของแผนกคุณวันนั้น ถ้าเป็นเคสทำแผล เลือกห้องทำแผล แล้วตอบว่าฝาก scrub ทำไหม`,
       target: () => find("[data-testid=case-room]"),
-      setup: form,
+      setup: details,
       scroll: "center",
     },
     {
@@ -571,7 +625,7 @@ function buildSteps({
       target: () => find("#case-note")?.parentElement ?? null,
       mode: "do",
       done: () => true,
-      setup: form,
+      setup: details,
       scroll: "center",
     },
     {
@@ -583,7 +637,7 @@ function buildSteps({
       mode: "tap",
       hand: "tap",
       done: () => find("[data-testid=my-cases]") !== null,
-      setup: form,
+      setup: details,
       scroll: "center",
     },
     {

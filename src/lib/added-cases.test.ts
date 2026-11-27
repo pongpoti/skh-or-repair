@@ -31,11 +31,16 @@ import {
   NO_ROOM_NOTE,
   NOTE_ONLY_TEXT,
   POOLED_ROOM_NOTE,
+  byTime,
+  daySlots,
   roomAmong,
+  timeClash,
+  timeOf,
   withAddedCases,
   type AddedCase,
   type BookingContext,
 } from "./added-cases.ts";
+import { TIME_MISSING_TEXT } from "./booking-time.ts";
 import { displayHn } from "./hn.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
@@ -46,7 +51,7 @@ const REPAIR = REPAIR_FROM_JAN;
 const TODAY = "2026-11-13";
 const at = (hh: number, mm = 0) => hh * 60 + mm;
 const CONTEXT: BookingContext = { today: TODAY, earliest: "2026-11-16", periods: REPAIR, subtype: "GENSX", holidays: [] };
-const ok = { date: "2026-11-16", hn: "0012345", operation: "Lap chole", shift: "in" };
+const ok = { date: "2026-11-16", hn: "0012345", operation: "Lap chole", shift: "in", start: 540, end: 600 };
 const check = (input: unknown, context: Partial<BookingContext> = {}) => checkCase(input, { ...CONTEXT, ...context });
 // Mon 7 Dec 2026 (the day after วันพ่อแห่งชาติ, a Sunday) and Thu 10 Dec 2026 (วันรัฐธรรมนูญ).
 const DECEMBER = [
@@ -160,7 +165,7 @@ test("a good booking passes, cleaned, in the room of the doctor's choice; a room
   const checked = check({ ...ok, operation: "  Lap \u200bchole\n  ", roomId: "or-2" });
   assert.deepEqual(checked, {
     ok: true,
-    value: { date: "2026-11-16", roomId: "or-12", hn: "12345", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null, note: "" },
+    value: { date: "2026-11-16", start: 540, end: 600, roomId: "or-12", hn: "12345", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null, note: "" },
   });
   assert.equal(cleanOperation("a\t b"), "a b");
   // the department's room unless the doctor picks the dressing room, whatever the name
@@ -224,6 +229,8 @@ test("a saved booking: the doctor's choice, or for one saved before the form ask
   const saved = (more: Partial<AddedCase>): AddedCase => ({
     id: "1",
     date: "2026-11-16",
+    start: null,
+    end: null,
     roomId: "or-12",
     hn: "12345",
     operation: "Wound dressing",
@@ -310,7 +317,7 @@ test("the operation's name is required (Pong, 15 Nov 2026) and at most 300 chara
 });
 
 test("the shift defaults to in hours and must be in or out; nothing at all is refused", () => {
-  const checked = check({ date: ok.date, hn: ok.hn, operation: ok.operation });
+  const checked = check({ date: ok.date, hn: ok.hn, operation: ok.operation, start: ok.start, end: ok.end });
   assert.ok(checked.ok);
   assert.equal(checked.value.shift, "in");
   assert.deepEqual(check({ ...ok, shift: "night" }), { ok: false, field: "shift", error: "เลือกในเวลาหรือนอกเวลา" });
@@ -331,7 +338,7 @@ test("added cases join the board after its own, numbered per room", () => {
       { id: "a", roomId: "or-12", order: 1, procedure: "EGD", surgeon: "x", specialty: null, status: "scheduled", shift: "in" },
     ],
   };
-  const base = { operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, note: "", hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
+  const base = { start: null, end: null, operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, note: "", hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
   const added: AddedCase[] = [
     { ...base, id: "1", date: TODAY, roomId: "or-12" },
     { ...base, id: "2", date: TODAY, roomId: "or-11", shift: "out" },
@@ -380,6 +387,8 @@ test("a department with two rooms: a doctor's bookings stay in one, the first ta
   const made = (surgeonId: string, roomId: string, more: Partial<AddedCase> = {}): AddedCase => ({
     id: `${surgeonId}-${roomId}`,
     date: MONDAY,
+    start: null,
+    end: null,
     roomId,
     hn: "1234567",
     operation: "Lap chole",
@@ -426,6 +435,8 @@ test("a department with no room that day borrows the open room with the fewest b
   const made = (surgeonId: string, roomId: string, subtype: string): AddedCase => ({
     id: `${surgeonId}-${roomId}`,
     date: TUESDAY,
+    start: null,
+    end: null,
     roomId,
     hn: "1234567",
     operation: "operation",
@@ -448,6 +459,8 @@ test("a department with no room that day borrows the open room with the fewest b
 const own = (more: Partial<AddedCase> = {}): AddedCase => ({
   id: "41",
   date: "2026-11-17",
+  start: null,
+  end: null,
   roomId: "or-12",
   hn: "12345",
   operation: "Lap chole",
@@ -463,6 +476,8 @@ const own = (more: Partial<AddedCase> = {}): AddedCase => ({
 /** The form's input for a booking as it is (what the edit form opens with). */
 const asInput = (booking: AddedCase) => ({
   date: booking.date,
+  start: booking.start,
+  end: booking.end,
   hn: booking.hn ? displayHn(booking.hn) : "",
   operation: booking.operation,
   room: bookedChoice(booking, REPAIR),
@@ -486,7 +501,7 @@ test("an edit on its own open day: every field as a new booking, without the day
   const edited = check({ ...asInput(booking), hn: "0099999", operation: "Hernia", note: "" }, context);
   assert.deepEqual(edited, {
     ok: true,
-    value: { date: "2026-11-17", roomId: "or-12", hn: "99999", operation: "Hernia", shift: "in", dressing: false, scrubDoes: null, note: "" },
+    value: { date: "2026-11-17", start: null, end: null, roomId: "or-12", hn: "99999", operation: "Hernia", shift: "in", dressing: false, scrubDoes: null, note: "" },
   });
   // the fields are still required there
   const blank = check({ ...asInput(booking), operation: " " }, context);
@@ -529,7 +544,7 @@ test("an edit on its own closed day changes only the note: the HN, the name and 
   const noted = check({ ...asInput(booking), note: "  NPO หลังเที่ยงคืน " }, context);
   assert.deepEqual(noted, {
     ok: true,
-    value: { date: "2026-11-17", roomId: "or-10", hn: "12345", operation: "Lap chole", shift: "in", dressing: true, scrubDoes: true, note: "NPO หลังเที่ยงคืน" },
+    value: { date: "2026-11-17", start: null, end: null, roomId: "or-10", hn: "12345", operation: "Lap chole", shift: "in", dressing: true, scrubDoes: true, note: "NPO หลังเที่ยงคืน" },
   });
   const refused = (input: Record<string, unknown>) => {
     const checked = check({ ...asInput(booking), ...input }, context);
@@ -548,7 +563,7 @@ test("an edit on its own closed day changes only the note: the HN, the name and 
   const oldNoted = check({ ...asInput(old), note: "ขอเตียง ICU" }, { ...context, editing: old });
   assert.deepEqual(oldNoted, {
     ok: true,
-    value: { date: "2026-11-17", roomId: "or-12", hn: "", operation: "", shift: "in", dressing: false, scrubDoes: null, note: "ขอเตียง ICU" },
+    value: { date: "2026-11-17", start: null, end: null, roomId: "or-12", hn: "", operation: "", shift: "in", dressing: false, scrubDoes: null, note: "ขอเตียง ICU" },
   });
   // on an open day it needs them, as a new booking does
   const opened = check({ ...asInput(old), note: "x" }, { today: "2026-11-16", earliest: "2026-11-17", editing: old });
@@ -645,6 +660,8 @@ test("booking again refuses a day that already has the patient in that room choi
   const mine = (more: Partial<AddedCase>): AddedCase => ({
     id: "1",
     date: "2026-11-16",
+    start: null,
+    end: null,
     roomId: "or-10",
     hn: "0012345",
     operation: "D/S",
@@ -667,4 +684,92 @@ test("booking again refuses a day that already has the patient in that room choi
   assert.equal(bookedAlready([mine({ hn: null })], { date: "2026-11-16", hn: "", choice: "dressing" }, REPAIR), false, "an older booking with no HN matches nothing");
   // an older dressing booking (no room choice saved) counts by the room it was saved in
   assert.equal(bookedAlready([mine({ dressing: null, scrubDoes: null })], { date: "2026-11-16", hn: "0012345", choice: "dressing" }, REPAIR), true);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// The booking's time (Pong, 27 Nov 2026: picked on the day view, 08:30 to 15:30; a booked time is taken)
+
+test("the time: a new booking needs one, in 15-minute steps from 08:30 to 15:30; an untimed booking's edit may keep none", () => {
+  const time = (start: unknown, end: unknown, context: Partial<BookingContext> = {}) => {
+    const checked = check({ ...(context.editing ? asInput(own(context.editing)) : ok), start, end }, context);
+    return checked.ok ? [checked.value.start, checked.value.end] : [checked.field, checked.error];
+  };
+  assert.deepEqual(time(510, 570), [510, 570], "08:30 to 09:30");
+  assert.deepEqual(time(915, 930), [915, 930], "the last quarter hour");
+  assert.deepEqual(time(510, 930), [510, 930], "the whole day");
+  for (const [start, end] of [[undefined, undefined], [null, null], [540, null], [undefined, 600]]) {
+    assert.deepEqual(time(start, end), ["time", TIME_MISSING_TEXT], `${start}-${end}`);
+  }
+  for (const [start, end] of [[495, 555], [900, 945], [545, 600], [600, 600], [660, 600], ["540", "600"], [540.5, 600], [true, 600]]) {
+    assert.deepEqual(time(start, end), ["time", "เวลาไม่ถูกต้อง เลือกใหม่"], `${start}-${end}`);
+  }
+  // An edit of a booking from before the form asked keeps none, or takes one; a timed booking's edit needs one.
+  const untimed = own({ date: "2026-11-17" });
+  const editing = { today: "2026-11-16", earliest: "2026-11-17", editing: untimed };
+  assert.deepEqual(time(null, null, editing), [null, null]);
+  assert.deepEqual(time(600, 660, editing), [600, 660]);
+  const timed = { ...editing, editing: own({ date: "2026-11-17", start: 540, end: 600 }) };
+  assert.deepEqual(time(null, null, timed), ["time", TIME_MISSING_TEXT]);
+  // A closed day's note edit keeps the booking's own time, whatever the form sends.
+  const closed = { today: "2026-11-17", earliest: "2026-11-18", editing: own({ date: "2026-11-17", start: 540, end: 600 }) };
+  assert.deepEqual(time(540, 600, closed), [540, 600]);
+});
+
+test("a time clashes with another booking's in the same room that day, never with its own or another room's", () => {
+  const MONDAY = "2026-11-23";
+  const P = DEFAULT_REPAIR_PERIODS;
+  const made = (id: string, roomId: string, start: number | null, end: number | null, surgeonId = "7"): AddedCase => ({
+    id,
+    date: MONDAY,
+    start,
+    end,
+    roomId,
+    hn: "1234567",
+    operation: "Lap chole",
+    shift: "in",
+    dressing: false,
+    scrubDoes: null,
+    note: "",
+    surgeonId,
+    surgeon: `หมอ ${surgeonId}`,
+    subtype: "GENSX",
+  });
+  const day = [made("a", "or-2", 540, 600), made("b", "or-5", 600, 690), made("c", "or-2", null, null)];
+  assert.equal(timeClash({ start: 570, end: 630 }, "or-2", MONDAY, day, P), true, "09:30-10:30 over 09:00-10:00");
+  assert.equal(timeClash({ start: 600, end: 660 }, "or-2", MONDAY, day, P), false, "from 10:00, as the other ends");
+  assert.equal(timeClash({ start: 510, end: 540 }, "or-2", MONDAY, day, P), false, "ending as the other starts");
+  assert.equal(timeClash({ start: 570, end: 630 }, "or-2", MONDAY, day, P, "a"), false, "its own time");
+  assert.equal(timeClash({ start: 570, end: 630 }, "or-2", "2026-11-24", day, P), false, "another day");
+  assert.equal(timeClash(null, "or-2", MONDAY, day, P), false, "no time");
+  assert.equal(timeClash({ start: 630, end: 660 }, "or-5", MONDAY, day, P), true);
+
+  // A department's two rooms: the first booking of a doctor takes the room free at its time.
+  assert.equal(roomAmong(["or-2", "or-5"], "8", MONDAY, [made("a", "or-2", 540, 600, "7")], P, { start: 540, end: 600 }), "or-5");
+  assert.equal(roomAmong(["or-2", "or-5"], "8", MONDAY, [made("a", "or-2", 540, 600, "7")], P, { start: 600, end: 660 }), "or-5", "fewer bookings");
+  assert.equal(
+    roomAmong(["or-2", "or-5"], "8", MONDAY, [made("a", "or-2", 540, 600, "7"), made("b", "or-5", 600, 660, "9")], P, { start: 540, end: 600 }),
+    "or-5",
+    "the room free then, though as booked as the other",
+  );
+
+  // The day view's slots: the room each is in now, and the viewer's own marked.
+  assert.deepEqual(daySlots([made("a", "or-2", 540, 600, "7"), { ...made("b", "or-5", null, null, "9"), operation: "" }], P, "7"), [
+    { id: "a", roomId: "or-2", start: 540, end: 600, operation: "Lap chole", surgeon: "หมอ 7", own: true },
+    { id: "b", roomId: "or-5", start: null, end: null, operation: NO_OPERATION_LABEL, surgeon: "หมอ 9", own: false },
+  ]);
+  assert.deepEqual(timeOf(made("a", "or-2", 540, 600)), { start: 540, end: 600 });
+  assert.equal(timeOf(made("c", "or-2", null, null)), null);
+  // By time, the untimed after in their own order.
+  const order = byTime([made("1", "or-2", null, null), made("2", "or-2", 600, 660), made("3", "or-2", 540, 600), made("4", "or-2", null, null)]);
+  assert.deepEqual(order.map((item) => item.id), ["3", "2", "1", "4"]);
+});
+
+test("a new time keeps the booking's place in the queue; it counts as a change", () => {
+  const booking = { ...own({ date: "2026-11-17", start: 540, end: 600 }), subtype: "GENSX" };
+  const moved = check({ ...asInput(booking), start: 600, end: 660 }, { today: "2026-11-16", earliest: "2026-11-17", editing: booking });
+  assert.ok(moved.ok);
+  assert.deepEqual(bookingChange(booking, moved.value, REPAIR), { changed: true, requeue: false, moved: false });
+  const same = check(asInput(booking), { today: "2026-11-16", earliest: "2026-11-17", editing: booking });
+  assert.ok(same.ok);
+  assert.deepEqual(bookingChange(booking, same.value, REPAIR), { changed: false, requeue: false, moved: false });
 });

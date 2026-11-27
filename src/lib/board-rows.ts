@@ -1,4 +1,5 @@
-import { NO_OPERATION_LABEL, UNDER_WAY, bookedAtText, bookedRoom, type AddedCase } from "./added-cases.ts";
+import { NO_OPERATION_LABEL, UNDER_WAY, bookedAtText, bookedRoom, timeOf, type AddedCase } from "./added-cases.ts";
+import { rangeText } from "./booking-time.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
 import { isDressingCase, placeAll, roomsHeldBy, type RoomChoice } from "./placement.ts";
@@ -44,6 +45,11 @@ export type BoardRow = Operation & {
   bookingId?: string;
   /** When the booking was made, as the row says it: "15 พ.ย. 69, 23:43" (Bangkok time; booking and matched rows). */
   bookedAt?: string;
+  /**
+   * The booking's time on its day, "09:00–10:00" (Pong, 27 Nov 2026: picked on the booking form's day view), for every
+   * viewer; left out for a booking made before the form asked and for a case nobody booked.
+   */
+  time?: string;
   /**
    * The booking's note to the OR team (หมายเหตุ; Pong, 17 Nov 2026: "each case row has หมายเหตุ => click to open dialog
    * to see details"), for every viewer: the team prepares from it. Present only when the booking has one; the HOSxP
@@ -230,10 +236,11 @@ function departmentName(dept: DeptCode | null): string | null {
  * flagged "not-in-hosxp", for MX's upload summary alone. A row whose room is not open that day (closed, a recovery or
  * instrument room, or a workbook case not placed) is left off the board.
  *
- * In each room the booked cases come first, the earliest booking first, then the cases nobody booked in the
- * workbook's order (Pong, 15 Nov 2026: "first priority is booking case: sort by prior set; second priority is HOSxP
- * sequence from workbook"). `bookings` come in queue order (lib/cases.ts: the queue time, when a booking was made or
- * last moved to its day, room or patient), so their order is the booking order.
+ * In each room the booked cases come first, by their time (Pong, 27 Nov 2026: booked on the form's day view), then those
+ * without one in booking order, then the cases nobody booked in the workbook's order (Pong, 15 Nov 2026: "first priority
+ * is booking case: sort by prior set; second priority is HOSxP sequence from workbook"). `bookings` come in queue order
+ * (lib/cases.ts: the queue time, when a booking was made or last moved to its day, room or patient), so their order is
+ * the booking order.
  */
 export function buildBoardRows({ date, periods, workbook, bookings, viewer }: BoardRowsInput): BoardRows {
   const uploaded = workbook !== null;
@@ -263,8 +270,9 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   const ownBooking = (booking: AddedCase) => viewer.userId !== null && booking.surgeonId === viewer.userId;
   const seesHn = (booking: AddedCase) => viewer.allHn || ownBooking(booking);
   const ownId = (booking: AddedCase): { bookingId?: string } => (ownBooking(booking) ? { bookingId: booking.id } : {});
-  // The booked rows by the booking's place in `today` (the booking order), then the unbooked ones in file order.
-  const booked: { at: number; row: Omit<BoardRow, "order"> }[] = [];
+  // The booked rows by their time, then by the booking's place in `today` (the booking order); then the unbooked ones
+  // in file order.
+  const booked: { start: number; at: number; row: Omit<BoardRow, "order"> }[] = [];
   const unbooked: Omit<BoardRow, "order">[] = [];
   const unmatchedRows: Omit<BoardRow, "order">[] = [];
   const bookingIndex = new Map(today.map((booking, index) => [booking, index]));
@@ -273,6 +281,11 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
     return text ? { bookedAt: text } : {};
   };
   const noteOf = (booking: AddedCase): { note?: string } => (booking.note ? { note: booking.note } : {});
+  const timeText = (booking: AddedCase): { time?: string } => {
+    const time = timeOf(booking);
+    return time ? { time: rangeText(time) } : {};
+  };
+  const startOf = (booking: AddedCase) => booking.start ?? Infinity;
 
   for (const item of cases) {
     const booking = pairs.get(item);
@@ -286,6 +299,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       if (!roomId) continue;
       const hn = booking.hn ?? normalizeHn(item.hn);
       booked.push({
+        start: startOf(booking),
         at: bookingIndex.get(booking) ?? 0,
         row: {
           id: `mt-${booking.id}`,
@@ -302,6 +316,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
           bookedBy: booking.surgeon,
           ...ownId(booking),
           ...when(booking),
+          ...timeText(booking),
           ...noteOf(booking),
           ...doneByIn(roomId, dressingRooms, booking),
         },
@@ -346,15 +361,16 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       bookedBy: booking.surgeon,
       ...ownId(booking),
       ...when(booking),
+      ...timeText(booking),
       ...noteOf(booking),
       ...doneByIn(roomId, dressingRooms, booking),
     };
     if (uploaded) unmatchedRows.push(row);
-    else booked.push({ at: index, row });
+    else booked.push({ start: startOf(booking), at: index, row });
   });
 
-  // A stable sort: a pair keeps the booking order, whatever the file order of its HOSxP case.
-  const rows = [...booked.sort((a, b) => a.at - b.at).map((entry) => entry.row), ...unbooked];
+  // By time, then the booking order (a pair keeps it, whatever the file order of its HOSxP case).
+  const rows = [...booked.sort((a, b) => a.start - b.start || a.at - b.at).map((entry) => entry.row), ...unbooked];
 
   const order = new Map<string, number>();
   const countByRoom: Record<string, number> = {};

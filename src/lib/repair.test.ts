@@ -249,6 +249,8 @@ test("an added case in a room not operating that day stays off the board", () =>
   const added = (id: string, roomId: string): AddedCase => ({
     id,
     date: SECOND_DAY,
+    start: null,
+    end: null,
     roomId,
     hn: "1",
     operation: "x",

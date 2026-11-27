@@ -1,8 +1,19 @@
 "use server";
 
-import type { CaseResult } from "@/app/(board)/actions";
-import { bookedMessage, bookingChange, checkCase, editedMessage, type AddedCase, type BookingContext } from "@/lib/added-cases";
-import { SAMPLE_DOCTOR_ID } from "./sample";
+import type { CaseResult, DayResult } from "@/app/(board)/actions";
+import {
+  bookedMessage,
+  bookingChange,
+  checkCase,
+  daySlots,
+  editedMessage,
+  timeClash,
+  timeOf,
+  type AddedCase,
+  type BookingContext,
+} from "@/lib/added-cases";
+import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
+import { SAMPLE_DOCTOR_ID, sampleCases } from "./sample";
 
 /**
  * The preview's booking form (/preview?book=1, development only): the same checks as the real actions, with the
@@ -25,11 +36,27 @@ function sortKept() {
   kept.sort((a, b) => a.date.localeCompare(b.date) || (a.bookedAt ?? "").localeCompare(b.bookedAt ?? "") || a.id.localeCompare(b.id));
 }
 
-export async function previewAddCase(context: BookingContext & { name: string }, input: unknown): Promise<CaseResult> {
+type PreviewContext = BookingContext & { name: string; sample: boolean };
+
+/** The day's bookings: the form's, and with ?sample=1 the other made-up doctors' of that day. */
+function dayOf(context: PreviewContext, date: string): AddedCase[] {
+  const others = context.sample ? sampleCases(date, context.periods).bookings.filter((item) => item.surgeonId !== SAMPLE_DOCTOR_ID) : [];
+  return [...others, ...kept.filter((item) => item.date === date)];
+}
+
+export async function previewDay(context: PreviewContext, date: string): Promise<DayResult> {
+  devOnly();
+  return { ok: true, date, slots: daySlots(dayOf(context, date), context.periods, SAMPLE_DOCTOR_ID) };
+}
+
+export async function previewAddCase(context: PreviewContext, input: unknown): Promise<CaseResult> {
   devOnly();
   const checked = checkCase(input, context);
-  if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest, mine: [...kept] };
+  if (!checked.ok) return { ok: false, error: checked.error, field: checked.field, earliest: checked.earliest, mine: [...kept] };
   const value = checked.value;
+  if (timeClash(timeOf(value), value.roomId, value.date, dayOf(context, value.date), context.periods)) {
+    return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: [...kept] };
+  }
   const id = String(Date.now());
   seen.add(id);
   kept.push({ ...value, id, surgeonId: SAMPLE_DOCTOR_ID, surgeon: context.name, subtype: context.subtype, bookedAt: new Date().toISOString() });
@@ -37,14 +64,17 @@ export async function previewAddCase(context: BookingContext & { name: string },
   return { ok: true, mine: [...kept], message: bookedMessage(value) };
 }
 
-export async function previewEditCase(context: BookingContext & { name: string }, id: string, input: unknown): Promise<CaseResult> {
+export async function previewEditCase(context: PreviewContext, id: string, input: unknown): Promise<CaseResult> {
   devOnly();
   const at = kept.findIndex((item) => item.id === id);
   if (at < 0) return { ok: false, error: "การจองนี้ถูกยกเลิกไปแล้ว", mine: [...kept] };
   const before = kept[at];
   const checked = checkCase(input, { ...context, editing: { ...before, subtype: context.subtype } });
-  if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
+  if (!checked.ok) return { ok: false, error: checked.error, field: checked.field, earliest: checked.earliest };
   const value = checked.value;
+  if (timeClash(timeOf(value), value.roomId, value.date, dayOf(context, value.date), context.periods, id)) {
+    return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: [...kept] };
+  }
   const change = bookingChange({ ...before, subtype: context.subtype }, value, context.periods);
   if (!change.changed) return { ok: true, mine: [...kept], message: "ไม่มีอะไรเปลี่ยน" };
   const now = new Date().toISOString();
