@@ -16,14 +16,12 @@ import {
   firstBookingDay,
   roomAmong,
   STARTED_TEXT,
-  timeClash,
   timeOf,
   type AddedCase,
   type CaseField,
   type DaySlot,
 } from "@/lib/added-cases";
 import { isAdmin } from "@/lib/admin";
-import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { getUser } from "@/lib/auth/server";
 import { bookingUnderWay } from "@/lib/board-rows";
 import {
@@ -140,18 +138,16 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
       return { ok: false, error: `จองได้ไม่เกิน ${DAILY_ADD_LIMIT} รายการต่อวัน` };
     }
 
-    // Under the day's lock: the time is checked free in its room and taken in one go (Pong, 27 Nov 2026).
-    const taken = await withDayLock(pool, value.date, async (client) => {
+    // Under the day's lock: the room is worked out from the day's bookings and the booking saved in one go. Times may
+    // overlap freely (Pong, 27 Nov 2026: "allow time of each case to be freely overlapped").
+    await withDayLock(pool, value.date, async (client) => {
       const day = await listCasesOn(client, value.date, place);
-      // A department with several rooms that day: the room of the doctor's own booking there, else the emptier one
-      // that is free at that time. รพ.ท่าฉลอม gives a department one room a day.
+      // A department with several rooms that day: the room of the doctor's own booking there, else the emptier one,
+      // the one free at that time first. รพ.ท่าฉลอม gives a department one room a day.
       const rooms = value.dressing || place !== "skh" ? [] : deptRooms(doctor.subtype, value.operation, value.date, periods);
       if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods, timeOf(value));
-      if (timeClash(timeOf(value), value.roomId, value.date, day, periods)) return true;
       await insertCase(client, doctor.id, user.sub, value);
-      return false;
     });
-    if (taken) return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: await listCasesBy(pool, doctor.id, today, place) };
     refreshBoards();
     return { ok: true, mine: await listCasesBy(pool, doctor.id, today, place), message: bookedMessage(value) };
   } catch (error) {
@@ -230,8 +226,8 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
       refreshBoards();
       return { ok: true, mine: await mine(), message: "บันทึกแล้ว" };
     }
-    // Under the new day's lock, as a new booking: its room worked out and its time checked free there.
-    const saved = await withDayLock(pool, value.date, async (client): Promise<"taken" | "same" | "gone" | { requeue: boolean; moved: boolean }> => {
+    // Under the new day's lock, as a new booking: its room worked out (times may overlap freely).
+    const saved = await withDayLock(pool, value.date, async (client): Promise<"same" | "gone" | { requeue: boolean; moved: boolean }> => {
       // Among the day's other bookings: this one does not hold a room or a time for itself.
       const day = (await listCasesOn(client, value.date, place)).filter((item) => item.id !== booking.id);
       if (!value.dressing && place === "skh") {
@@ -242,11 +238,9 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
       }
       const change = bookingChange(editing, value, periods);
       if (!change.changed) return "same";
-      if (timeClash(timeOf(value), value.roomId, value.date, day, periods)) return "taken";
       return (await updateCase(client, id, doctor.id, value, change.requeue)) ? change : "gone";
     });
     if (saved === "same") return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
-    if (saved === "taken") return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: await mine() };
     if (saved === "gone") return { ok: false, error: GONE, mine: await mine() };
     refreshBoards();
     return { ok: true, mine: await mine(), message: editedMessage(value, booking, saved) };
@@ -293,7 +287,7 @@ async function cancelAt(boardPlace: PlaceId, id: unknown): Promise<CaseResult> {
 
 /**
  * Books back a booking the doctor cancelled moments ago (เลิกทำ on the cancel's answer), in its old place in the queue:
- * within UNDO_MINUTES of the cancel, and only while its day has not gone and its time is still free in its room.
+ * within UNDO_MINUTES of the cancel, and only while its day has not gone.
  */
 export async function undoCancel(id: unknown): Promise<CaseResult> {
   return restoreAt("skh", id);
@@ -314,17 +308,11 @@ async function restoreAt(boardPlace: PlaceId, id: unknown): Promise<CaseResult> 
     const cancelled = await removedCase(pool, id, doctor.id);
     const place: PlaceId = cancelled ? (cancelled.place ?? "skh") : boardPlace;
     const restored = cancelled
-      ? await withDayLock(pool, cancelled.date, async (client) => {
-          const periods = await getRepairPeriods(client);
-          const room = bookedRoom(cancelled, periods).roomId;
-          if (timeClash(timeOf(cancelled), room, cancelled.date, await listCasesOn(client, cancelled.date, place), periods, cancelled.id)) return "taken";
-          return (await restoreCase(client, id, doctor.id, today)) ? "restored" : "late";
-        })
+      ? await withDayLock(pool, cancelled.date, async (client) => ((await restoreCase(client, id, doctor.id, today)) ? "restored" : "late"))
       : "late";
     refreshBoards();
     const mine = await listCasesBy(pool, doctor.id, today, place);
     if (restored === "restored") return { ok: true, mine, message: "จองคืนแล้ว คิวเดิม" };
-    if (restored === "taken") return { ok: false, mine, error: "เวลานั้นมีคนจองแล้ว จองใหม่แทน" };
     return { ok: false, mine, error: `เลิกทำได้ภายใน ${UNDO_MINUTES} นาทีหลังยกเลิก จองใหม่แทน` };
   } catch (error) {
     logFailure("Restoring a booking failed", error);

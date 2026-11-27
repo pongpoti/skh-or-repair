@@ -426,7 +426,8 @@ export function roomAmong(
 
 /**
  * Whether `time` on `date` shares a minute with another booking in room `roomId` (where each booking is now, bookedRoom),
- * leaving out the booking `selfId` (an edit's own). Pong, 27 Nov 2026: one room runs one case at a time.
+ * leaving out the booking `selfId` (an edit's own). Times overlap freely (Pong, 27 Nov 2026: "allow time of each case to
+ * be freely overlapped"), so this only steers roomAmong to the room that has the time free; it refuses no booking.
  */
 export function timeClash(
   time: TimeRange | null,

@@ -2852,12 +2852,12 @@ async function main() {
           ? page.locator(`${FORM} [data-testid="day-slot"]:enabled`).first()
           : page.locator(`${FORM} [data-testid="day-slot"][data-time="${start}"]`);
       await slot.click();
-      await page.waitForSelector(`${FORM} [data-testid="day-pick"]:not([data-clash])`);
+      await page.waitForSelector(`${FORM} [data-testid="day-pick"]`);
     };
     const toDetails = async (page, start = undefined) => {
       if (await page.locator(`${FORM} [data-testid="case-when"]`).count()) return;
       await dayViewRead(page);
-      const picked = await page.locator(`${FORM} [data-testid="day-pick"]:not([data-clash])`).count();
+      const picked = await page.locator(`${FORM} [data-testid="day-pick"]`).count();
       if (start !== undefined || !picked) await pickTime(page, start ?? null);
       await page.click(`${FORM} [data-testid="case-next"]`);
       await page.waitForSelector(`${FORM} [data-testid="case-when"]`);
@@ -3717,8 +3717,8 @@ async function main() {
         JSON.stringify(rows.rows) ===
           JSON.stringify([
             { d: "2026-11-16", room_id: "or-11", hn: HN_TODAY, op: "Perm cath insertion", dressing: false, scrub_does: null, start_min: 540, end_min: 630 },
-            // the time picked on Monday after the first booking (08:30 up to the doctor's own 09:00) goes along to Tuesday
-            { d: "2026-11-17", room_id: "or-10", hn: HN_X_MISSING, op: "Dresing wound back", dressing: true, scrub_does: true, start_min: 510, end_min: 540 },
+            // the time picked on Monday after the first booking (08:30, an hour, over the doctor's own 09:00) goes along to Tuesday
+            { d: "2026-11-17", room_id: "or-10", hn: HN_X_MISSING, op: "Dresing wound back", dressing: true, scrub_does: true, start_min: 510, end_min: 570 },
             { d: "2026-11-17", room_id: "or-11", hn: "7000002", op: "ORIF Lt distal radius", dressing: false, scrub_does: null, start_min: 510, end_min: 570 },
           ]),
         `stored bookings: ${JSON.stringify(rows.rows)}`,
@@ -3780,17 +3780,20 @@ async function main() {
       await pageY.waitForSelector(`${dialog}[open]`);
       await book(pageY, { date: "2026-11-17", hn: HN_Y_MATCH, operation: "Total thyroidectomy", room: "or-12", start: 600 });
       assert((await textOf(pageY, '[data-testid="my-case-time"]')) === "· 10:00–11:00 น.", `the time in the doctor's own list: ${await textOf(pageY, '[data-testid="my-case-time"]')}`);
-      // Pong, 27 Nov 2026: "No, a booked time is taken". Another booking of the same room shows it taken: its half hours
-      // cannot be tapped, the next tap stops at it, and a time taken while the form was open is refused by the server.
+      // Pong, 27 Nov 2026: "For time booking, allow time of each case to be freely overlapped". A time another booking
+      // of the same room has can be tapped and saved, sitting beside it on the day view, and one booked meanwhile from
+      // another phone does not stop the save either.
       await pickDate(pageY, "case-date", "2026-11-17");
       await dayViewRead(pageY);
       assert((await pageY.locator(`${dialog} [data-testid="day-booking"][data-own]`).count()) === 1, "the doctor's own booking on the day view");
-      assert(await pageY.locator(`${dialog} [data-testid="day-slot"][data-time="600"]`).isDisabled(), "10:00 taken");
-      assert(await pageY.locator(`${dialog} [data-testid="day-slot"][data-time="630"]`).isDisabled(), "10:30 taken");
+      assert(!(await pageY.locator(`${dialog} [data-testid="day-slot"][data-time="600"]`).isDisabled()), "10:00 can be tapped");
       await pageY.click(`${dialog} [data-testid="day-slot"][data-time="570"]`);
-      assert((await pageY.getAttribute('[data-testid="day-pick"]', "data-end")) === "600", "09:30 gives half an hour, up to the booking");
-      // taken meanwhile, here by the doctor's own other booking from another phone (only a general surgeon's booking is
-      // in OR 12, and doctor Y is the e2e's only one)
+      assert((await pageY.getAttribute('[data-testid="day-pick"]', "data-end")) === "630", "09:30 gives an hour, over the booking");
+      assert((await pageY.getAttribute('[data-testid="day-pick"]', "data-overlap")) === "true", "drawn beside the booking it overlaps");
+      const startsTaken = await pageY.$$eval(`${dialog} [data-testid="day-start"] option:disabled`, (els) => els.filter((e) => e.value !== "").length);
+      assert(startsTaken === 0, `no start is taken: ${startsTaken}`);
+      assert((await pageY.locator(`${dialog} [data-testid="day-end"] option`).last().getAttribute("value")) === "930", "the end goes up to 15:30");
+      await ownerShot(pageY, "booking-time-overlap.png");
       await db.query(
         "INSERT INTO cases (op_date, room_id, hn, operation, surgeon_id, line_sub, start_min, end_min) VALUES ('2026-11-17', 'or-12', '7900011', 'Lap chole', $1, $2, 570, 600)",
         [RP.drY.userId, RP.drY.sub],
@@ -3799,18 +3802,21 @@ async function main() {
       await pageY.fill(`${dialog} input[data-testid="case-hn"]`, "7900012");
       await pageY.fill('[data-testid="case-operation"]', "Hernia");
       await pageY.click('[data-testid="case-submit"]');
-      await pageY.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === "เวลานี้มีการจองแล้ว เลือกเวลาอื่น");
-      await pageY.waitForSelector(`${dialog} [data-testid="day-pick"][data-clash]`);
-      assert((await pageY.locator(`${dialog} [data-testid="day-booking"]`).count()) === 2, "the day read again: the other booking shows");
-      await ownerShot(pageY, "booking-time-taken.png");
-      assert((await db.query("SELECT 1 FROM cases WHERE hn = '7900012'")).rowCount === 0, "nothing saved");
-      // With no time (Pong, 27 Nov 2026: "Add toggle time input : disable as default") the same case is booked: a
-      // booking with no time takes no time from anyone.
+      await pageY.waitForSelector(`${dialog} .inline-status-success`);
+      const overlapped = await db.query("SELECT start_min, end_min FROM cases WHERE hn = '7900012'");
+      assert(overlapped.rowCount === 1 && overlapped.rows[0].start_min === 570 && overlapped.rows[0].end_min === 630, `saved over the others: ${JSON.stringify(overlapped.rows)}`);
+      await dayViewRead(pageY);
+      assert((await pageY.locator(`${dialog} [data-testid="day-booking"]`).count()) === 3, "all three on the day view, side by side");
+      await ownerShot(pageY, "booking-time-overlap-saved.png");
+      await db.query("DELETE FROM cases WHERE hn = '7900012'");
+      // With no time (Pong, 27 Nov 2026: "Add toggle time input : disable as default") the same case is booked again.
       await pageY.click(`${dialog} [data-testid="case-time-toggle"]`);
       assert((await textOf(pageY, '[data-testid="case-time-text"]')) === "ไม่ระบุเวลา", "the switch off: no time");
       await pageY.click('[data-testid="case-next"]');
       await pageY.waitForSelector(`${dialog} [data-testid="case-when"]`);
       assert((await textOf(pageY, '[data-testid="case-when-time"]')) === "ไม่ระบุเวลา", "the rest says no time");
+      await pageY.fill(`${dialog} input[data-testid="case-hn"]`, "7900012");
+      await pageY.fill('[data-testid="case-operation"]', "Hernia");
       await pageY.click('[data-testid="case-submit"]');
       await pageY.waitForSelector(`${dialog} .inline-status-success`);
       const untimed = await db.query("SELECT start_min, end_min FROM cases WHERE hn = '7900012'");

@@ -7,7 +7,6 @@ import {
   DAY_START,
   dragTime,
   endChoices,
-  isFree,
   lanes,
   lengthText,
   overlaps,
@@ -56,62 +55,35 @@ test("times overlap when they share a minute", () => {
   assert.equal(overlaps(range("09:00", "12:00"), range("10:00", "10:30")), true);
 });
 
-test("a time is free when one room has all of it free", () => {
-  assert.equal(isFree(range("11:00", "12:00"), [[range("09:00", "11:00")]]), true);
-  assert.equal(isFree(range("10:45", "12:00"), [[range("09:00", "11:00")]]), false);
-  assert.equal(isFree(range("10:45", "12:00"), [[range("09:00", "11:00")], []]), true, "the other room is free");
-  assert.equal(isFree(range("09:00", "10:00"), []), true, "no room to look at");
-  // a department's two rooms: 09:00-10:00 taken in one, 10:00-11:00 in the other; each hour fits, the two hours do not
-  const two = [[range("09:00", "10:00")], [range("10:00", "11:00")]];
-  assert.equal(isFree(range("09:00", "10:00"), two), true);
-  assert.equal(isFree(range("10:00", "11:00"), two), true);
-  assert.equal(isFree(range("09:00", "11:00"), two), false);
-  assert.equal(isFree(range("09:45", "10:15"), two), false);
+test("a tap gives an hour from its half hour, up to 15:30, whatever is booked", () => {
+  assert.deepEqual(tapTime(at("09:10")), range("09:00", "10:00"));
+  assert.deepEqual(tapTime(at("15:05")), range("15:00", "15:30"));
+  assert.deepEqual(tapTime(at("09:00"), 120), range("09:00", "11:00"));
 });
 
-test("a department's two rooms: the lists, a tap and a drag offer only what one room can take", () => {
-  const two = [[range("09:00", "10:00")], [range("10:00", "11:00")]];
-  // from 09:00 only the second room is free: up to its booking at 10:00
-  assert.deepEqual(
-    endChoices(at("09:00"), two).filter((choice) => choice.free).map((choice) => clockText(choice.minute)),
-    ["09:15", "09:30", "09:45", "10:00"],
-  );
-  assert.deepEqual(startAt(range("13:00", "15:00"), at("09:00"), two), range("09:00", "10:00"));
-  assert.deepEqual(tapTime(at("09:00"), two, 120), range("09:00", "10:00"));
-  assert.deepEqual(dragTime(range("09:00", "09:30"), "end", 120, two), range("09:00", "10:00"));
-  // from 08:30 both rooms are free: up to the later booking (10:00 in the second room)
-  assert.deepEqual(startAt(null, at("08:30"), two, 180), range("08:30", "10:00"));
-  // from 11:00 both are free for the rest of the day
-  assert.deepEqual(dragTime(range("11:00", "12:00"), "start", -180, two), range("10:00", "12:00"));
-  assert.deepEqual(dragTime(range("11:00", "12:00"), "move", -180, two), range("10:00", "11:00"));
-  // every start is free in one room or the other
-  assert.equal(startChoices(two).every((choice) => choice.free), true);
-});
-
-test("a tap gives an hour from its half-hour slot, cut short by the next booking or 15:30", () => {
-  assert.deepEqual(tapTime(at("09:10"), []), range("09:00", "10:00"));
-  assert.deepEqual(tapTime(at("15:05"), []), range("15:00", "15:30"));
-  assert.deepEqual(tapTime(at("09:00"), [[range("09:30", "10:00")]]), range("09:00", "09:30"));
-  // the slot's first half taken: from its second half
-  assert.deepEqual(tapTime(at("09:20"), [[range("08:30", "09:15")]]), range("09:15", "10:15"));
-  // all taken: nothing
-  assert.equal(tapTime(at("09:20"), [[range("08:30", "10:00")]]), null);
-});
-
-test("a drag snaps to 15 minutes and stops at the bookings on either side", () => {
-  const busy = [[range("08:30", "09:00"), range("11:00", "12:00")]];
+test("a drag stays within 08:30 to 15:30 and at least a quarter hour long", () => {
   const time = range("09:30", "10:30");
-  assert.deepEqual(dragTime(time, "end", 22, busy), range("09:30", "10:45"));
-  assert.deepEqual(dragTime(time, "end", 200, busy), range("09:30", "11:00"));
-  assert.deepEqual(dragTime(time, "end", -200, busy), range("09:30", "09:45"));
-  assert.deepEqual(dragTime(time, "start", -60, busy), range("09:00", "10:30"));
-  assert.deepEqual(dragTime(time, "start", 120, busy), range("10:15", "10:30"));
-  assert.deepEqual(dragTime(time, "move", 30, busy), range("10:00", "11:00"));
-  assert.deepEqual(dragTime(time, "move", 300, busy), range("10:00", "11:00"));
-  assert.deepEqual(dragTime(time, "move", -300, busy), range("09:00", "10:00"));
-  // nothing taken: the day's ends
-  assert.deepEqual(dragTime(range("15:00", "15:30"), "move", 60, []), range("15:00", "15:30"));
-  assert.deepEqual(dragTime(range("08:30", "09:00"), "start", -60, []), range("08:30", "09:00"));
+  assert.deepEqual(dragTime(time, "end", 22), range("09:30", "10:45"));
+  assert.deepEqual(dragTime(time, "end", 600), range("09:30", "15:30"));
+  assert.deepEqual(dragTime(time, "end", -200), range("09:30", "09:45"));
+  assert.deepEqual(dragTime(time, "start", -60), range("08:30", "10:30"));
+  assert.deepEqual(dragTime(time, "start", 120), range("10:15", "10:30"));
+  assert.deepEqual(dragTime(time, "move", 30), range("10:00", "11:00"));
+  assert.deepEqual(dragTime(time, "move", 600), range("14:30", "15:30"));
+  assert.deepEqual(dragTime(time, "move", -300), range("08:30", "09:30"));
+});
+
+test("every start and end is offered, and a new start keeps the length up to 15:30", () => {
+  const starts = startChoices();
+  assert.equal(starts[0], DAY_START);
+  assert.equal(starts.at(-1), at("15:15"));
+  assert.equal(starts.length, 28);
+  assert.deepEqual(endChoices(at("15:15")), [DAY_END], "the last quarter hour");
+  assert.equal(endChoices(at("09:00"))[0], at("09:15"));
+  assert.deepEqual(startAt(null, at("08:30")), range("08:30", "09:30"));
+  assert.deepEqual(startAt(range("08:30", "10:00"), at("11:00")), range("11:00", "12:30"));
+  assert.deepEqual(startAt(range("08:30", "10:00"), at("15:00")), range("15:00", "15:30"));
+  assert.deepEqual(startAt(range("09:30", "09:45"), at("11:00"), 60), range("11:00", "12:00"));
 });
 
 test("overlapping times take lanes side by side", () => {
@@ -123,30 +95,3 @@ test("overlapping times take lanes side by side", () => {
   assert.deepEqual(out, { a: [0, 2], b: [1, 2], c: [0, 2], d: [0, 1] });
 });
 
-test("the start and end lists: every 15 minutes, a taken one disabled; a new start keeps the length up to the next booking", () => {
-  const busy = [[range("10:00", "11:00"), range("13:00", "13:30")]];
-  const starts = startChoices(busy);
-  assert.equal(starts.length, 28, "08:30 to 15:15");
-  assert.deepEqual(starts[0], { minute: at("08:30"), free: true });
-  assert.deepEqual(starts.at(-1), { minute: at("15:15"), free: true });
-  const takenStarts = starts.filter((choice) => !choice.free).map((choice) => clockText(choice.minute));
-  assert.deepEqual(takenStarts, ["10:00", "10:15", "10:30", "10:45", "13:00", "13:15"]);
-  // from 09:00: free up to the booking at 10:00, taken past it
-  const ends = endChoices(at("09:00"), busy);
-  assert.deepEqual(ends[0], { minute: at("09:15"), free: true });
-  assert.deepEqual(ends.at(-1), { minute: DAY_END, free: false });
-  assert.deepEqual(
-    ends.filter((choice) => choice.free).map((choice) => clockText(choice.minute)),
-    ["09:15", "09:30", "09:45", "10:00"],
-  );
-  assert.deepEqual(endChoices(at("15:15"), []), [{ minute: DAY_END, free: true }], "the last quarter hour");
-  // a new start: an hour when nothing was picked, the same length otherwise, cut short at the next booking or 15:30
-  assert.deepEqual(startAt(null, at("08:30"), busy), range("08:30", "09:30"));
-  assert.deepEqual(startAt(null, at("09:30"), busy), range("09:30", "10:00"));
-  assert.deepEqual(startAt(range("08:30", "10:00"), at("11:00"), busy), range("11:00", "12:30"));
-  assert.deepEqual(startAt(range("08:30", "10:00"), at("12:30"), busy), range("12:30", "13:00"));
-  assert.deepEqual(startAt(range("08:30", "10:00"), at("15:00"), busy), { start: at("15:00"), end: DAY_END });
-  // a taken start gives its quarter hour; a length given wins over the time's own
-  assert.deepEqual(startAt(range("08:30", "09:30"), at("10:15"), busy), range("10:15", "10:30"));
-  assert.deepEqual(startAt(range("09:30", "09:45"), at("11:00"), busy, 60), range("11:00", "12:00"));
-});
