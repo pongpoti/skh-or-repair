@@ -17,13 +17,13 @@ export function PlaceTabs({ current, hrefs, pickedDate, className = "" }: PlaceS
       {PLACES.map((place) =>
         place.id === current ? (
           <span key={place.id} className="place-tab" aria-current="page" data-place={place.id} data-testid="place-tab">
-            <span className="min-w-0 truncate">{place.name}</span>
+            <span className="min-w-0 truncate">{place.short}</span>
             {/* The board's notices, beside its own hospital's name (components/board-notices.tsx). */}
             <span id={PLACE_NOTICES_ID} className="place-notices" />
           </span>
         ) : (
           <Link key={place.id} href={placeHref(hrefs?.[place.id] ?? place.href, pickedDate)} className="place-tab" data-place={place.id} data-testid="place-tab">
-            <PlaceTabLabel>{place.name}</PlaceTabLabel>
+            <PlaceTabLabel>{place.short}</PlaceTabLabel>
           </Link>
         ),
       )}

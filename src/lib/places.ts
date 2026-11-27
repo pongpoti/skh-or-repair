@@ -9,6 +9,8 @@ export type Place = {
   id: PlaceId;
   /** As Pong wrote it, with the usual full stop of รพ. */
   name: string;
+  /** In the bar's switch, without รพ. (Pong, 27 Nov 2026: "remove word รพ"). */
+  short: string;
   href: string;
 };
 
@@ -18,8 +20,8 @@ export const BOARD_PATH = "/skh";
 export const THA_CHALOM_PATH = "/tha-chalom";
 
 export const PLACES: readonly Place[] = [
-  { id: "skh", name: "รพ.สมุทรสาคร", href: BOARD_PATH },
-  { id: "tha-chalom", name: "รพ.ท่าฉลอม", href: THA_CHALOM_PATH },
+  { id: "skh", name: "รพ.สมุทรสาคร", short: "สมุทรสาคร", href: BOARD_PATH },
+  { id: "tha-chalom", name: "รพ.ท่าฉลอม", short: "ท่าฉลอม", href: THA_CHALOM_PATH },
 ];
 
 /**
