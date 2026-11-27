@@ -30,6 +30,8 @@ import {
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
   NOTE_ONLY_TEXT,
+  placeBookingRoom,
+  placeRoomName,
   POOLED_ROOM_NOTE,
   byTime,
   daySlots,
@@ -772,4 +774,51 @@ test("a new time keeps the booking's place in the queue; it counts as a change",
   const same = check(asInput(booking), { today: "2026-11-16", earliest: "2026-11-17", editing: booking });
   assert.ok(same.ok);
   assert.deepEqual(bookingChange(booking, same.value, REPAIR), { changed: false, requeue: false, moved: false });
+});
+
+// Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also"; on the decision card "No, own department's room only".
+test("รพ.ท่าฉลอม: the department's room in its table, never a dressing room nor another department's", () => {
+  const tc = { place: "tha-chalom" as const };
+  // Monday 16 Nov: OR 1 is orthopaedics', so general surgery has no room there
+  const monday = check({ ...ok, room: "dept" }, tc);
+  assert.ok(!monday.ok && monday.field === "date" && monday.error === "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น", JSON.stringify(monday));
+  const tuesday = check({ ...ok, date: "2026-11-17", room: "dept" }, tc);
+  assert.ok(tuesday.ok, JSON.stringify(tuesday));
+  assert.deepEqual([tuesday.value.roomId, tuesday.value.dressing, tuesday.value.place], ["or-1", false, "tha-chalom"]);
+  const dressing = check({ ...ok, date: "2026-11-17", room: "dressing", scrubDoes: true }, tc);
+  assert.ok(!dressing.ok && dressing.field === "date", "no dressing room to book there");
+  assert.deepEqual(check({ ...ok, date: "2026-11-17", room: "dept" }, { ...tc, subtype: "PLASTIC" }), {
+    ok: true,
+    value: { ...(tuesday.value as object), roomId: "scope", place: "tha-chalom" },
+  } as unknown, "ศัลยกรรมตกแต่ง in the Scope room on Tuesdays");
+  // รพ.สมุทรสาคร's bookings carry no place, whatever the form sends: the server's context decides
+  const skh = check({ ...ok, date: "2026-11-17", room: "dept", place: "tha-chalom" });
+  assert.ok(skh.ok && !("place" in skh.value) && skh.value.roomId === "or-12", JSON.stringify(skh));
+  assert.deepEqual(placeBookingRoom("tha-chalom", "ENT", "", "2026-11-18", REPAIR, "dept"), { ok: true, roomId: "or-4", dressing: false });
+  assert.deepEqual(placeBookingRoom("tha-chalom", null, "", "2026-11-18", REPAIR, "dept"), {
+    ok: false,
+    reason: "no-department",
+    error: "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล",
+  });
+  assert.deepEqual(placeBookingRoom(undefined, "GENSX", "Lap chole", "2026-11-17", REPAIR, "dept"), bookingRoom("GENSX", "Lap chole", "2026-11-17", REPAIR, "dept"));
+});
+
+test("a รพ.ท่าฉลอม booking stays in the room it was saved in, and is named by its hospital's rooms", () => {
+  const tc = own({ roomId: "scope", subtype: "PLASTIC", place: "tha-chalom" });
+  assert.deepEqual(bookedRoom(tc, REPAIR), { roomId: "scope", dressing: false });
+  assert.equal(bookedChoice(tc, REPAIR), "dept");
+  assert.equal(bookedMessage({ roomId: "scope", date: "2026-11-17", place: "tha-chalom" }), "จอง ห้อง Scope วันอังคารที่ 17 พ.ย. 2569 แล้ว");
+  assert.equal(bookedMessage({ roomId: "or-4", date: "2026-11-18", place: "tha-chalom" }), "จอง OR 4 วันพุธที่ 18 พ.ย. 2569 แล้ว");
+  assert.equal(placeRoomName("or-12"), "OR 12");
+  assert.equal(placeRoomName("scope", "tha-chalom"), "ห้อง Scope");
+  // on its own day a new name or note keeps its place in the queue; a new day or patient does not
+  const keep = { date: tc.date, hn: "12345", operation: "Excision", choice: "dept" as const };
+  assert.equal(editRequeues(tc, keep, "PLASTIC", REPAIR), false);
+  assert.equal(editRequeues(tc, { ...keep, date: "2026-11-24" }, "PLASTIC", REPAIR), true);
+  assert.equal(editRequeues(tc, { ...keep, hn: "54321" }, "PLASTIC", REPAIR), true);
+  // the day view shows it in its own room
+  assert.deepEqual(
+    daySlots([tc], REPAIR, "7").map((slot) => slot.roomId),
+    ["scope"],
+  );
 });

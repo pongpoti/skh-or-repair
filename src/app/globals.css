@@ -2215,6 +2215,34 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 }
 
 /*
+ * A room that opens its cases (on the board): the floor takes the tap, through the ring and the labels; hover and press
+ * darken it and the open room gets a heavy wall and an inverted ring, as on รพ.สมุทรสาคร's plan (.fp-or).
+ */
+.tcp-or.is-pick .tcp-or-shape,
+.tcp-scope.is-pick .tcp-or-shape { cursor: pointer; transition: filter 0.15s ease; }
+.tcp-or.is-pick :is(.tcp-or-ring, .tcp-or-num, .tcp-or-dept, .tcp-or-thai),
+.tcp-scope.is-pick :is(.tcp-scope-tag, .tcp-scope-name, .tcp-or-dept, .tcp-or-thai) { pointer-events: none; }
+@media (hover: hover) {
+  .tcp-or.is-pick:hover .tcp-or-shape,
+  .tcp-scope.is-pick:hover .tcp-or-shape { filter: brightness(0.9); }
+}
+.tcp-or.is-pick:active .tcp-or-shape,
+.tcp-scope.is-pick:active .tcp-or-shape { filter: brightness(0.9); }
+.tcp-or.is-selected,
+.tcp-scope.is-selected { filter: drop-shadow(0 0 4px rgb(41 29 20 / 0.4)); }
+.tcp-or.is-selected .tcp-or-shape,
+.tcp-scope.is-selected .tcp-or-shape { stroke: var(--fp-ink); stroke-width: 4.5; }
+.tcp-or.is-selected .tcp-or-ring,
+.tcp-scope.is-selected .tcp-scope-tag { fill: var(--brand); stroke: #fff; stroke-width: 2; }
+.tcp-or.is-selected .tcp-or-num,
+.tcp-scope.is-selected .tcp-scope-name { fill: #fff; }
+/* Above the selected room's outline, so a room the keyboard is on shows it whether or not it is open. */
+.tcp-or .tcp-or-shape:focus-visible,
+.tcp-scope .tcp-or-shape:focus-visible,
+.tcp-or.is-selected .tcp-or-shape:focus-visible,
+.tcp-scope.is-selected .tcp-or-shape:focus-visible { outline: none; stroke: var(--focus); stroke-width: 5; }
+
+/*
  * รพ.ท่าฉลอม's plan on its board fills the swipe area as รพ.สมุทรสาคร's does, with the same margins (Pong, 27 Nov 2026:
  * "same screen margin like สมุทรสาคร"); the drawing keeps its shape inside (tha-chalom-plan.tsx).
  */
@@ -2232,24 +2260,53 @@ a.place-tab:has(.place-tab-label[data-pending]) {
  * in a column on the left; the bookings there as soft blocks (the doctor's own in the brand's tint), the doctor's pick as
  * a solid brown block with two round handles, as Google Calendar's new event.
  */
-.day-slot { border-top: 1px dashed var(--line); }
-.day-slot[data-hour] { border-top-style: solid; border-top-color: var(--line-strong); }
+/* The line of each half hour starts beside its time, as Google Calendar's: the hours solid, the half hours dashed and lighter. */
+.day-slot::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: calc(var(--gutter) - 0.375rem);
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--line) 70%, transparent);
+}
+.day-slot[data-hour]::before { border-top: 1px solid var(--line); }
+/* Only the hours are named (and the day's two ends), centred on their line. */
 .day-hour {
   position: absolute;
   left: 0;
   top: -0.5rem;
   width: calc(var(--gutter) - 0.625rem);
-  padding-right: 0.25rem;
   text-align: right;
   font-size: 0.6875rem;
   line-height: 1rem;
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
+}
+/* The day before and after: one pill of two 44px buttons, on the date field's right edge. */
+.day-arrows {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
   background: #fff;
 }
+.day-arrow {
+  display: inline-flex;
+  width: 2.75rem;
+  height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.day-arrow + .day-arrow { border-left: 1px solid var(--line); }
+.day-arrow:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+.day-arrow:disabled { color: var(--line-strong); cursor: default; }
+.day-arrow:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; border-radius: 999px; }
 .day-slot-button {
   position: absolute;
-  inset: 0 0 0 var(--gutter);
+  /* 1px under the half hour's line, so its hover fill never hides it. */
+  inset: 1px 0 0 var(--gutter);
   cursor: pointer;
   border-radius: 0;
 }
@@ -2281,7 +2338,6 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 /* A time another booking has: striped in the warning colour until another is picked. */
 .day-pick.is-clash {
   background: repeating-linear-gradient(135deg, var(--late) 0 8px, color-mix(in srgb, var(--late) 82%, #000) 8px 16px);
-  opacity: 0.92;
 }
 .day-pick-body {
   height: 100%;
@@ -2293,7 +2349,8 @@ a.place-tab:has(.place-tab-label[data-pending]) {
   touch-action: none;
 }
 .day-pick.is-fixed .day-pick-body { cursor: default; touch-action: auto; }
-.day-pick-body:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+/* Focused (from the keyboard, or back from the rest of the form): a white ring inside the block, not a second frame. */
+.day-pick-body:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
 /* A handle is a 44 × 32 target round a small white dot on the block's edge. */
 .day-handle {
   position: absolute;

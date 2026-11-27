@@ -10,8 +10,10 @@ import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha
  * (lib/tha-chalom-schedule.ts), each OR takes its department's colour and label, as on รพ.สมุทรสาคร's plan: split
  * between morning (above) and afternoon (below) when they differ, the board's closed-room stripes for OR 3 while it is
  * turned into an intervention room, and plain for a room no one has (ว่าง). Without a day the ORs keep Pong's brown and
- * "OR". Nothing on it is tapped. The colours are the board's plan's own (globals.css .tcp-*); the classes are prefixed,
- * so the drawing's names (room, frame) never meet the app's.
+ * "OR". Given `onSelect` (the board, Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also"), a room some department has
+ * that day is a button that opens its cases, as on รพ.สมุทรสาคร's plan; OR 3 and a ว่าง room are not. The colours are the
+ * board's plan's own (globals.css .tcp-*); the classes are prefixed, so the drawing's names (room, frame) never meet the
+ * app's.
  */
 
 /**
@@ -81,6 +83,32 @@ const SCOPE = { x: 78.25, y: 190, w: 98, h: 80 };
 /** The tag's text and the department's label in the Scope room, smaller than an OR's: the room is half as wide. */
 const SCOPE_TAG = 17;
 
+/** What makes a room a button: the board's choice, and the room's cases that day. */
+type Pick = { selectedId: string | null; onSelect: (id: string) => void; cases: Record<string, number> };
+
+/**
+ * The room's floor as the button that opens it, with its name, its day and, when it has none, ไม่มีเคส as รพ.สมุทรสาคร's
+ * plan says it (components/floor-plan.tsx); keyboard too. Nothing for a room that is not one (no pick, or not open).
+ */
+function pressable(id: string, label: string, pick: Pick | null) {
+  if (!pick) return {};
+  const parts = [label];
+  if ((pick.cases[id] ?? 0) === 0) parts.push("ไม่มีเคส");
+  return {
+    tabIndex: 0,
+    role: "button" as const,
+    "aria-pressed": pick.selectedId === id,
+    "aria-label": parts.join(" · "),
+    onClick: () => pick.onSelect(id),
+    onKeyDown: (event: React.KeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        pick.onSelect(id);
+      }
+    },
+  };
+}
+
 /** A room no one has: the board's empty-room floor. */
 const FREE_FILL = "var(--fp-or)";
 
@@ -118,7 +146,7 @@ function Ring({ or, y, small }: { or: Or; y: number; small: boolean }) {
   );
 }
 
-function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
+function OrRoom({ or, entry, pick }: { or: Or; entry: ThaChalomRoomDay | null; pick: Pick | null }) {
   if (!entry) {
     return (
       <g className="tcp-or" data-room={or.id}>
@@ -143,13 +171,15 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
   const short = (or.bottom - or.top) * SKH_UNITS < SHORT;
   const ringY = entry.split ? middle : middle - (short ? 30 : 36) / SCALE;
   const labelY = middle + (short ? 44 : 54) / SCALE;
+  const button = state === "open" ? pick : null;
+  const selected = button?.selectedId === or.id;
   return (
     <g
-      className={`tcp-or is-${state}${entry.split ? " is-split" : ""}`}
+      className={`tcp-or is-${state}${entry.split ? " is-split" : ""}${button ? " is-pick" : ""}${selected ? " is-selected" : ""}`}
       data-room={or.id}
       data-state={state}
-      role="img"
-      aria-label={roomDayText(entry)}
+      role={button ? undefined : "img"}
+      aria-label={button ? undefined : roomDayText(entry)}
       style={{ "--tcp-fill": fill } as CSSProperties}
     >
       {entry.split ? (
@@ -160,7 +190,7 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
           </linearGradient>
         </defs>
       ) : null}
-      <path className="tcp-or-shape" d={or.d} />
+      <path className="tcp-or-shape" d={or.d} {...pressable(or.id, roomDayText(entry), button)} />
       <Ring or={or} y={ringY} small={entry.split || short} />
       {entry.split ? (
         <>
@@ -174,7 +204,7 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
   );
 }
 
-function ScopeRoom({ entry }: { entry: ThaChalomRoomDay | null }) {
+function ScopeRoom({ entry, pick }: { entry: ThaChalomRoomDay | null; pick: Pick | null }) {
   const x = SCOPE.x + SCOPE.w / 2;
   const tagY = SCOPE.y + SCOPE.h * 0.36;
   const labelY = SCOPE.y + SCOPE.h * 0.72;
@@ -196,16 +226,25 @@ function ScopeRoom({ entry }: { entry: ThaChalomRoomDay | null }) {
   }
   const use = entry.am;
   const state = use.kind === "closed" ? "closed" : use.kind === "free" ? "free" : "open";
+  const button = state === "open" ? pick : null;
+  const selected = button?.selectedId === "scope";
   return (
     <g
-      className={`tcp-scope is-${state}`}
+      className={`tcp-scope is-${state}${button ? " is-pick" : ""}${selected ? " is-selected" : ""}`}
       data-room="scope"
       data-state={state}
-      role="img"
-      aria-label={roomDayText(entry)}
+      role={button ? undefined : "img"}
+      aria-label={button ? undefined : roomDayText(entry)}
       style={{ "--tcp-fill": fillOf(use) } as CSSProperties}
     >
-      <rect className="tcp-or-shape" x={SCOPE.x} y={SCOPE.y} width={SCOPE.w} height={SCOPE.h} />
+      <rect
+        className="tcp-or-shape"
+        x={SCOPE.x}
+        y={SCOPE.y}
+        width={SCOPE.w}
+        height={SCOPE.h}
+        {...pressable("scope", roomDayText(entry), button)}
+      />
       {tag}
       <Label use={use} x={x} y={labelY} />
     </g>
@@ -216,8 +255,24 @@ function ScopeRoom({ entry }: { entry: ThaChalomRoomDay | null }) {
  * The plan fills its box as far as it can, at the top and centred across it, as รพ.สมุทรสาคร's does (components/floor-plan.tsx):
  * the whole width on a phone, the whole height beside the room list.
  */
-export function ThaChalomPlan({ className, day = null }: { className?: string; day?: readonly ThaChalomRoomDay[] | null }) {
+export function ThaChalomPlan({
+  className,
+  day = null,
+  selectedId = null,
+  onSelect,
+  cases = {},
+}: {
+  className?: string;
+  day?: readonly ThaChalomRoomDay[] | null;
+  /** The open room (the board's). */
+  selectedId?: string | null;
+  /** Opens a room's cases; without it nothing on the plan is tapped. */
+  onSelect?: (id: string) => void;
+  /** The cases in each room that day. */
+  cases?: Record<string, number>;
+}) {
   const byId = new Map((day ?? []).map((entry) => [entry.room.id as string, entry]));
+  const pick: Pick | null = onSelect ? { selectedId, onSelect, cases } : null;
   return (
     <svg
       viewBox="25.5 98.5 590.25 626"
@@ -252,9 +307,9 @@ export function ThaChalomPlan({ className, day = null }: { className?: string; d
         />
       ))}
       {ORS.map((or) => (
-        <OrRoom key={or.id} or={or} entry={day ? (byId.get(or.id) ?? null) : null} />
+        <OrRoom key={or.id} or={or} entry={day ? (byId.get(or.id) ?? null) : null} pick={pick} />
       ))}
-      <ScopeRoom entry={day ? (byId.get("scope") ?? null) : null} />
+      <ScopeRoom entry={day ? (byId.get("scope") ?? null) : null} pick={pick} />
     </svg>
   );
 }

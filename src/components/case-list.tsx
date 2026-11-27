@@ -4,10 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { BookingSheet, ManageIcon, type OwnBookings } from "@/components/booking-actions";
 import { CaseIcon } from "@/components/case-source";
-import { bookingState, type AddedCase } from "@/lib/added-cases";
+import { bookingState, placeRoomName, type AddedCase } from "@/lib/added-cases";
 import type { BoardRow } from "@/lib/board-rows";
 import { displayHn } from "@/lib/hn";
-import { getRoom, roomLabel } from "@/lib/rooms";
 import type { CaseStatus } from "@/lib/schedule";
 
 const STATUS_LABEL: Record<CaseStatus, string> = {
@@ -434,7 +433,6 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
  * in it can be changed: the doctor cancels and books again for another note.
  */
 function NoteDialog({ dialogRef, row, onClosed }: { dialogRef: React.RefObject<HTMLDialogElement | null>; row: BoardRow | null; onClosed: () => void }) {
-  const room = row ? getRoom(row.roomId) : undefined;
   const close = () => dialogRef.current?.close();
   // Whether the press began on the backdrop: a selection dragged from the note out past the card ends with a click on
   // the dialog itself, which must not close it.
@@ -467,7 +465,7 @@ function NoteDialog({ dialogRef, row, onClosed }: { dialogRef: React.RefObject<H
                 หมายเหตุ
               </h2>
               <p className="text-sm text-ink-2" data-testid="case-note-room">
-                {room ? roomLabel(room) : row.roomId} · ลำดับ {row.order}
+                {placeRoomName(row.roomId, row.place)} · ลำดับ {row.order}
               </p>
             </div>
             <button type="button" className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0" aria-label="ปิด" onClick={close}>

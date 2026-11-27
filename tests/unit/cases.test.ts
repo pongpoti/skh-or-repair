@@ -265,6 +265,30 @@ describe("added cases (database)", () => {
     }
   });
 
+  // Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also".
+  test("each hospital's bookings are its own: listed apart, and only in that hospital's rooms", async () => {
+    const base = { start: null, end: null, date: "2026-12-08", hn: "5101", operation: "TKA", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const skh = await insertCase(pool, doctor, "U1", { ...base, roomId: "or-1" });
+    const tc = await insertCase(pool, doctor, "U1", { ...base, roomId: "or-1", hn: "5102", place: "tha-chalom" });
+    const scope = await insertCase(pool, doctor, "U1", { ...base, roomId: "scope", hn: "5103", place: "tha-chalom" });
+    assert.deepEqual((await listCasesOn(pool, "2026-12-08")).map((item) => item.id), [skh], "รพ.สมุทรสาคร's day");
+    const there = await listCasesOn(pool, "2026-12-08", "tha-chalom");
+    assert.deepEqual(there.map((item) => [item.id, item.roomId, item.place]), [
+      [tc, "or-1", "tha-chalom"],
+      [scope, "scope", "tha-chalom"],
+    ]);
+    assert.equal("place" in (await listCasesOn(pool, "2026-12-08"))[0], false, "รพ.สมุทรสาคร's bookings say nothing of it");
+    assert.deepEqual((await listCasesBy(pool, doctor, "2026-12-08", "tha-chalom")).map((item) => item.id), [tc, scope]);
+    assert.ok(!(await listCasesBy(pool, doctor, "2026-12-08")).some((item) => item.id === tc || item.id === scope), "nor on รพ.สมุทรสาคร's list");
+    assert.equal((await ownCase(pool, scope, doctor))?.place, "tha-chalom", "an edit knows its hospital");
+    const insert = (room: string, place: string) =>
+      pool.query("INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub, place) VALUES ('2026-12-08', $1, 'x', $2, 'U1', $3)", [room, doctor, place]);
+    for (const [room, place] of [["scope", "skh"], ["or-5", "tha-chalom"], ["or-1", "elsewhere"]]) {
+      await assert.rejects(insert(room, place), `${room} at ${place}`);
+    }
+    for (const id of [skh, tc, scope]) await removeCase(pool, id, doctor);
+  });
+
   test("a booking keeps its time; the table takes only 15-minute steps from 08:30 to 15:30, or none", async () => {
     const base = { date: "2026-12-07", roomId: "or-12", hn: "41", operation: "Lap chole", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
     const timed = await insertCase(pool, doctor, "U1", { ...base, start: 540, end: 600 });

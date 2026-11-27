@@ -4,7 +4,18 @@ import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState, useTransition, type RefObject } from "react";
 import type { CaseResult } from "@/app/(board)/actions";
 import { InlineStatus } from "@/components/inline-status";
-import { bookedRoom, bookingState, editClosesOn, NO_OPERATION_LABEL, NOTE_ONLY_TEXT, STARTED_TEXT, UNDER_WAY, type AddedCase } from "@/lib/added-cases";
+import {
+  atThaChalom,
+  bookedRoom,
+  bookingState,
+  editClosesOn,
+  NO_OPERATION_LABEL,
+  NOTE_ONLY_TEXT,
+  placeRoomName,
+  STARTED_TEXT,
+  UNDER_WAY,
+  type AddedCase,
+} from "@/lib/added-cases";
 import type { BoardRow } from "@/lib/board-rows";
 import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
@@ -218,7 +229,9 @@ export function BookingSheet({
   const room = booking ? getRoom(booking.roomId) : undefined;
   const where = booking ? bookedRoom(booking, own.periods) : null;
   const placeRoom = getRoom(row?.roomId ?? where?.roomId ?? null) ?? room;
-  const heading = booking ? [placeRoom ? roomLabel(placeRoom) : booking.roomId, row ? `ลำดับ ${row.order}` : null, thaiDate(booking.date, "short")].filter(Boolean).join(" · ") : "";
+  // รพ.ท่าฉลอม's rooms by its own names ("ห้อง Scope").
+  const roomName = booking ? (atThaChalom(booking) ? placeRoomName(booking.roomId, booking.place) : placeRoom ? roomLabel(placeRoom) : booking.roomId) : "";
+  const heading = booking ? [roomName, row ? `ลำดับ ${row.order}` : null, thaiDate(booking.date, "short")].filter(Boolean).join(" · ") : "";
 
   function act(run: () => void) {
     if (!settled() || pending) return;

@@ -5,9 +5,12 @@ import {
   openRooms,
   roomDayText,
   THA_CHALOM_ROOM_LIST,
+  thaChalomAllocation,
+  thaChalomBookingRoom,
   thaChalomDay,
   thaChalomPickedDay,
   thaChalomPickRange,
+  thaChalomRoomName,
   type ThaChalomRoomDay,
   type ThaChalomUse,
 } from "./tha-chalom-schedule.ts";
@@ -117,4 +120,36 @@ test("the picker offers today to 60 days ahead, workdays only", () => {
   assert.equal(thaChalomPickedDay("2026-13-01", "2026-11-26", holidays), null);
   assert.equal(thaChalomPickedDay(["2026-11-27"], "2026-11-26", holidays), null);
   assert.equal(thaChalomPickedDay(undefined, "2026-11-26", holidays), null);
+});
+
+test("a doctor books their department's room in the table that day, and no other room (Pong, 27 Nov 2026)", () => {
+  // Monday 16 Nov 2026 to Friday 20 Nov; Thursday 19 Nov is the month's third, 26 Nov its fourth
+  assert.equal(thaChalomBookingRoom("ORTHO", "2026-11-16"), "or-1");
+  assert.equal(thaChalomBookingRoom("GENSX", "2026-11-16"), null, "general surgery has no room on a Monday");
+  assert.equal(thaChalomBookingRoom("GENSX", "2026-11-17"), "or-1");
+  assert.equal(thaChalomBookingRoom("PLASTIC", "2026-11-17"), "scope", "the Scope room is ศัลยกรรมตกแต่ง's on Tuesdays");
+  assert.equal(thaChalomBookingRoom("EYE", "2026-11-18"), "or-4", "OR 4 on a Wednesday morning");
+  assert.equal(thaChalomBookingRoom("ENT", "2026-11-18"), "or-4", "and afternoon");
+  assert.equal(thaChalomBookingRoom("ORTHO", "2026-11-19"), "or-4", "OR 4 in a Thursday of week 3");
+  assert.equal(thaChalomBookingRoom("PLASTIC", "2026-11-26"), "or-4", "and of week 4");
+  assert.equal(thaChalomBookingRoom("EYE", "2026-11-19"), "scope");
+  assert.equal(thaChalomBookingRoom("VASCULAR", "2026-11-20"), "or-2");
+  assert.equal(thaChalomBookingRoom("GENSX", "2026-11-20"), null, "OR 1 is ว่าง on Fridays: no borrowing it");
+  assert.equal(thaChalomBookingRoom("GENSX", "2026-11-21"), null, "a Saturday");
+  assert.equal(thaChalomBookingRoom("MIXED", "2026-11-17"), null, "a department the table does not name");
+  assert.equal(thaChalomBookingRoom(null, "2026-11-17"), null);
+});
+
+test("who holds a room, in รพ.สมุทรสาคร's shape, and the rooms' names", () => {
+  const held = (roomId: string, date: string) => {
+    const allocation = thaChalomAllocation(roomId, date);
+    return allocation && [allocation.am?.code ?? null, allocation.pm?.code ?? null, allocation.split];
+  };
+  assert.deepEqual(held("or-4", "2026-11-18"), ["EYE", "ENT", true]);
+  assert.deepEqual(held("or-1", "2026-11-16"), ["ORTHO", "ORTHO", false]);
+  assert.equal(held("or-3", "2026-11-16"), null, "OR 3 under works");
+  assert.equal(held("scope", "2026-11-16"), null, "ว่าง");
+  assert.equal(held("or-1", "2026-11-21"), null, "a Saturday");
+  assert.equal(thaChalomRoomName("or-4"), "OR 4");
+  assert.equal(thaChalomRoomName("scope"), "ห้อง Scope");
 });

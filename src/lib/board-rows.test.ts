@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
-import { bookingUnderWay, buildBoardRows, missingUploadDay, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
+import { bookingUnderWay, buildBoardRows, missingUploadDay, thaChalomRows, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 
@@ -545,4 +545,30 @@ test("booked cases go by their time, untimed bookings after in booking order, th
   }
   // Everyone sees the time, not only the doctor and MX.
   assert.equal(build(null, [early], NOBODY).rows[0].time, "09:00–10:00");
+});
+
+// Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also". There is no HOSxP list there: its rows are its bookings.
+test("รพ.ท่าฉลอม's rows: its bookings in the rooms they were booked in, by time, numbered in each room", () => {
+  const late = booking({ roomId: "or-1", start: 600, end: 660, place: "tha-chalom", surgeonId: "7", note: "ขอ C-arm" });
+  const early = booking({ roomId: "or-1", start: 540, end: 600, place: "tha-chalom", surgeonId: "8", surgeon: "สมหญิง ดีใจ" });
+  const untimed = booking({ roomId: "or-1", place: "tha-chalom", surgeonId: "8" });
+  const scope = booking({ roomId: "scope", start: 510, end: 540, place: "tha-chalom", subtype: "PLASTIC", surgeonId: "8" });
+  const other = booking({ date: "2026-11-18", roomId: "or-1", place: "tha-chalom" });
+  const rows = thaChalomRows(DAY, [late, untimed, early, scope, other], { allHn: false, userId: "7" });
+  assert.deepEqual(
+    rows.map((row) => [row.id, row.roomId, row.order, row.time ?? null]),
+    [
+      [`bk-${scope.id}`, "scope", 1, "08:30–09:00"],
+      [`bk-${early.id}`, "or-1", 1, "09:00–10:00"],
+      [`bk-${late.id}`, "or-1", 2, "10:00–11:00"],
+      [`bk-${untimed.id}`, "or-1", 3, null],
+    ],
+  );
+  assert.ok(rows.every((row) => row.source === "booking" && row.flag === null && row.status === "scheduled" && row.place === "tha-chalom"));
+  // the viewer's own booking: its HN and its id for the row's actions; another doctor's neither
+  const mine = rows.find((row) => row.id === `bk-${late.id}`);
+  assert.deepEqual([mine?.hn, mine?.bookingId, mine?.note], [late.hn, late.id, "ขอ C-arm"]);
+  const theirs = rows.find((row) => row.id === `bk-${early.id}`);
+  assert.ok(theirs && !("hn" in theirs) && !("bookingId" in theirs) && theirs.bookedBy === "สมหญิง ดีใจ");
+  assert.ok(thaChalomRows(DAY, [early], MX).every((row) => row.hn === early.hn), "MX and admins see every HN");
 });

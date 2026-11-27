@@ -644,8 +644,10 @@ function buildSteps({
       id: "booked",
       chapter: 1,
       title: "จองแล้ว!",
-      body: "เคสนี้ได้คิวก่อนเคสที่ไม่ได้จองแล้ว การจองของคุณอยู่ตรงนี้ แก้ไขหรือยกเลิกได้",
-      target: () => find("[data-testid=my-cases]"),
+      body: "เคสนี้ได้คิวก่อนเคสที่ไม่ได้จองแล้ว การจองของคุณอยู่ตรงนี้",
+      // After a save the form is back on the day view, where the booking is the doctor's own block (the list of their
+      // bookings is on the form's second step).
+      target: () => find("[data-testid=day-booking][data-own]"),
       setup: form,
       scroll: "center",
       confetti: true,

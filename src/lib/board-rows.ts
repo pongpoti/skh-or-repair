@@ -2,6 +2,7 @@ import { NO_OPERATION_LABEL, UNDER_WAY, bookedAtText, bookedRoom, timeOf, type A
 import { rangeText } from "./booking-time.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
+import type { PlaceId } from "./places.ts";
 import { isDressingCase, placeAll, roomsHeldBy, type RoomChoice } from "./placement.ts";
 import type { RepairPeriods } from "./repair.ts";
 import { roomUse } from "./rooms.ts";
@@ -64,6 +65,8 @@ export type BoardRow = Operation & {
    * of where it came from. Left out in every other room.
    */
   doneBy?: DoneBy;
+  /** รพ.ท่าฉลอม's rows say so (thaChalomRows), for their rooms' names; รพ.สมุทรสาคร's leave it out. */
+  place?: PlaceId;
 };
 
 /**
@@ -276,16 +279,6 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   const unbooked: Omit<BoardRow, "order">[] = [];
   const unmatchedRows: Omit<BoardRow, "order">[] = [];
   const bookingIndex = new Map(today.map((booking, index) => [booking, index]));
-  const when = (booking: AddedCase): { bookedAt?: string } => {
-    const text = booking.bookedAt ? bookedAtText(booking.bookedAt) : "";
-    return text ? { bookedAt: text } : {};
-  };
-  const noteOf = (booking: AddedCase): { note?: string } => (booking.note ? { note: booking.note } : {});
-  const timeText = (booking: AddedCase): { time?: string } => {
-    const time = timeOf(booking);
-    return time ? { time: rangeText(time) } : {};
-  };
-  const startOf = (booking: AddedCase) => booking.start ?? Infinity;
 
   for (const item of cases) {
     const booking = pairs.get(item);
@@ -389,6 +382,56 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
 
   const unmatched = unmatchedRows.map((row, index): BoardRow => ({ ...row, order: index + 1 }));
   return { rows: numbered, unmatched, uploaded, matched: pairs.size, mismatchCount, mismatchByRoom, countByRoom };
+}
+
+/** When a booking was made, as its row says it. */
+function when(booking: AddedCase): { bookedAt?: string } {
+  const text = booking.bookedAt ? bookedAtText(booking.bookedAt) : "";
+  return text ? { bookedAt: text } : {};
+}
+const noteOf = (booking: AddedCase): { note?: string } => (booking.note ? { note: booking.note } : {});
+function timeText(booking: AddedCase): { time?: string } {
+  const time = timeOf(booking);
+  return time ? { time: rangeText(time) } : {};
+}
+/** A booking's start, for the rows' order; a booking without a time after every timed one. */
+const startOf = (booking: AddedCase) => booking.start ?? Infinity;
+
+/**
+ * รพ.ท่าฉลอม's case rows on `date` (Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also"): its doctors' bookings alone, in
+ * the room each was booked in, as the board shows bookings before MX's upload (there is no HOSxP list for this hospital):
+ * by time, then the booking order, numbered in each room. The HN only to whoever may see it (BoardViewer).
+ */
+export function thaChalomRows(date: string, bookings: readonly AddedCase[], viewer: BoardViewer): BoardRow[] {
+  const own = (booking: AddedCase) => viewer.userId !== null && booking.surgeonId === viewer.userId;
+  const sorted = bookings
+    .map((booking, index) => ({ booking, index }))
+    .filter(({ booking }) => booking.date === date)
+    .sort((a, b) => startOf(a.booking) - startOf(b.booking) || a.index - b.index);
+  const order = new Map<string, number>();
+  return sorted.map(({ booking }): BoardRow => {
+    const slot = (order.get(booking.roomId) ?? 0) + 1;
+    order.set(booking.roomId, slot);
+    return {
+      id: `bk-${booking.id}`,
+      roomId: booking.roomId,
+      order: slot,
+      procedure: booking.operation || NO_OPERATION_LABEL,
+      surgeon: booking.surgeon,
+      specialty: subtypeLabel("DR", booking.subtype),
+      status: "scheduled",
+      shift: booking.shift,
+      source: "booking",
+      flag: null,
+      ...((viewer.allHn || own(booking)) && booking.hn ? { hn: booking.hn } : {}),
+      bookedBy: booking.surgeon,
+      ...(own(booking) ? { bookingId: booking.id } : {}),
+      ...when(booking),
+      ...timeText(booking),
+      ...noteOf(booking),
+      place: "tha-chalom",
+    };
+  });
 }
 
 /**

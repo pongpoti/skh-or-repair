@@ -11,13 +11,13 @@ import { InlineStatus } from "@/components/inline-status";
 import { ThaiDateField, type DayState } from "@/components/thai-date-field";
 import {
   addDays,
+  atThaChalom,
   BOOK_AHEAD_DAYS,
   BOOKING_CUTOFF_PHRASES,
   bookableFrom,
   bookedAlready,
   bookedChoice,
   bookedRoom,
-  bookingRoom,
   BORROWED_ROOM_NAME,
   BORROWED_ROOM_NOTE,
   borrowsRoom,
@@ -33,6 +33,8 @@ import {
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
   NOTE_ONLY_TEXT,
+  placeBookingRoom,
+  placeRoomName,
   POOLED_ROOM_NOTE,
   REQUEUE_TEXT,
   SCRUB_NO,
@@ -52,7 +54,9 @@ import { thaiDate } from "@/lib/days";
 import { displayHn, normalizeHn } from "@/lib/hn";
 import type { Holiday } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
-import { getRoom, roomLabel, roomUse } from "@/lib/rooms";
+import type { PlaceId } from "@/lib/places";
+import { roomUse } from "@/lib/rooms";
+import { thaChalomAllocation } from "@/lib/tha-chalom-schedule";
 import { subtypeLabel } from "@/lib/user-labels";
 
 const DIALOG_LOOK =
@@ -150,6 +154,7 @@ export function AddCase({
   onEdit,
   onRemove,
   onDay,
+  place = "skh",
 }: {
   /** Set to a new object to open the dialog (CaseRequest). */
   request: CaseRequest | null;
@@ -171,7 +176,14 @@ export function AddCase({
   onRemove: (id: string) => Promise<CaseResult>;
   /** The bookings of one day, every room's, for the day view (app/(board)/actions.ts dayBookings). */
   onDay: (date: string) => Promise<DayResult>;
+  /**
+   * The hospital booked at: รพ.สมุทรสาคร, or รพ.ท่าฉลอม (Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also"), where a
+   * doctor books only their department's room in its table that day (lib/added-cases.ts placeBookingRoom), with no
+   * dressing room to pick.
+   */
+  place?: PlaceId;
 }) {
+  const tc = place === "tha-chalom";
   const router = useRouter();
   const ref = useRef<HTMLDialogElement>(null);
   const hnRef = useRef<HTMLInputElement>(null);
@@ -449,7 +461,7 @@ export function AddCase({
     }
     // No ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026): a booking is saved as ในเวลา, and a HOSxP case it matches keeps
     // its own เวร on the board.
-    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null };
+    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null, ...(tc ? { place } : {}) };
     const edit = mode === "edit" ? editing : null;
     const checked = checkCase(input, {
       today,
@@ -457,6 +469,7 @@ export function AddCase({
       periods,
       subtype: doctor.subtype,
       holidays,
+      place,
       ...(edit ? { editing: { ...edit, subtype: doctor.subtype } } : {}),
     });
     if (!checked.ok) {
@@ -528,7 +541,7 @@ export function AddCase({
    * other fields are checked on the save).
    */
   function next() {
-    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null };
+    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null, ...(tc ? { place } : {}) };
     const edit = mode === "edit" ? editing : null;
     const checked = checkCase(input, {
       today,
@@ -536,6 +549,7 @@ export function AddCase({
       periods,
       subtype: doctor.subtype,
       holidays,
+      place,
       ...(edit ? { editing: { ...edit, subtype: doctor.subtype } } : {}),
     });
     if (!checked.ok && (checked.field === "date" || checked.field === "time")) {
@@ -603,7 +617,8 @@ export function AddCase({
   const name = cleanOperation(operation);
   // A department with several rooms that day keeps a surgeon's list in one (lib/added-cases.ts roomAmong): the room of
   // the doctor's own booking there; with none yet, the server gives the one with fewer bookings, so the card names both.
-  const pooled = deptRooms(doctor.subtype, name, date, periods);
+  // รพ.ท่าฉลอม gives a department one room a day and lends none.
+  const pooled = tc ? [] : deptRooms(doctor.subtype, name, date, periods);
   const ownRoom =
     pooled.length > 1
       ? (mine
@@ -611,18 +626,16 @@ export function AddCase({
           .map((item) => bookedRoom(item, periods))
           .find((item) => !item.dressing && pooled.includes(item.roomId))?.roomId ?? null)
       : null;
-  const deptPlaced = bookingRoom(doctor.subtype, name, date, periods, "dept");
+  const deptPlaced = placeBookingRoom(place, doctor.subtype, name, date, periods, "dept");
   const deptRoom = deptPlaced.ok && ownRoom ? { ...deptPlaced, roomId: ownRoom } : deptPlaced;
   const deptChoices = pooled.length > 1 && !ownRoom ? pooled : null;
   // A department with no room that day borrows the open room with the fewest bookings (Pong, 22 Nov 2026).
-  const borrowed = borrowsRoom(doctor.subtype, name, date, periods);
-  const dressingRoom = bookingRoom(doctor.subtype, name, date, periods, "dressing");
+  const borrowed = !tc && borrowsRoom(doctor.subtype, name, date, periods);
+  const dressingRoom = placeBookingRoom(place, doctor.subtype, name, date, periods, "dressing");
   const room = choice === "dressing" ? dressingRoom : deptRoom;
-  const allocation = deptRoom.ok && !(borrowed && deptChoices) ? allocationFor(deptRoom.roomId, date, periods) : null;
-  const label = (roomId: string) => {
-    const found = getRoom(roomId);
-    return found ? roomLabel(found) : roomId;
-  };
+  const allocation =
+    deptRoom.ok && !(borrowed && deptChoices) ? (tc ? thaChalomAllocation(deptRoom.roomId, date) : allocationFor(deptRoom.roomId, date, periods)) : null;
+  const label = (roomId: string) => placeRoomName(roomId, place);
   // The day view: the bookings in the room the doctor's choice gives (a department's rooms that day, when the server
   // still picks one of them), the doctor's own edited booking left out.
   const shownRooms = room.ok ? (choice === "dept" && deptChoices ? deptChoices : [room.roomId]) : [];
@@ -744,15 +757,18 @@ export function AddCase({
           {step === "time" ? (
           <>
           <div ref={dateRef}>
-            {/* The day before and after beside the label, as Google Calendar's arrows over its day. */}
-            <div className="-my-2 flex items-center justify-between gap-2">
+            {/*
+              The day before and after beside the label, as Google Calendar's arrows over its day: one pill, its right
+              edge on the field's (Pong, 27 Nov 2026: "try check time book design, it looks weird").
+            */}
+            <div className="flex items-center justify-between gap-2">
               <label htmlFor="case-date" className="text-sm font-semibold text-ink">
                 วันที่ผ่าตัด
               </label>
-              <span className="-mr-2 flex">
+              <span className="day-arrows">
                 <button
                   type="button"
-                  className="btn btn-ghost size-11 min-h-0 rounded-full p-0"
+                  className="day-arrow"
                   aria-label="วันก่อนหน้า"
                   title="วันก่อนหน้า"
                   disabled={!prevDay}
@@ -763,7 +779,7 @@ export function AddCase({
                 </button>
                 <button
                   type="button"
-                  className="btn btn-ghost size-11 min-h-0 rounded-full p-0"
+                  className="day-arrow"
                   aria-label="วันถัดไป"
                   title="วันถัดไป"
                   disabled={!nextDay}
@@ -827,7 +843,8 @@ export function AddCase({
                   setTime(next);
                   edited("time");
                 }}
-                readOnly={locked}
+                // รพ.ท่าฉลอม has no dressing room to fall back on: a day without the department's room has no time to pick.
+                readOnly={locked || (tc && !room.ok)}
                 clash={clash}
                 invalid={invalid === "time"}
                 describedBy={describe("time")}
@@ -925,7 +942,7 @@ export function AddCase({
             aria-describedby="case-room-why"
           >
             <legend className="text-sm font-semibold text-ink">ห้องผ่าตัด</legend>
-            <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+            <div className={`mt-1.5 grid gap-1.5 ${tc ? "grid-cols-1" : "grid-cols-2"}`}>
               <label className={`${OPTION} min-h-16`}>
                 <input
                   type="radio"
@@ -970,22 +987,25 @@ export function AddCase({
                 ) : null}
                 {!allocation && !deptRoom.ok ? <span className="text-xs">{NO_ROOM_NOTE[deptRoom.reason]}</span> : null}
               </label>
-              <label className={`${OPTION} min-h-16`}>
-                <input
-                  type="radio"
-                  name="room"
-                  value="dressing"
-                  checked={choice === "dressing" && dressingRoom.ok}
-                  disabled={!dressingRoom.ok}
-                  onChange={() => pickRoom("dressing")}
-                  aria-invalid={(invalid === "room" && choice === "dressing") || undefined}
-                  aria-describedby={describe("room")}
-                  className="sr-only"
-                  data-testid="case-room-dressing"
-                />
-                <span className="text-[0.9375rem] font-bold">{DRESSING_ROOM_NAME}</span>
-                <span className="text-xs text-muted">{dressingRoom.ok ? label(dressingRoom.roomId) : NO_ROOM_NOTE[dressingRoom.reason]}</span>
-              </label>
+              {/* รพ.ท่าฉลอม has no dressing room to book (Pong, 27 Nov 2026: "own department's room only"). */}
+              {tc ? null : (
+                <label className={`${OPTION} min-h-16`}>
+                  <input
+                    type="radio"
+                    name="room"
+                    value="dressing"
+                    checked={choice === "dressing" && dressingRoom.ok}
+                    disabled={!dressingRoom.ok}
+                    onChange={() => pickRoom("dressing")}
+                    aria-invalid={(invalid === "room" && choice === "dressing") || undefined}
+                    aria-describedby={describe("room")}
+                    className="sr-only"
+                    data-testid="case-room-dressing"
+                  />
+                  <span className="text-[0.9375rem] font-bold">{DRESSING_ROOM_NAME}</span>
+                  <span className="text-xs text-muted">{dressingRoom.ok ? label(dressingRoom.roomId) : NO_ROOM_NOTE[dressingRoom.reason]}</span>
+                </label>
+              )}
             </div>
             {/* Empty for the department's room (Pong, 15 Nov 2026: "remove ห้องของสาขาคุณ..."), so it takes no room then. */}
             <div
@@ -1076,7 +1096,8 @@ export function AddCase({
 
         {step === "time" ? (
           // The day view is taller than a phone: ต่อไป stays in sight at the dialog's foot, with the time picked.
-          <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex items-center gap-3 border-t border-line bg-surface px-4 py-3 min-[360px]:-mx-5 min-[360px]:px-5 sm:-mx-6 sm:px-6">
+          // It sits on the dialog's own foot, over its padding, so no hour shows under it while the day scrolls by.
+          <div className="sticky -bottom-4 z-10 -mx-4 mt-4 -mb-4 flex items-center gap-3 border-t border-line bg-surface px-4 py-3 min-[360px]:-bottom-5 min-[360px]:-mx-5 min-[360px]:-mb-5 min-[360px]:px-5 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
             <div className="min-w-0 flex-1">
               {saveError ? (
                 <InlineStatus tone="warning" role="alert" id="case-save-status" testId="case-save-status">
@@ -1133,8 +1154,11 @@ export function AddCase({
         )}
       </form>
 
-      {/* An edit is about one booking: the list waits until the form books again. */}
-      <section className="mt-6 border-t border-line pt-4" aria-labelledby="my-cases-title" hidden={mode === "edit"}>
+      {/*
+        An edit is about one booking: the list waits until the form books again. On the day view the doctor's own bookings
+        are its "ของคุณ" blocks, and ต่อไป stays the dialog's foot: the list comes with the rest of the form.
+      */}
+      <section className="mt-6 border-t border-line pt-4" aria-labelledby="my-cases-title" hidden={mode === "edit" || step === "time"}>
         <h3 id="my-cases-title" className="flex items-center gap-2 text-sm font-bold">
           การจองของฉัน
           <span className="count-tag">
@@ -1158,15 +1182,16 @@ export function AddCase({
             {mine.map((item) => {
               // Where the booking is now (the app works the room out again if the repair's dates moved).
               const { roomId, dressing } = bookedRoom(item, periods);
-              const room = getRoom(roomId);
+              const roomName = placeRoomName(roomId, item.place);
               const asking = confirming === item.id;
               const when = timeOf(item);
               // A case whose room is not in use that day (the ventilation repair moves the rooms) is not on the board.
-              const offBoard = roomUse(roomId, item.date, periods) !== "open";
+              // รพ.ท่าฉลอม's rooms stay where they are.
+              const offBoard = !atThaChalom(item) && roomUse(roomId, item.date, periods) !== "open";
               // Names the booking for the cancel button's screen-reader label: several can share a day and an HN.
               const what = [
                 thaiDate(item.date, "short"),
-                room ? roomLabel(room) : roomId,
+                roomName,
                 item.hn ? `HN ${displayHn(item.hn)}` : item.operation,
               ]
                 .filter(Boolean)
@@ -1175,7 +1200,7 @@ export function AddCase({
                 <li key={item.id} className="flex items-center gap-3 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-ink-2">
-                      {thaiDate(item.date, "short")} · {room ? roomLabel(room) : roomId}
+                      {thaiDate(item.date, "short")} · {roomName}
                       {dressing ? ` ${DRESSING_ROOM_NAME}` : null}
                       {when ? <span className="tabular-nums" data-testid="my-case-time">{` · ${rangeText(when)} น.`}</span> : null}
                       {dressing && typeof item.scrubDoes === "boolean" ? (

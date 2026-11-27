@@ -10,6 +10,8 @@ import type { CaseStatus, Operation, Shift } from "./schedule.ts";
 import { isSpecialtyCode } from "./specialties.ts";
 import { subtypeLabel } from "./user-labels.ts";
 import type { DayBoard } from "./week.ts";
+import type { PlaceId } from "./places.ts";
+import { thaChalomBookingRoom, thaChalomRoomName } from "./tha-chalom-schedule.ts";
 
 export { addDays };
 
@@ -82,7 +84,22 @@ export type CaseInput = {
    */
   start: number | null;
   end: number | null;
+  /**
+   * The hospital (cases.place): left out, or "skh", for รพ.สมุทรสาคร; "tha-chalom" for รพ.ท่าฉลอม (Pong, 27 Nov 2026: "Add
+   * booking btn on ท่าฉลอม also"), whose room is its own department's in that hospital's table (thaChalomBookingRoom).
+   */
+  place?: PlaceId;
 };
+
+/** Whether a booking is รพ.ท่าฉลอม's. */
+export const atThaChalom = (booking: { place?: PlaceId }) => booking.place === "tha-chalom";
+
+/** A room's name in a booking's hospital: "OR 4", or รพ.ท่าฉลอม's "ห้อง Scope". */
+export function placeRoomName(roomId: string, place?: PlaceId): string {
+  if (place === "tha-chalom") return thaChalomRoomName(roomId);
+  const room = getRoom(roomId);
+  return room ? roomLabel(room) : roomId;
+}
 
 /**
  * A booking as the day view shows it (components/day-view.tsx): where it is now (bookedRoom), its time, its operation and
@@ -312,6 +329,26 @@ export function bookingRoom(subtype: string | null | undefined, operation: strin
 }
 
 /**
+ * The room a booking goes to in `place`: bookingRoom for รพ.สมุทรสาคร; at รพ.ท่าฉลอม the room its table gives the doctor's
+ * department that day (thaChalomBookingRoom), never a dressing room (it has none for bookings) nor another department's.
+ */
+export function placeBookingRoom(
+  place: PlaceId | undefined,
+  subtype: string | null | undefined,
+  operation: string,
+  date: string,
+  periods: RepairPeriods,
+  choice: RoomChoice,
+): BookingRoom {
+  if (place !== "tha-chalom") return bookingRoom(subtype, operation, date, periods, choice);
+  if (choice === "dressing") return noRoom("no-dressing-room");
+  const dept = bookingDept(subtype);
+  if (!dept) return noRoom("no-department");
+  const roomId = thaChalomBookingRoom(dept, date);
+  return roomId ? { ok: true, roomId, dressing: false } : noRoom("no-room");
+}
+
+/**
  * The department rooms a booking may take on `date`: the pool bookingRoom chooses from for "dept", in number order. More
  * than one on a day the department holds several rooms (GENSX in OR 2 and OR 5 on a Monday of the weekly schedule);
  * empty when it has none.
@@ -401,7 +438,8 @@ const DRESSING_ROOMS_ANY: ReadonlySet<string> = new Set([
  * since, so a saved room that is closed on its day now still counts when it is a dressing room under some layout (OR 10
  * in the first half, OR 1 otherwise).
  */
-export function bookedChoice(booking: Pick<AddedCase, "dressing" | "date" | "roomId">, periods: RepairPeriods): RoomChoice {
+export function bookedChoice(booking: Pick<AddedCase, "dressing" | "date" | "roomId" | "place">, periods: RepairPeriods): RoomChoice {
+  if (atThaChalom(booking)) return "dept";
   if (typeof booking.dressing === "boolean") return booking.dressing ? "dressing" : "dept";
   const { date, roomId } = booking;
   const dressing =
@@ -417,9 +455,11 @@ export function bookedChoice(booking: Pick<AddedCase, "dressing" | "date" | "roo
  * worked out now (the doctor's department has none that day).
  */
 export function bookedRoom(
-  booking: Pick<AddedCase, "subtype" | "operation" | "date" | "roomId" | "dressing">,
+  booking: Pick<AddedCase, "subtype" | "operation" | "date" | "roomId" | "dressing" | "place">,
   periods: RepairPeriods,
 ): { roomId: string; dressing: boolean } {
+  // รพ.ท่าฉลอม's table has no repair to move rooms: a booking stays in the room it was saved in.
+  if (atThaChalom(booking)) return { roomId: booking.roomId, dressing: false };
   const choice = bookedChoice(booking, periods);
   const room = bookingRoom(booking.subtype, booking.operation ?? "", booking.date, periods, choice);
   if (!room.ok) return { roomId: booking.roomId, dressing: choice === "dressing" };
@@ -433,9 +473,8 @@ export function bookedRoom(
  * What the form says once a booking is saved, simply the room and the day (Pong, 15 Nov 2026: "simply state จอง OR XX
  * วันอังคารที่ … แล้ว"): "จอง OR 10 วันอังคารที่ 17 พ.ย. 2569 แล้ว", for the dressing room too.
  */
-export function bookedMessage(value: Pick<CaseInput, "roomId" | "date">): string {
-  const room = getRoom(value.roomId);
-  return `จอง ${room ? roomLabel(room) : value.roomId} ${thaiDate(value.date, "short")} แล้ว`;
+export function bookedMessage(value: Pick<CaseInput, "roomId" | "date" | "place">): string {
+  return `จอง ${placeRoomName(value.roomId, value.place)} ${thaiDate(value.date, "short")} แล้ว`;
 }
 
 /**
@@ -487,9 +526,12 @@ export function bookingChange(
  * What the form says once an edit is saved: the new room and day when it moved to another day, the new room when only
  * the room changed, and that it went to the back of the queue when it did.
  */
-export function editedMessage(value: Pick<CaseInput, "roomId" | "date">, before: Pick<AddedCase, "date">, change: { requeue: boolean; moved: boolean }): string {
-  const room = getRoom(value.roomId);
-  const name = room ? roomLabel(room) : value.roomId;
+export function editedMessage(
+  value: Pick<CaseInput, "roomId" | "date" | "place">,
+  before: Pick<AddedCase, "date">,
+  change: { requeue: boolean; moved: boolean },
+): string {
+  const name = placeRoomName(value.roomId, value.place);
   if (value.date !== before.date) return `เลื่อนไป ${name} ${thaiDate(value.date, "short")} แล้ว`;
   if (change.moved) return `ย้ายไป ${name} แล้ว ต่อท้ายคิว`;
   return change.requeue ? "บันทึกแล้ว ต่อท้ายคิว" : "บันทึกแล้ว";
@@ -502,13 +544,15 @@ export function editedMessage(value: Pick<CaseInput, "roomId" | "date">, before:
  * schedule). On its own day a booking keeps a room that is still one of its department's (app/(board)/actions.ts editCase).
  */
 export function editRequeues(
-  before: Pick<AddedCase, "date" | "roomId" | "hn" | "dressing" | "scrubDoes" | "operation" | "subtype">,
+  before: Pick<AddedCase, "date" | "roomId" | "hn" | "dressing" | "scrubDoes" | "operation" | "subtype" | "place">,
   after: { date: string; hn: string; operation: string; choice: RoomChoice },
   subtype: string | null,
   periods: RepairPeriods,
 ): boolean {
   if (after.date !== before.date) return true;
   if (before.hn !== null && normalizeHn(after.hn) !== before.hn) return true;
+  // รพ.ท่าฉลอม: on its own day the department keeps its one room.
+  if (atThaChalom(before)) return false;
   const now = bookedRoom(before, periods);
   if (after.choice === "dressing") return !now.dressing;
   if (now.dressing) return true;
@@ -569,7 +613,9 @@ export type BookingContext = {
    * The doctor's own booking being edited, when the input is its new state (editCase): its own day needs none of a new
    * booking's day checks, and once that day is closed (bookingState) only the note may change.
    */
-  editing?: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "subtype" | "start" | "end">;
+  editing?: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "subtype" | "start" | "end" | "place">;
+  /** The hospital booked at: รพ.สมุทรสาคร when left out (placeBookingRoom). An edit stays at its booking's. */
+  place?: PlaceId;
 };
 
 /**
@@ -581,6 +627,9 @@ export type BookingContext = {
  */
 export function checkCase(input: unknown, context: BookingContext): CheckedCase {
   const { today, earliest, periods, subtype, holidays, editing } = context;
+  const place = editing ? editing.place : context.place;
+  // Only รพ.ท่าฉลอม's bookings carry their place; รพ.สมุทรสาคร's stay as they were.
+  const at = place === "tha-chalom" ? { place } : {};
   const raw = (input ?? {}) as Record<string, unknown>;
   const refuse = (field: CaseField | undefined, error: string, more: { earliest?: string } = {}): CheckedCase => ({ ok: false, error, field, ...more });
   const date = raw.date;
@@ -626,6 +675,7 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
         note: note.note,
         start: editing.start,
         end: editing.end,
+        ...at,
       },
     };
   }
@@ -650,14 +700,14 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
     if (typeof raw.scrubDoes !== "boolean") return refuse("room", `ห้องทำแผล: ตอบก่อนว่า ${SCRUB_QUESTION}`);
     scrubDoes = raw.scrubDoes;
   }
-  const room = bookingRoom(subtype, operation, date, periods, choice);
+  const room = placeBookingRoom(place, subtype, operation, date, periods, choice);
   // No room that day: another day may have one.
   if (!room.ok) return refuse(room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
 
   // Last, as in the form.
   const note = checkNote(raw.note);
   if (!note.ok) return refuse("note", note.error);
-  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note: note.note, start, end } };
+  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note: note.note, start, end, ...at } };
 }
 
 function checkNote(raw: unknown): { ok: true; note: string } | { ok: false; error: string } {
