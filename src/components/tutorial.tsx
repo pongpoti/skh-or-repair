@@ -471,6 +471,14 @@ function buildSteps({
     closeRoom();
     openForm();
   };
+  // The practice booking's time: the ระบุเวลา switch on (it starts off), then the first free half hour.
+  const pickTime = () => {
+    const toggle = find("[data-testid=case-time-toggle]");
+    if (toggle && toggle.getAttribute("aria-checked") !== "true") toggle.click();
+    window.setTimeout(() => {
+      if (!find("[data-testid=day-pick]")) find("[data-testid=day-slot]:enabled")?.click();
+    }, 120);
+  };
   // The rest of the form, after the day view: a time (the first free one) and ต่อไป, once the form is open.
   const details = () => {
     closeRoom();
@@ -479,8 +487,8 @@ function buildSteps({
       return;
     }
     if (find("[data-testid=case-hn-card]")) return;
-    if (!find("[data-testid=day-pick]")) find("[data-testid=day-slot]:enabled")?.click();
-    window.setTimeout(() => find("[data-testid=case-next]")?.click(), 120);
+    pickTime();
+    window.setTimeout(() => find("[data-testid=case-next]")?.click(), 240);
   };
   return [
     { id: "welcome", chapter: 0, card: "welcome" },
@@ -560,13 +568,13 @@ function buildSteps({
       id: "form-time",
       chapter: 1,
       title: "เลือกเวลา",
-      body: "แตะเวลาที่ว่าง ได้ 1 ชั่วโมง ลากจุดบนหรือล่างเพื่อปรับ ช่องที่มีชื่อคือเวลาที่มีคนจองแล้ว",
-      target: () => find("[data-testid=day-view]"),
+      body: "เปิด ระบุเวลา แล้วเลือกเวลาเริ่มและถึง หรือแตะเวลาที่ว่าง ช่องที่มีชื่อคือเวลาที่มีคนจองแล้ว ไม่ระบุเวลาก็จองได้",
+      target: () => find("[data-testid=case-time-section]"),
       mode: "do",
       done: () => find("[data-testid=day-pick]") !== null,
       setup: form,
       scroll: "center",
-      example: { label: "เลือกเวลาตัวอย่าง", fill: () => find("[data-testid=day-slot]:enabled")?.click() },
+      example: { label: "เลือกเวลาตัวอย่าง", fill: pickTime },
     },
     {
       id: "form-next",

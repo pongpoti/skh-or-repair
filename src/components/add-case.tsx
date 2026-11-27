@@ -46,7 +46,7 @@ import {
   type DaySlot,
   type RoomChoice,
 } from "@/lib/added-cases";
-import { busyTimes, isFree, lengthText, rangeText, TIME_TAKEN_TEXT, type TimeRange } from "@/lib/booking-time";
+import { busyTimes, isFree, lengthText, rangeText, TIME_MISSING_TEXT, TIME_TAKEN_TEXT, type TimeRange } from "@/lib/booking-time";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate } from "@/lib/days";
 import { displayHn, normalizeHn } from "@/lib/hn";
@@ -114,7 +114,8 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
  * The doctor's booking of a room for one patient, in a dialog, in two steps (Pong, 27 Nov 2026: "select time (time range
  * 8.30 to 15.30) on day view of calendar (just like in google calendar app) then show form input"): first the day and the
  * time on a day view (components/day-view.tsx) that shows the bookings already in the room, a booked time being taken
- * (Pong's pick, 27 Nov 2026); then ต่อไป shows the rest, under the day and time with เปลี่ยน to go back.
+ * (Pong's pick, 27 Nov 2026); then ต่อไป shows the rest, under the day and time with เปลี่ยน to go back. The time is
+ * optional, behind a ระบุเวลา switch that starts off (Pong, 27 Nov 2026: "Add toggle time input : disable as default").
  *
  * The rest (Pong, 15 Nov 2026): the day, in Thai with a calendar
  * that offers only the days that can be booked (from the next workday, or the one after once 15:00 has passed, up to
@@ -225,8 +226,12 @@ export function AddCase({
   const [editing, setEditing] = useState<AddedCase | null>(null);
   // Opens the calendar (a move): a new object each time.
   const [calendarOpen, setCalendarOpen] = useState<object | null>(null);
-  // The time picked on the day view (null until one is).
+  // The time picked on the day view (null until one is, and while the doctor gives none).
   const [time, setTime] = useState<TimeRange | null>(null);
+  // Whether the doctor gives a time (Pong, 27 Nov 2026: "Add toggle time input : disable as default"): off for a new
+  // booking, on for one that has a time. Turned off, the time is set aside here, and comes back if it is turned on again.
+  const [timed, setTimed] = useState(false);
+  const [timeKept, setTimeKept] = useState<TimeRange | null>(null);
   // The form's two steps: the day view, then the rest. `opened`: the one it opened on (an edit of a booking's details
   // opens on them, and its back arrow then goes to the row's sheet).
   const [step, setStep] = useState<"time" | "details">("time");
@@ -310,6 +315,8 @@ export function AddCase({
     setScrubDoes(picked === "dressing" && typeof from?.scrubDoes === "boolean" ? from.scrubDoes : null);
     // An edit keeps its time; booking again tries the same time on the other day (the day view drops it if taken).
     setTime(from ? timeOf(from) : null);
+    setTimed(from ? timeOf(from) !== null : false);
+    setTimeKept(null);
     const opensOn = next.mode === "edit" && next.focus === "details" ? "details" : "time";
     setStep(opensOn);
     setOpened(opensOn);
@@ -366,7 +373,8 @@ export function AddCase({
       const dialog = ref.current;
       (
         dialog?.querySelector<HTMLElement>('[data-testid="day-pick"] [role="button"]') ??
-        dialog?.querySelector<HTMLElement>('[data-testid="day-slot"]:enabled')
+        dialog?.querySelector<HTMLElement>('[data-testid="day-start"]:enabled') ??
+        dialog?.querySelector<HTMLElement>('[data-testid="case-time-toggle"]')
       )?.focus();
     } else if (field === "hn") hnRef.current?.focus();
     else if (field === "operation") operationRef.current?.focus();
@@ -517,7 +525,9 @@ export function AddCase({
           setNote("");
           setChoice("dept");
           setScrubDoes(null);
+          // The switch stays as the doctor left it: on, the day view shows the booking just made.
           setTime(null);
+          setTimeKept(null);
           setStep("time");
           focusAfter.current = "time";
         }
@@ -556,6 +566,16 @@ export function AddCase({
     }
     if (mode === "again" && bookedAlready(mine, { date, hn, choice }, periods)) {
       refuse(SAME_DAY_TEXT, "date");
+      return;
+    }
+    // รพ.ท่าฉลอม lends no room: a day without the department's own waits for another day here.
+    if (tc && !room.ok) {
+      refuse(room.error, "date");
+      return;
+    }
+    // Turned on, the time is wanted.
+    if (timed && !time && !locked) {
+      refuse(TIME_MISSING_TEXT, "time");
       return;
     }
     if (time && !locked && !isFree(time, busy)) {
@@ -663,6 +683,16 @@ export function AddCase({
   function showTime() {
     focusAfter.current = "time";
     setStep("time");
+  }
+  function giveTime(on: boolean) {
+    if (on) {
+      if (!time && timeKept) setTime(timeKept);
+    } else {
+      setTimeKept(time);
+      setTime(null);
+    }
+    setTimed(on);
+    edited("time");
   }
   const lockedNote = (
     <p className="mt-1.5 text-[0.8125rem] leading-5 font-semibold text-ink-2" data-testid="case-locked">
@@ -820,14 +850,33 @@ export function AddCase({
             The time, on the day view of the room the doctor's choice gives that day (the department's, until the rest of
             the form picks the dressing room).
           */}
-          <div>
-            <p className="flex flex-wrap items-baseline gap-x-1.5 text-sm" data-testid="case-day-room">
-              <span className="font-semibold text-ink">เวลาผ่าตัด</span>{" "}
-              {shownName ? <span className="text-ink-2">· {shownName}</span> : null}
-            </p>
+          <div data-testid="case-time-section">
+            {/*
+              The time is the doctor's to give (Pong, 27 Nov 2026: "Add toggle time input : disable as default"): the
+              switch beside the room, off to start with; on, the start and end lists and the day view.
+            */}
+            <div className="flex items-center justify-between gap-3">
+              <p className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-sm" data-testid="case-day-room">
+                <span className="font-semibold text-ink">เวลาผ่าตัด</span>{" "}
+                {shownName ? <span className="text-ink-2">· {shownName}</span> : null}
+              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={timed}
+                className="time-toggle"
+                disabled={locked || (tc && !room.ok)}
+                onClick={() => giveTime(!timed)}
+                data-testid="case-time-toggle"
+              >
+                ระบุเวลา
+                <span className="switch" aria-hidden="true" />
+              </button>
+            </div>
             {!room.ok ? (
               <p className="mt-0.5 text-[0.8125rem] leading-5 font-semibold text-[var(--stop)]">{room.error}</p>
             ) : null}
+            {timed ? (
             <div className="mt-1.5">
               <DayView
                 slots={slots}
@@ -846,7 +895,8 @@ export function AddCase({
                 describedBy={describe("time")}
               />
             </div>
-            {read?.error && !loading ? (
+            ) : null}
+            {timed && read?.error && !loading ? (
               <div className="mt-1.5 flex items-center gap-2">
                 <InlineStatus tone="warning" role="alert" className="flex-1">
                   {read.error}
@@ -1102,10 +1152,10 @@ export function AddCase({
                       <span className="font-bold text-ink">{rangeText(time)} น.</span>{" "}
                       <span className="whitespace-nowrap text-muted">{lengthText(time)}</span>
                     </>
-                  ) : locked ? (
-                    <span className="text-muted">ไม่ระบุเวลา</span>
+                  ) : timed && !locked ? (
+                    <span className="text-muted">เลือกเวลาที่ต้องการ</span>
                   ) : (
-                    <span className="text-muted">แตะเวลาที่ต้องการ</span>
+                    <span className="text-muted">ไม่ระบุเวลา</span>
                   )}
                 </p>
               )}

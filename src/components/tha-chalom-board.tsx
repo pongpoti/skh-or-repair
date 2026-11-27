@@ -184,7 +184,7 @@ export function ThaChalomBoard({
             pathname={pathname}
             className={`flex min-h-0 flex-1 overflow-hidden p-1 lg:p-0 ${adding ? "pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.75rem)] lg:pb-[4.5rem]" : ""}`}
           >
-            {/* Filling the box as รพ.สมุทรสาคร's plan does, with the same margins (globals.css .tc-plan). */}
+            {/* As wide as รพ.สมุทรสาคร's plan, in the same place (globals.css .tc-plan). */}
             <ThaChalomPlan
               day={day}
               className="tc-plan"

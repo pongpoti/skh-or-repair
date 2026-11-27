@@ -8,9 +8,12 @@ import {
   DAY_END,
   DAY_START,
   dragTime,
+  endChoices,
   lanes,
   lengthText,
   rangeText,
+  startAt,
+  startChoices,
   tapTime,
   TIME_STEP,
   type TimeRange,
@@ -35,8 +38,10 @@ type Drag = { edge: "start" | "end" | "move"; y: number; from: TimeRange; moved:
  * in the room (`rooms`: one room, or a department's rooms that day, where a time is taken only when all of them are),
  * and the doctor's time: a tap on a free half hour gives an hour from there (cut short by the next booking or 15:30),
  * and its handles, or the time itself, drag in 15-minute steps, never over a booking (Pong, 27 Nov 2026: "No, a booked
- * time is taken"). The arrow keys move a handle, or the time, by 15 minutes. `selfId` is an edit's own booking, left
- * out. `readOnly`: a closed day's booking, whose time cannot change.
+ * time is taken"). The arrow keys move a handle, or the time, by 15 minutes. Above it, เริ่ม and ถึง lists in 15-minute
+ * steps set the same time without dragging (Pong, 27 Nov 2026: "it is hard to expand time range (hard to click and to
+ * select)"), a taken one disabled. `selfId` is an edit's own booking, left out. `readOnly`: a closed day's booking, whose
+ * time cannot change.
  */
 export function DayView({
   slots,
@@ -105,6 +110,58 @@ export function DayView({
 
   return (
     <div data-testid="day-view" data-loading={loading || undefined} aria-busy={loading}>
+      {readOnly ? null : (
+        <div className="mb-2 grid grid-cols-2 gap-2" data-testid="day-time-fields">
+          <label className="min-w-0">
+            <span className="mb-1 block text-xs font-semibold text-ink-2">เริ่ม</span>
+            <select
+              className="field tabular-nums"
+              value={value?.start ?? ""}
+              disabled={loading}
+              onChange={(event) => onChange(startAt(value, Number(event.target.value), busy))}
+              aria-invalid={invalid || undefined}
+              aria-describedby={describedBy}
+              data-testid="day-start"
+            >
+              {value ? null : (
+                <option value="" disabled>
+                  เลือก
+                </option>
+              )}
+              {startChoices(busy).map((choice) => (
+                <option key={choice.minute} value={choice.minute} disabled={!choice.free}>
+                  {clockText(choice.minute)}
+                  {choice.free ? "" : " จองแล้ว"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="min-w-0">
+            <span className="mb-1 block text-xs font-semibold text-ink-2">ถึง</span>
+            <select
+              className="field tabular-nums"
+              value={value?.end ?? ""}
+              disabled={loading || !value}
+              onChange={(event) => value && onChange({ start: value.start, end: Number(event.target.value) })}
+              aria-invalid={invalid || undefined}
+              data-testid="day-end"
+            >
+              {value ? (
+                // Up to the next booking or 15:30; a time kept from another day keeps its own end in the list.
+                endChoices(value.start, busy)
+                  .filter((choice) => choice.free || choice.minute === value.end)
+                  .map((choice) => (
+                    <option key={choice.minute} value={choice.minute} disabled={!choice.free}>
+                      {clockText(choice.minute)} ({lengthText({ start: value.start, end: choice.minute })})
+                    </option>
+                  ))
+              ) : (
+                <option value="">--:--</option>
+              )}
+            </select>
+          </label>
+        </div>
+      )}
       {untimed > 0 ? (
         <p className="mb-2 rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-ink-2" data-testid="day-untimed">
           จองไว้ไม่ระบุเวลา <span className="font-semibold tabular-nums">{untimed}</span> เคส

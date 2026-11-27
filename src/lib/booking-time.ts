@@ -123,6 +123,37 @@ export function dragTime(time: TimeRange, edge: "start" | "end" | "move", delta:
 }
 
 /**
+ * The start and end lists under the day view (Pong, 27 Nov 2026: "it is hard to expand time range (hard to click and to
+ * select)"): every 15 minutes from 08:30, a start being free when its first quarter hour is, an end when the whole time
+ * from the start is. A taken one stays in the list, disabled, so a time kept from another day still shows.
+ */
+export function startChoices(busy: readonly TimeRange[]): { minute: number; free: boolean }[] {
+  const out: { minute: number; free: boolean }[] = [];
+  for (let minute = DAY_START; minute < DAY_END; minute += TIME_STEP) {
+    out.push({ minute, free: isFree({ start: minute, end: minute + TIME_STEP }, busy) });
+  }
+  return out;
+}
+
+export function endChoices(start: number, busy: readonly TimeRange[]): { minute: number; free: boolean }[] {
+  const out: { minute: number; free: boolean }[] = [];
+  for (let minute = start + TIME_STEP; minute <= DAY_END; minute += TIME_STEP) {
+    out.push({ minute, free: isFree({ start, end: minute }, busy) });
+  }
+  return out;
+}
+
+/**
+ * The time a new start in the list gives: the same length as before (an hour when nothing was picked), cut short by the
+ * next taken time or 15:30.
+ */
+export function startAt(time: TimeRange | null, start: number, busy: readonly TimeRange[]): TimeRange {
+  const length = time ? time.end - time.start : DEFAULT_LENGTH;
+  const next = busy.filter((range) => range.end > start).reduce((min, range) => Math.min(min, Math.max(range.start, start + TIME_STEP)), DAY_END);
+  return { start, end: Math.max(start + TIME_STEP, Math.min(start + length, next)) };
+}
+
+/**
  * Lanes for times that overlap, as Google Calendar sets events side by side: each time's lane and how many lanes its
  * group of overlapping times needs. Taken in order of start, longest first on a tie.
  */

@@ -1,5 +1,5 @@
 import type { DeptCode } from "./allocation.ts";
-import { checkTime, overlaps, TIME_MISSING_TEXT, type TimeRange } from "./booking-time.ts";
+import { checkTime, overlaps, type TimeRange } from "./booking-time.ts";
 import { addDays, thaiDate, workdayIndex } from "./days.ts";
 import { checkHn, normalizeHn } from "./hn.ts";
 import { holidayIn, nextWorkdayIn, type Holiday } from "./holidays.ts";
@@ -648,11 +648,10 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
     if (holiday) return refuse("date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
   }
 
-  // The time, picked on the day view before the rest (Pong, 27 Nov 2026): a new booking needs one; an edit of a booking
-  // made before the form asked may keep none.
+  // The time, picked on the day view before the rest (Pong, 27 Nov 2026), is the doctor's to give or not (Pong, 27 Nov
+  // 2026: "Add toggle time input : disable as default"): a booking with none takes no time from anyone.
   const time = checkTime(raw.start, raw.end);
   if (!time.ok) return refuse("time", time.error);
-  if (time.time === null && !(editing && editing.start === null)) return refuse("time", TIME_MISSING_TEXT);
   const start = time.time?.start ?? null;
   const end = time.time?.end ?? null;
 

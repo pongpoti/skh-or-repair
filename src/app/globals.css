@@ -1486,7 +1486,9 @@ dialog[open]::backdrop {
     animation: none;
   }
   .day-swipe-plan,
-  .day-swipe-hint { transition: none; }
+  .day-swipe-hint,
+  .time-toggle .switch,
+  .time-toggle .switch::after { transition: none; }
   .notice-badge-chevron,
   .case-op-chev,
   .case-note,
@@ -2246,14 +2248,17 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 .tcp-scope.is-selected .tcp-or-shape:focus-visible { outline: none; stroke: var(--focus); stroke-width: 5; }
 
 /*
- * รพ.ท่าฉลอม's plan on its board fills the swipe area as รพ.สมุทรสาคร's does, with the same margins (Pong, 27 Nov 2026:
- * "same screen margin like สมุทรสาคร"); the drawing keeps its shape inside (tha-chalom-plan.tsx).
+ * รพ.ท่าฉลอม's plan on its board is as wide as รพ.สมุทรสาคร's (Pong, 27 Nov 2026: "Resize ท่าฉลอม layout to same width
+ * as สมุทรสาคร"): its box is รพ.สมุทรสาคร's plan's (floor-plan.tsx: the swipe area's height, 1207 × 1706, narrowed to
+ * the area's width when that is less), and the drawing, wider for its height, fills the box's width from the top
+ * (tha-chalom-plan.tsx, xMidYMin meet). Both frames sit about 1.6% of the width in from the box's sides.
  */
 .tc-plan {
-  flex: 1 1 0%;
+  flex: 0 1 auto;
   min-width: 0;
-  width: 100%;
+  width: auto;
   height: 100%;
+  aspect-ratio: 1207 / 1706;
 }
 
 
@@ -2285,6 +2290,50 @@ a.place-tab:has(.place-tab-label[data-pending]) {
   color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
+/*
+ * The booking form's ระบุเวลา switch (Pong, 27 Nov 2026: "Add toggle time input : disable as default"): its words and a
+ * small track, the whole a 44px tap; on, the track takes the brand's colour and the knob moves right.
+ */
+.time-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.25rem 0 0.5rem;
+  border-radius: 999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.time-toggle:disabled { cursor: default; opacity: 0.5; }
+.time-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.time-toggle .switch {
+  position: relative;
+  width: 2.75rem;
+  height: 1.625rem;
+  border-radius: 999px;
+  /* The fields' border colour: the off track stands out from the dialog (3:1). */
+  background: var(--line-input);
+  transition: background-color 0.15s ease;
+}
+.time-toggle .switch::after {
+  content: "";
+  position: absolute;
+  top: 0.1875rem;
+  left: 0.1875rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(41 29 20 / 0.3);
+  transition: transform 0.15s ease;
+}
+.time-toggle[aria-checked="true"] { color: var(--ink); }
+.time-toggle[aria-checked="true"] .switch { background: var(--brand); }
+.time-toggle[aria-checked="true"] .switch::after { transform: translateX(1.125rem); }
+
 /* The day before and after: one pill of two 44px buttons, on the date field's right edge. */
 .day-arrows {
   display: inline-flex;

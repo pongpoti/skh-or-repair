@@ -27,7 +27,7 @@ import { tutorialSeen } from "@/lib/tutorial-store";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
 import { workbookFor, workbookForDay } from "@/lib/workbook-store";
-import { addCase, dayBookings, deleteCase, editCase, undoCancel } from "../actions";
+import { addCase, dayBookings, deleteCase, editCase, undoCancel } from "@/app/(board)/actions";
 
 export const dynamic = "force-dynamic";
 

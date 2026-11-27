@@ -1,6 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { busyTimes, checkTime, clockText, DAY_END, DAY_START, dragTime, isFree, lanes, lengthText, overlaps, rangeText, tapTime } from "./booking-time.ts";
+import {
+  busyTimes,
+  checkTime,
+  clockText,
+  DAY_END,
+  DAY_START,
+  dragTime,
+  endChoices,
+  isFree,
+  lanes,
+  lengthText,
+  overlaps,
+  rangeText,
+  startAt,
+  startChoices,
+  tapTime,
+} from "./booking-time.ts";
 
 const at = (text: string) => {
   const [h, m] = text.split(":").map(Number);
@@ -83,4 +99,29 @@ test("overlapping times take lanes side by side", () => {
   const d = { ...range("13:00", "14:00"), id: "d" };
   const out = Object.fromEntries(lanes([c, b, a, d]).map((entry) => [entry.item.id, [entry.lane, entry.of]]));
   assert.deepEqual(out, { a: [0, 2], b: [1, 2], c: [0, 2], d: [0, 1] });
+});
+
+test("the start and end lists: every 15 minutes, a taken one disabled; a new start keeps the length up to the next booking", () => {
+  const busy = [range("10:00", "11:00"), range("13:00", "13:30")];
+  const starts = startChoices(busy);
+  assert.equal(starts.length, 28, "08:30 to 15:15");
+  assert.deepEqual(starts[0], { minute: at("08:30"), free: true });
+  assert.deepEqual(starts.at(-1), { minute: at("15:15"), free: true });
+  const takenStarts = starts.filter((choice) => !choice.free).map((choice) => clockText(choice.minute));
+  assert.deepEqual(takenStarts, ["10:00", "10:15", "10:30", "10:45", "13:00", "13:15"]);
+  // from 09:00: free up to the booking at 10:00, taken past it
+  const ends = endChoices(at("09:00"), busy);
+  assert.deepEqual(ends[0], { minute: at("09:15"), free: true });
+  assert.deepEqual(ends.at(-1), { minute: DAY_END, free: false });
+  assert.deepEqual(
+    ends.filter((choice) => choice.free).map((choice) => clockText(choice.minute)),
+    ["09:15", "09:30", "09:45", "10:00"],
+  );
+  assert.deepEqual(endChoices(at("15:15"), []), [{ minute: DAY_END, free: true }], "the last quarter hour");
+  // a new start: an hour when nothing was picked, the same length otherwise, cut short at the next booking or 15:30
+  assert.deepEqual(startAt(null, at("08:30"), busy), range("08:30", "09:30"));
+  assert.deepEqual(startAt(null, at("09:30"), busy), range("09:30", "10:00"));
+  assert.deepEqual(startAt(range("08:30", "10:00"), at("11:00"), busy), range("11:00", "12:30"));
+  assert.deepEqual(startAt(range("08:30", "10:00"), at("12:30"), busy), range("12:30", "13:00"));
+  assert.deepEqual(startAt(range("08:30", "10:00"), at("15:00"), busy), { start: at("15:00"), end: DAY_END });
 });
