@@ -17,7 +17,7 @@ import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import { isDressingCase } from "@/lib/placement";
-import { BOARD_PATH } from "@/lib/places";
+import { BOARD_PATH, THA_CHALOM_PATH } from "@/lib/places";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRoom, openRooms, roomLabel } from "@/lib/rooms";
 import {
@@ -25,11 +25,13 @@ import {
   DRESSING_EXAMPLES,
   LONG_OPERATION,
   practiceRoom,
+  STAFF_TUTORIAL_COOKIE,
   TUTORIAL_COOKIE,
   TUTORIAL_ME,
   TUTORIAL_NOTICE,
   tutorialBoard,
   tutorialCases,
+  type TutorialAudience,
   type TutorialPhase,
 } from "@/lib/tutorial";
 
@@ -42,6 +44,11 @@ import {
  * the end. The doctor makes a practice booking (kept in this page only; the booking form's save is replaced), sees the
  * day before and after MX's 16:00 upload, and is told what each icon, mark and colour means. Nothing is saved but the
  * note that the doctor has seen it (actions.ts seeTutorial), which stops the board from opening it by itself again.
+ *
+ * The staff's version (Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking. Always on
+ * tutorial for non-DR"): RN, PN, PCA and MX, who cannot book, walk the same made-up day with no booking form and no
+ * booking steps: the plan, a room's list before and after the upload, the dressing room, the real days before, and the
+ * symbols. The board opens it each time they open the app (lib/tutorial.ts STAFF_TUTORIAL_COOKIE).
  */
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -81,6 +88,9 @@ type Step = {
 };
 
 const CHAPTERS = ["แปลนห้อง", "จองห้อง", "ดูการจอง", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "ตัวอย่างจริง", "จบบทเรียน"] as const;
+
+/** The staff's chapters: no booking, so the room's list takes the booking's place. */
+const STAFF_CHAPTERS = ["แปลนห้อง", "ดูรายการเคส", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "ตัวอย่างจริง", "จบบทเรียน"] as const;
 
 const EXAMPLE_HN = "1234567";
 /** The short name surgeons type (Pong, 20 Nov 2026: "For พิมพ์ชื่อผ่าตัด change from lap chole to LC"). */
@@ -204,6 +214,9 @@ function sameBox(a: Box | null, b: Box | null): boolean {
 // ---------------------------------------------------------------------------------------------------------------------
 
 export function Tutorial({
+  audience = "doctor",
+  mx = false,
+  back = "skh",
   first,
   seenKey,
   doctor,
@@ -215,9 +228,15 @@ export function Tutorial({
   unlisted,
   periods,
 }: {
+  /** A doctor (the practice booking) or the rest of the staff (no booking steps). */
+  audience?: TutorialAudience;
+  /** The staff member is MX: the upload button is shown, and every HN, as on their board. */
+  mx?: boolean;
+  /** The board the tutorial goes back to. */
+  back?: "skh" | "tha-chalom";
   /** The board sent the doctor here on their first visit: the welcome offers to skip, and starting or skipping notes it. */
   first: boolean;
-  /** The doctor's users.id, for the seen cookie (null for an admin who is not a doctor). */
+  /** The doctor's users.id, for the seen cookie (null for an admin who is not a doctor); for staff, the cookie's value. */
   seenKey: string | null;
   /** The doctor's name and the department the practice booking goes by (lib/tutorial.ts practiceSubtype). */
   doctor: { name: string; subtype: string };
@@ -242,7 +261,12 @@ export function Tutorial({
   // A new run of the tutorial (เล่นอีกครั้ง) starts the board afresh.
   const [run, setRun] = useState(0);
 
-  const built = useMemo(() => tutorialBoard({ date: day, today, periods, doctor, mine, phase }), [day, today, periods, doctor, mine, phase]);
+  const staff = audience === "staff";
+  const chapters: readonly string[] = staff ? STAFF_CHAPTERS : CHAPTERS;
+  const built = useMemo(
+    () => tutorialBoard({ date: day, today, periods, doctor, mine, phase, allHn: staff && mx }),
+    [day, today, periods, doctor, mine, phase, staff, mx],
+  );
   const board: BoardView = {
     date: day,
     rows: built.rows,
@@ -342,19 +366,10 @@ export function Tutorial({
   // The practice room is not the doctor's own department's (obstetrics during the repair, or no department of theirs).
   const stand = ownSubtype === null || practiceRoom(ownSubtype, day, periods) !== roomId;
 
-  const steps = useMemo(
-    () =>
-      buildSteps({
-        roomId,
-        roomName,
-        goneRoom,
-        goneName: label(goneRoom),
-        dressingRoom,
-        dressingName: label(dressingRoom),
-        stand,
-      }),
-    [roomId, roomName, goneRoom, dressingRoom, stand],
-  );
+  const steps = useMemo(() => {
+    const input = { roomId, roomName, goneRoom, goneName: label(goneRoom), dressingRoom, dressingName: label(dressingRoom), stand };
+    return staff ? buildStaffSteps(input, mx) : buildSteps(input);
+  }, [roomId, roomName, goneRoom, dressingRoom, stand, staff, mx]);
   const step = steps[Math.min(index, steps.length - 1)];
 
   const go = useCallback(
@@ -368,7 +383,7 @@ export function Tutorial({
 
   function exit() {
     seen();
-    router.push(BOARD_PATH);
+    router.push(back === "tha-chalom" ? THA_CHALOM_PATH : BOARD_PATH);
   }
 
   /**
@@ -379,6 +394,11 @@ export function Tutorial({
   function seen() {
     if (!first || !seenKey) return;
     const secure = window.location.protocol === "https:" ? "; secure" : "";
+    if (staff) {
+      // No max-age: a session cookie, gone when the app is closed, so the next open starts here again.
+      document.cookie = `${STAFF_TUTORIAL_COOKIE}=${encodeURIComponent(seenKey)}; path=/; samesite=lax${secure}`;
+      return;
+    }
     document.cookie = `${TUTORIAL_COOKIE}=${encodeURIComponent(seenKey)}; path=/; max-age=31536000; samesite=lax${secure}`;
     void seeTutorial();
   }
@@ -412,22 +432,26 @@ export function Tutorial({
           image={profile.image}
           pathname="/tutorial"
           helpHref="/tutorial"
+          // The staff's board bar as they have it (the made-up day is รพ.สมุทรสาคร's): the hospital switch, MX's upload button.
+          uploadHref={staff && mx ? "/upload" : null}
+          place={staff ? { current: "skh" } : null}
         />
-        <SuiteBoard board={board} today={today} periods={periods} pathname="/tutorial" adding={adding} notices={notices} swipe={null} />
+        <SuiteBoard board={board} today={today} periods={periods} pathname="/tutorial" adding={staff ? null : adding} notices={notices} swipe={null} />
       </div>
       <Coach
         step={step}
         index={index}
         total={steps.length}
+        chapters={chapters}
         onNext={() => go(index + 1)}
         onExit={exit}
         card={
           step.card === "welcome" ? (
-            <WelcomeCard first={first} onStart={start} onSkip={exit} />
+            <WelcomeCard first={first} staff={staff} chapters={chapters} onStart={start} onSkip={exit} />
           ) : step.card === "plan-symbols" ? (
             <PlanSymbolsCard day={day} periods={periods} onNext={() => go(index + 1)} />
           ) : step.card === "priority" ? (
-            <PriorityCard onNext={() => go(index + 1)} />
+            <PriorityCard staff={staff} onNext={() => go(index + 1)} />
           ) : step.card === "row-symbols" ? (
             <RowSymbolsCard onNext={() => go(index + 1)} />
           ) : step.card === "upload" ? (
@@ -437,7 +461,7 @@ export function Tutorial({
           ) : step.card === "examples" ? (
             <ExamplesCard onNext={() => go(index + 1)} />
           ) : step.card === "finish" ? (
-            <FinishCard onBoard={exit} onAgain={again} />
+            <FinishCard staff={staff} onBoard={exit} onAgain={again} />
           ) : null
         }
       />
@@ -899,6 +923,113 @@ function buildSteps({
   ];
 }
 
+/** Whether the element is drawn on the screen (a button hidden on a narrow phone is not). */
+function shown(element: Element | null): boolean {
+  if (!element) return false;
+  const box = element.getBoundingClientRect();
+  return box.width > 0 && box.height > 0;
+}
+
+/**
+ * The staff's steps (Pong, 27 Nov 2026: "similar to DR except booking"): the doctors' steps without the booking form or
+ * the practice booking, in the same order. A room's list is shown on the made-up colleague's booking in general
+ * surgery's room, where the doctors' version shows the doctor's own; two steps of their own show the switch between the
+ * hospitals and, for MX, the upload button.
+ */
+function buildStaffSteps(input: Parameters<typeof buildSteps>[0], mx: boolean): Step[] {
+  const { roomId, roomName } = input;
+  const doctors = new Map(buildSteps(input).map((step) => [step.id, step]));
+  const take = (id: string, chapter: number, change: Partial<Step> = {}): Step => {
+    const step = doctors.get(id);
+    if (!step) throw new Error(`no tutorial step ${id}`);
+    return { ...step, chapter, ...change };
+  };
+  const steps: Step[] = [
+    { id: "welcome", chapter: 0, card: "welcome" },
+
+    // 1. The plan.
+    take("plan", 0),
+    take("notices", 0),
+    take("zone", 0),
+    take("plan-symbols", 0),
+    take("date", 0),
+    take("swipe", 0),
+    {
+      id: "place",
+      chapter: 0,
+      title: "สลับโรงพยาบาล",
+      body: "แตะชื่อโรงพยาบาลเพื่อดูตารางของ รพ.สมุทรสาคร หรือ รพ.ท่าฉลอม วันเดียวกัน",
+      target: () => find("[data-testid=place-tabs]"),
+    },
+    ...(mx
+      ? [
+          {
+            id: "upload-button",
+            chapter: 0,
+            title: "อัปโหลดตาราง HOSxP",
+            body: "Manager อัปโหลดตาราง HOSxP ทุกวัน 15:00–16:00 น. ที่ปุ่มนี้ หรือเมนูรูปโปรไฟล์",
+            target: () => find("[data-testid=upload-button]"),
+            skip: () => !shown(find("[data-testid=upload-button]")),
+            round: true,
+          } satisfies Step,
+        ]
+      : []),
+
+    // 2. A room's list, before MX's upload: the doctors' bookings alone.
+    take("priority", 1),
+    take("room", 1, { title: "เปิดดูห้อง", body: `แตะ ${roomName} เพื่อดูรายการเคส` }),
+    take("colleague", 1, {
+      id: "booked-row",
+      title: "เคสที่แพทย์จอง",
+      body: mx
+        ? "เรียงตามเวลาที่แพทย์จอง ยิ่งจองเร็ว ยิ่งได้คิวก่อน Manager เห็น HN ทุกเคส"
+        : "เรียงตามเวลาที่แพทย์จอง ยิ่งจองเร็ว ยิ่งได้คิวก่อน HN เห็นเฉพาะแพทย์ที่จองและ Manager",
+    }),
+    {
+      id: "row-icon",
+      chapter: 1,
+      title: "ไอคอนปฏิทิน",
+      body: "แตะไอคอนเพื่อดูความหมาย ปฏิทิน = แพทย์จองแล้ว รอตาราง HOSxP",
+      target: () => find("[data-testid=row-icon]", colleagueRow()),
+      mode: "tap",
+      hand: "tap",
+      round: true,
+      done: () => find("[data-testid=row-icon-tip]", colleagueRow()) !== null,
+      setup: () => openRoom(roomId),
+      scroll: "nearest",
+    },
+    take("no-table", 1),
+    take("upload", 2),
+
+    // 3. After the upload.
+    take("mismatch", 2),
+    take("gone", 2),
+    take("room-again", 2, { title: `เปิด ${roomName} อีกครั้ง` }),
+    take("matched", 2, { target: colleagueRow, body: "ตาราง HOSxP ตรงกับที่แพทย์จอง เคสที่จองยังได้คิวก่อน" }),
+    take("unbooked", 2),
+    take("unfold", 2),
+    take("note", 2),
+    take("note-close", 2),
+    take("expand", 2),
+    take("full-close", 2),
+
+    // 4. The dressing room.
+    take("dressing", 3),
+    take("auto-dressing", 3),
+    take("dressing-rule", 3),
+    take("doers", 3, { body: "ห้องทำแผลแสดงรูปคนทำแทนไอคอน รูปพยาบาล = แพทย์ฝาก scrub ทำแผล รูปหมอ = แพทย์ทำเอง" }),
+
+    // 5. The real days before.
+    take("examples", 4),
+
+    // 6. The end.
+    take("row-symbols", 5),
+    take("help", 5),
+    take("finish", 5),
+  ];
+  return steps;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // The coach: dim, spotlight, bubble, hand, confetti.
 
@@ -939,6 +1070,7 @@ function Coach({
   step,
   index,
   total,
+  chapters,
   onNext,
   onExit,
   card,
@@ -946,6 +1078,7 @@ function Coach({
   step: Step;
   index: number;
   total: number;
+  chapters: readonly string[];
   onNext: () => void;
   onExit: () => void;
   card: ReactNode;
@@ -1084,7 +1217,7 @@ function Coach({
   const rect = step.card ? null : view.rect;
   const width = Math.min(360, Math.max(240, view.vw - 24));
   const progress = Math.round((index / Math.max(1, total - 1)) * 100);
-  const chapter = CHAPTERS[step.chapter];
+  const chapter = chapters[step.chapter];
 
   // Where the bubble goes: under the target, else above it, else at the screen's edge away from it.
   let bubbleStyle: CSSProperties = {};
@@ -1278,17 +1411,33 @@ function BigMascot({ mood }: { mood: MascotMood }) {
   );
 }
 
-function WelcomeCard({ first, onStart, onSkip }: { first: boolean; onStart: () => void; onSkip: () => void }) {
+function WelcomeCard({
+  first,
+  staff,
+  chapters,
+  onStart,
+  onSkip,
+}: {
+  first: boolean;
+  staff: boolean;
+  chapters: readonly string[];
+  onStart: () => void;
+  onSkip: () => void;
+}) {
   return (
     <Card testId="coach-welcome">
       <BigMascot mood="wave" />
       <h2 id="coach-welcome-title" className="coach-card-title">
         ยินดีต้อนรับสู่ ORSKH.APP
       </h2>
-      <p className="coach-card-text">มาลองจองห้องผ่าตัดในตารางตัวอย่างกัน ใช้เวลาราว 2 นาที เคสทั้งหมดเป็นเคสสมมติ ไม่ได้บันทึกจริง</p>
-      <Tip testId="coach-welcome-tip">เคสที่จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ</Tip>
+      <p className="coach-card-text">
+        {staff
+          ? "มาดูตารางห้องผ่าตัดตัวอย่างกัน ว่าแต่ละสัญลักษณ์หมายถึงอะไร ใช้เวลาราว 1 นาที เคสทั้งหมดเป็นเคสสมมติ"
+          : "มาลองจองห้องผ่าตัดในตารางตัวอย่างกัน ใช้เวลาราว 2 นาที เคสทั้งหมดเป็นเคสสมมติ ไม่ได้บันทึกจริง"}
+      </p>
+      <Tip testId="coach-welcome-tip">{staff ? "เคสที่แพทย์จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ" : "เคสที่จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ"}</Tip>
       <ol className="coach-stages">
-        {CHAPTERS.slice(0, -1).map((name, at) => (
+        {chapters.slice(0, -1).map((name, at) => (
           <li key={name}>
             <span className="coach-stage-no">{at + 1}</span>
             {name}
@@ -1303,7 +1452,11 @@ function WelcomeCard({ first, onStart, onSkip }: { first: boolean; onStart: () =
           {first ? "ข้ามไปก่อน" : "กลับตาราง"}
         </button>
       </div>
-      {first ? <p className="coach-card-note">ดูบทเรียนอีกครั้งได้ที่เมนูรูปโปรไฟล์ › วิธีใช้งาน</p> : null}
+      {first ? (
+        <p className="coach-card-note" data-testid="coach-welcome-note">
+          {staff ? "บทเรียนเปิดทุกครั้งที่เข้าแอป แตะ ข้ามไปก่อน เพื่อไปที่ตารางได้เลย" : "ดูบทเรียนอีกครั้งได้ที่เมนูรูปโปรไฟล์ › วิธีใช้งาน"}
+        </p>
+      ) : null}
     </Card>
   );
 }
@@ -1436,7 +1589,7 @@ function Tip({ children, testId }: { children: ReactNode; testId: string }) {
  * the HOSxP cases nobody booked after them (lib/board-rows.ts), so the card shows that queue as it stands after the
  * upload: handshakes, then the database icon (a calendar row never shares a list with a database one).
  */
-function PriorityCard({ onNext }: { onNext: () => void }) {
+function PriorityCard({ staff, onNext }: { staff: boolean; onNext: () => void }) {
   return (
     <Card testId="coach-priority">
       <span className="coach-trophy" aria-hidden="true">
@@ -1446,7 +1599,9 @@ function PriorityCard({ onNext }: { onNext: () => void }) {
       <h2 id="coach-priority-title" className="coach-card-title">
         จองก่อน ได้คิวก่อน
       </h2>
-      <p className="coach-card-text">เคส elective ที่จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ เคสที่ไม่ได้จองต่อท้ายคิว</p>
+      <p className="coach-card-text">
+        {staff ? "เคส elective ที่แพทย์จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ เคสที่ไม่ได้จองต่อท้ายคิว" : "เคส elective ที่จองล่วงหน้า ได้คิวห้องผ่าตัดก่อนเสมอ เคสที่ไม่ได้จองต่อท้ายคิว"}
+      </p>
       <ol className="coach-queue" data-testid="coach-queue" aria-label="ลำดับคิวในห้อง">
         <li className="is-booked">
           <span className="coach-queue-no">1</span>
@@ -1466,10 +1621,10 @@ function PriorityCard({ onNext }: { onNext: () => void }) {
           <span className="coach-queue-tag">ต่อท้าย</span>
         </li>
       </ol>
-      <Tip testId="coach-priority-tip">จองทุกเคส ก่อน 15:00 น. ของวันทำการก่อนผ่าตัด</Tip>
+      <Tip testId="coach-priority-tip">{staff ? "แพทย์จองได้ถึง 15:00 น. ของวันทำการก่อนผ่าตัด" : "จองทุกเคส ก่อน 15:00 น. ของวันทำการก่อนผ่าตัด"}</Tip>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
-          เข้าใจแล้ว ไปจองกัน
+          {staff ? "เข้าใจแล้ว ไปดูรายการ" : "เข้าใจแล้ว ไปจองกัน"}
         </button>
       </div>
     </Card>
@@ -1619,15 +1774,15 @@ function ExamplesCard({ onNext }: { onNext: () => void }) {
   );
 }
 
-function FinishCard({ onBoard, onAgain }: { onBoard: () => void; onAgain: () => void }) {
+function FinishCard({ staff, onBoard, onAgain }: { staff: boolean; onBoard: () => void; onAgain: () => void }) {
   return (
     <Card testId="coach-finish">
       <BigMascot mood="cheer" />
       <h2 id="coach-finish-title" className="coach-card-title">
         จบบทเรียนแล้ว เก่งมาก!
       </h2>
-      <p className="coach-card-text">พร้อมจองห้องผ่าตัดจริงแล้ว การจองในบทเรียนไม่ได้บันทึก</p>
-      <Tip testId="coach-finish-tip">จองทุกเคส elective ล่วงหน้า เพื่อได้คิวก่อนเสมอ</Tip>
+      <p className="coach-card-text">{staff ? "พร้อมดูตารางห้องผ่าตัดจริงแล้ว" : "พร้อมจองห้องผ่าตัดจริงแล้ว การจองในบทเรียนไม่ได้บันทึก"}</p>
+      <Tip testId="coach-finish-tip">{staff ? "แตะไอคอนในรายการเพื่อดูความหมายได้ทุกเมื่อ" : "จองทุกเคส elective ล่วงหน้า เพื่อได้คิวก่อนเสมอ"}</Tip>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onBoard} data-testid="coach-finish-board">
           ไปที่ตารางจริง

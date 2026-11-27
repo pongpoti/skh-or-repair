@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
 import type { BoardView, CaseAdding } from "@/components/suite-board";
@@ -18,6 +19,7 @@ import { THA_CHALOM_PATH } from "@/lib/places";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import { thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedule";
+import { STAFF_TUTORIAL_COOKIE, STAFF_TUTORIAL_SEEN } from "@/lib/tutorial";
 import type { SessionUser } from "@/lib/tokens";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
@@ -106,6 +108,9 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
   const loaded = await loadBoard(user, date, day, date !== day.boardDate);
   // Outside the try of loadBoard: redirect() works by throwing.
   if (!loaded) redirect(unavailablePath("server", await requestPath()));
+  // As on รพ.สมุทรสาคร's board: anyone but a doctor or an admin starts with the staff's tutorial each time they open the
+  // app (Pong, 27 Nov 2026: "Always on tutorial for non-DR"), and comes back here after it.
+  if (!loaded.adding && !admin && (await cookies()).get(STAFF_TUTORIAL_COOKIE)?.value !== STAFF_TUTORIAL_SEEN) redirect("/tutorial?first=1&back=tha-chalom");
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
@@ -121,7 +126,7 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
         pathname={THA_CHALOM_PATH}
         adminHref={admin ? "/admin" : null}
         uploadHref={loaded.upload ? "/upload" : null}
-        helpHref={loaded.adding || admin ? "/tutorial" : null}
+        helpHref="/tutorial?back=tha-chalom"
         datePick={datePick}
         // The switch in the bar names the hospital (Pong, 26 Nov 2026) and goes to รพ.สมุทรสาคร's board on the same day.
         place={{ current: "tha-chalom" }}

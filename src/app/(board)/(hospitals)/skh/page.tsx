@@ -22,7 +22,7 @@ import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import { simulatedBookings } from "@/lib/sim-bookings";
 import type { SessionUser } from "@/lib/tokens";
-import { TUTORIAL_COOKIE } from "@/lib/tutorial";
+import { STAFF_TUTORIAL_COOKIE, STAFF_TUTORIAL_SEEN, TUTORIAL_COOKIE } from "@/lib/tutorial";
 import { tutorialSeen } from "@/lib/tutorial-store";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
@@ -84,7 +84,8 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
       };
     }
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
-    return { board, adding, canUpload: viewer.allHn, tutorialDue };
+    // Everyone who is not a doctor (RN, PN, PCA, MX) gets the staff's tutorial each time they open the app.
+    return { board, adding, canUpload: viewer.allHn, tutorialDue, staff: !doctor };
   } catch (error) {
     console.error("[board] cases unavailable:", (error as Error).message);
     return null;
@@ -186,12 +187,15 @@ export default async function BoardPage({
   const simOn = !demoOn && params.sim === "1" && admin;
   const demo = demoOn ? demoBoard(view, periods) : simOn ? await simBoard(view, periods) : null;
   const loaded =
-    demoOn || simOn ? demo && { board: demo.board, adding: null, canUpload: true, tutorialDue: false } : await loadBoard(user, view, periods, view !== day);
+    demoOn || simOn ? demo && { board: demo.board, adding: null, canUpload: true, tutorialDue: false, staff: false } : await loadBoard(user, view, periods, view !== day);
   // Outside the try of loadBoard: redirect() works by throwing.
   if (!loaded) redirect(unavailablePath("server", await requestPath()));
   // A doctor who has not seen the tutorial yet starts there, once (components/tutorial.tsx): starting or skipping it
   // notes it seen.
   if (loaded.tutorialDue) redirect("/tutorial?first=1");
+  // Anyone else but an admin starts with the staff's tutorial each time they open the app (Pong, 27 Nov 2026: "Always on
+  // tutorial for non-DR"): its session cookie, set on a start or skip, lasts until the app is closed.
+  if (loaded.staff && !admin && (await cookies()).get(STAFF_TUTORIAL_COOKIE)?.value !== STAFF_TUTORIAL_SEEN) redirect("/tutorial?first=1");
   const { board, adding, canUpload } = loaded;
   // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
   // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
@@ -216,8 +220,8 @@ export default async function BoardPage({
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
         adminHref={admin ? "/admin" : null}
         uploadHref={canUpload ? "/upload" : null}
-        // The tutorial is the doctors' (Pong, 19 Nov 2026); admins may look at it too.
-        helpHref={adding || admin ? "/tutorial" : null}
+        // The doctors' tutorial (Pong, 19 Nov 2026), and the staff's for everyone else (Pong, 27 Nov 2026).
+        helpHref="/tutorial"
         datePick={datePick}
         // One tap to รพ.ท่าฉลอม's board on the same day (Pong, 26 Nov 2026: "seamless navigation between 2 places").
         place={{ current: "skh" }}
