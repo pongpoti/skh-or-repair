@@ -3,6 +3,7 @@ import type { Pool, PoolClient } from "pg";
 import type { DeptCode } from "./allocation";
 import { withTx } from "./db";
 import { normalizeHn } from "./hn";
+import type { PlaceId } from "./places";
 import { surgeonDeptOf } from "./workbook";
 import type { CaseStatus, Shift } from "./schedule";
 
@@ -10,8 +11,9 @@ type Q = Pool | PoolClient;
 
 /**
  * The HOSxP workbook uploads and their cases: tables `workbook_uploads` and `workbook_cases` (db/schema.sql). The
- * upload page reads the file (lib/xlsx.ts, lib/workbook.ts), places each kept case (lib/placement.ts) and saves the
- * result here; the board shows the latest upload of its cycle (lib/board-day.ts). Only what the board needs is
+ * upload page reads the file (lib/xlsx.ts, lib/workbook.ts), places each kept case (lib/placement.ts, and
+ * lib/tha-chalom-schedule.ts for รพ.ท่าฉลอม's) and saves the result here; each hospital's board shows its cases of the
+ * latest upload of its cycle (lib/board-day.ts). Only what the board needs is
  * stored: of the patient, the HN and the name (Pong, 16 Nov 2026), never the age, AN, diagnosis, illnesses or costs,
  * and nothing here is ever logged.
  */
@@ -50,6 +52,11 @@ export type PlacedCase = {
   position: number;
   /** The patient's name as the file has it (ชื่อ), or null when the file has no such column or the cell is blank. */
   patientName: string | null;
+  /**
+   * The hospital, รพ.สมุทรสาคร when left out (Pong, 27 Nov 2026: "Excel file include both place on one sheet"). Not read
+   * back: casesOf reads one hospital's cases.
+   */
+  place?: PlaceId;
 };
 
 /** A saved case, as read back. */
@@ -105,6 +112,8 @@ export type Upload = {
   summary: unknown;
   /** A past day's list an admin imported (savePastLists), not one MX uploaded. */
   pastImport: boolean;
+  /** It kept รพ.ท่าฉลอม's cases: one saved before 27 Nov 2026 cut them, so it has no list for that hospital. */
+  thaChalom: boolean;
 };
 
 interface UploadRow {
@@ -120,6 +129,7 @@ interface UploadRow {
   placed: number | null;
   summary: unknown;
   past_import: boolean;
+  tha_chalom: boolean;
 }
 
 interface CaseRow {
@@ -142,7 +152,7 @@ interface CaseRow {
 
 const UPLOAD_COLUMNS =
   "id::text AS id, to_char(target_date, 'YYYY-MM-DD') AS target_date, to_char(cycle_day, 'YYYY-MM-DD') AS cycle_day, " +
-  "uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary, past_import";
+  "uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary, past_import, tha_chalom";
 
 const CASE_COLUMNS =
   "id::text AS id, upload_id::text AS upload_id, case_id, hn, operation, surgeon, dept, team, room_id, shift, status, " +
@@ -162,6 +172,7 @@ function toUpload(r: UploadRow): Upload {
     placed: r.placed,
     summary: r.summary,
     pastImport: r.past_import,
+    thaChalom: r.tha_chalom,
   };
 }
 
@@ -201,9 +212,9 @@ async function insertCases(c: PoolClient, items: readonly { uploadId: string; it
   if (items.length === 0) return;
   const column = <T>(pick: (item: PlacedCase) => T) => items.map(({ item }) => pick(item));
   await c.query(
-    `INSERT INTO workbook_cases (upload_id, case_id, hn, operation, surgeon, dept, team, room_id, shift, status, urgency, booked_time, position, patient_name)
+    `INSERT INTO workbook_cases (upload_id, case_id, hn, operation, surgeon, dept, team, room_id, shift, status, urgency, booked_time, position, patient_name, place)
      SELECT * FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
-       $10::text[], $11::text[], $12::text[], $13::int[], $14::text[])`,
+       $10::text[], $11::text[], $12::text[], $13::int[], $14::text[], $15::text[])`,
     [
       items.map(({ uploadId }) => uploadId),
       column((item) => item.caseId),
@@ -219,22 +230,25 @@ async function insertCases(c: PoolClient, items: readonly { uploadId: string; it
       column((item) => item.bookedTime),
       column((item) => item.position),
       column((item) => item.patientName),
+      column((item) => item.place ?? "skh"),
     ],
   );
 }
 
 /**
- * Saves an upload and its cases in one transaction, so the board never sees half a file. The same transaction deletes
+ * Saves an upload and its cases (both hospitals', each case with its `place`) in one transaction, so the board never
+ * sees half a file. The upload is marked as keeping รพ.ท่าฉลอม's cases (Upload.thaChalom). The same transaction deletes
  * the uploads made more than 30 days before this one (their cases go with them) that a later upload for the same day
- * has replaced, so patient numbers are not kept longer than the board needs them; the latest list of each day stays
- * for the board's calendar. Every HN is stored normalised; a case id seen twice keeps its first row.
+ * has replaced, and รพ.ท่าฉลอม's cases of the days before this upload's cycle day, so patient numbers are not kept
+ * longer than the boards need them: the latest list of each day stays for รพ.สมุทรสาคร's calendar, and รพ.ท่าฉลอม's
+ * board shows no past day. Every HN is stored normalised; a case id seen twice keeps its first row.
  */
 export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload> {
   const cases = firstOfEachId(input.cases);
   return withTx(pool, async (c) => {
     const { rows } = await c.query<UploadRow>(
-      `INSERT INTO workbook_uploads (target_date, cycle_day, uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${UPLOAD_COLUMNS}`,
+      `INSERT INTO workbook_uploads (target_date, cycle_day, uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary, tha_chalom)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true) RETURNING ${UPLOAD_COLUMNS}`,
       [
         input.targetDate,
         input.cycleDay,
@@ -259,6 +273,11 @@ export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload
        AND EXISTS (SELECT 1 FROM workbook_uploads n WHERE n.target_date = u.target_date AND (n.uploaded_at, n.id) > (u.uploaded_at, u.id))`,
       [input.uploadedAt, KEEP_UPLOAD_DAYS],
     );
+    await c.query(
+      `DELETE FROM workbook_cases c USING workbook_uploads u
+       WHERE c.upload_id = u.id AND c.place = 'tha-chalom' AND u.target_date < $1::date`,
+      [input.cycleDay],
+    );
     return upload;
   });
 }
@@ -267,7 +286,8 @@ export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload
  * Saves an import's past days' lists in one transaction (Pong, 19 Nov 2026: the Jan-Oct lists on the board's calendar).
  * A day MX uploaded a list for is left alone: MX's list is the real one. A day an earlier import gave a list gets this
  * one instead, so importing a file again does not stack copies. Each list is an upload marked past_import, read by the
- * board like any other; a case id seen twice in a day keeps its first row.
+ * board like any other; a case id seen twice in a day keeps its first row. Only รพ.สมุทรสาคร's cases are kept: รพ.ท่าฉลอม's
+ * board shows no past day (lib/past-lists.ts leaves them out), so a list says it holds none for it.
  */
 export async function savePastLists(pool: Pool, input: PastListsInput): Promise<PastListsSaved> {
   const byDay = new Map<string, PastList>();
@@ -286,8 +306,8 @@ export async function savePastLists(pool: Pool, input: PastListsInput): Promise<
     if (lists.length === 0) return { saved: [], mxDays };
     await c.query("DELETE FROM workbook_uploads WHERE past_import AND target_date = ANY($1::date[])", [lists.map((list) => list.targetDate)]);
     const { rows } = await c.query<{ id: string; day: string }>(
-      `INSERT INTO workbook_uploads (target_date, cycle_day, uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary, past_import)
-       SELECT day, $2::date, $3::timestamptz, $4, $5, $6, total_rows, kept, placed, summary, true
+      `INSERT INTO workbook_uploads (target_date, cycle_day, uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary, past_import, tha_chalom)
+       SELECT day, $2::date, $3::timestamptz, $4, $5, $6, total_rows, kept, placed, summary, true, false
        FROM unnest($1::date[], $7::int[], $8::int[], $9::int[], $10::jsonb[]) AS list(day, total_rows, kept, placed, summary)
        RETURNING id::text AS id, to_char(target_date, 'YYYY-MM-DD') AS day`,
       [
@@ -306,7 +326,9 @@ export async function savePastLists(pool: Pool, input: PastListsInput): Promise<
     const idOf = new Map(rows.map((row) => [row.day, row.id]));
     await insertCases(
       c,
-      lists.flatMap((list) => firstOfEachId(list.cases).map((item) => ({ uploadId: idOf.get(list.targetDate) as string, item }))),
+      lists.flatMap((list) =>
+        firstOfEachId(list.cases.filter((item) => (item.place ?? "skh") === "skh")).map((item) => ({ uploadId: idOf.get(list.targetDate) as string, item })),
+      ),
     );
     return { saved: lists.map((list) => list.targetDate), mxDays };
   });
@@ -340,26 +362,32 @@ export async function latestUploadForTarget(pool: Q, targetDate: string): Promis
   return rows.length ? toUpload(rows[0]) : null;
 }
 
-/** An upload's cases in file order. */
-export async function casesOf(pool: Q, uploadId: string): Promise<StoredCase[]> {
+/** An upload's cases at one hospital (รพ.สมุทรสาคร unless named), in file order. */
+export async function casesOf(pool: Q, uploadId: string, place: PlaceId = "skh"): Promise<StoredCase[]> {
   const { rows } = await pool.query<CaseRow>(
-    `SELECT ${CASE_COLUMNS} FROM workbook_cases WHERE upload_id = $1 ORDER BY position, id`,
-    [uploadId],
+    `SELECT ${CASE_COLUMNS} FROM workbook_cases WHERE upload_id = $1 AND place = $2 ORDER BY position, id`,
+    [uploadId, place],
   );
   return rows.map(toCase);
 }
 
-/**
- * The workbook of a day picked on the board: the latest upload for that day, whichever cycle made it, with its cases,
- * or null when there is none (a day further ahead than the coming one, or one MX never uploaded).
- */
-export async function workbookForDay(pool: Q, targetDate: string): Promise<{ upload: Upload; cases: StoredCase[] } | null> {
-  const upload = await latestUploadForTarget(pool, targetDate);
-  return upload ? { upload, cases: await casesOf(pool, upload.id) } : null;
+export type Workbook = { upload: Upload; cases: StoredCase[] };
+
+/** An upload's list for `place`, or null for รพ.ท่าฉลอม from an upload that cut its cases (Upload.thaChalom). */
+async function listOf(pool: Q, upload: Upload | null, place: PlaceId): Promise<Workbook | null> {
+  if (!upload || (place === "tha-chalom" && !upload.thaChalom)) return null;
+  return { upload, cases: await casesOf(pool, upload.id, place) };
 }
 
-/** The board's workbook: the latest upload of the cycle with its cases, or null when MX has not uploaded yet. */
-export async function workbookFor(pool: Q, cycleDay: string, targetDate: string): Promise<{ upload: Upload; cases: StoredCase[] } | null> {
-  const upload = await latestUpload(pool, cycleDay, targetDate);
-  return upload ? { upload, cases: await casesOf(pool, upload.id) } : null;
+/**
+ * The workbook of a day picked on the board: the latest upload for that day, whichever cycle made it, with its cases at
+ * `place`, or null when there is none (a day further ahead than the coming one, or one MX never uploaded).
+ */
+export async function workbookForDay(pool: Q, targetDate: string, place: PlaceId = "skh"): Promise<Workbook | null> {
+  return listOf(pool, await latestUploadForTarget(pool, targetDate), place);
+}
+
+/** The board's workbook: the latest upload of the cycle with its cases at `place`, or null when MX has not uploaded yet. */
+export async function workbookFor(pool: Q, cycleDay: string, targetDate: string, place: PlaceId = "skh"): Promise<Workbook | null> {
+  return listOf(pool, await latestUpload(pool, cycleDay, targetDate), place);
 }

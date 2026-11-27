@@ -1,19 +1,26 @@
+import { DEPARTMENTS } from "./allocation.ts";
+import type { OffBoardCount } from "./board-rows.ts";
 import { shortThaiDate } from "./repair.ts";
 
 /**
- * The notice in the strip above the plan. Since Pong's 16 Nov 2026 change there is only one: no HOSxP file yet for the
- * board's day ("remove วันหยุด badge, it is unnecessary", and the โหลดไม่สำเร็จ and ไม่ตรง badges too). It is a badge
- * in the middle of the strip; a tap opens its full message as a chat bubble. The repair needs no notice: the plan's own
- * "พื้นที่ปิดซ่อม" zone shows it. The demo schedule has a badge of its own (DEMO_NOTICE), for admins only.
+ * The notices in the strip above the plan, at both hospitals. Since Pong's 16 Nov 2026 change there was only one: no
+ * HOSxP file yet for the board's day ("remove วันหยุด badge, it is unnecessary", and the โหลดไม่สำเร็จ and ไม่ตรง badges
+ * too). Since 27 Nov 2026 a second: HOSxP cases no room takes that day ("Leave off board and display on noti bar for
+ * both places"). Each is a badge in the middle of the strip; a tap opens its full message as a chat bubble. The repair
+ * needs no notice: the plan's own "พื้นที่ปิดซ่อม" zone shows it. The demo schedule has a badge of its own
+ * (DEMO_NOTICE), for admins only.
  */
 
 /** "alert" is the red alert theme of the no-table notice (Pong, 17 Nov 2026). */
 export type NoticeTone = "neutral" | "alert";
-/** "no-table" is the database with a slash through it: no HOSxP table yet (components/no-table-icon.tsx). */
-export type NoticeIcon = "no-table" | "flask";
+/**
+ * "no-table" is the database with a slash through it: no HOSxP table yet (components/no-table-icon.tsx); "no-room" a
+ * closed door: cases no room takes.
+ */
+export type NoticeIcon = "no-table" | "flask" | "no-room";
 
 export type BoardNotice = {
-  id: "demo" | "sim" | "no-upload";
+  id: "demo" | "sim" | "no-upload" | "no-room";
   tone: NoticeTone;
   icon: NoticeIcon;
   /** The whole message in one line: the badge's text when it is alone, and the bubble's title. */
@@ -26,15 +33,24 @@ export type BoardNotice = {
   testId?: string;
 };
 
+/** A department's cases as the no-room notice names them: "ศัลยกรรมหลอดเลือด 2 เคส", "ไม่ทราบสาขา 1 เคส". */
+function offBoardText({ dept, count }: OffBoardCount): string {
+  const name = dept && Object.hasOwn(DEPARTMENTS, dept) ? DEPARTMENTS[dept].name : "ไม่ทราบสาขา";
+  return `${name} ${count} เคส`;
+}
+
 export function boardNotices({
   missingUpload,
+  offBoard = [],
 }: {
   /** The board's date when MX has not uploaded its HOSxP file yet, else null. */
   missingUpload: string | null;
+  /** The HOSxP cases no room takes that day (lib/board-rows.ts BoardRows.offBoard). */
+  offBoard?: readonly OffBoardCount[];
 }): BoardNotice[] {
-  if (!missingUpload) return [];
-  return [
-    {
+  const notices: BoardNotice[] = [];
+  if (missingUpload) {
+    notices.push({
       id: "no-upload",
       tone: "alert",
       icon: "no-table",
@@ -42,17 +58,30 @@ export function boardNotices({
       short: "ยังไม่มี HOSxP",
       detail: "Manager อัปโหลดตาราง HOSxP ทุกวัน 15:00–16:00 น. ตอนนี้เห็นเฉพาะเคสที่แพทย์จอง",
       testId: "no-upload-alert",
-    },
-  ];
+    });
+  }
+  const total = offBoard.reduce((sum, item) => sum + item.count, 0);
+  if (total > 0) {
+    notices.push({
+      id: "no-room",
+      tone: "alert",
+      icon: "no-room",
+      text: `${total} เคสไม่มีห้องผ่าตัด`,
+      short: `ไม่มีห้อง ${total} เคส`,
+      detail: `ไม่ได้ลงกระดาน เพราะสาขาไม่มีห้องในวันนั้น: ${offBoard.map(offBoardText).join(" · ")}`,
+      testId: "no-room-alert",
+    });
+  }
+  return notices;
 }
 
 /**
  * Every kind of notice at once, for seeing how the strip looks with all of them (Pong, 15 Nov 2026: "Test mode: show me
- * all possible notification badges stacked within noti bar"): an admin's /?notices=all, and the preview's. Since 16 Nov
- * 2026 that is the one badge.
+ * all possible notification badges stacked within noti bar"): an admin's /?notices=all, and the preview's. Since 27 Nov
+ * 2026 the two badges, the no-room one with made-up counts.
  */
 export function everyNotice(date: string): BoardNotice[] {
-  return boardNotices({ missingUpload: date });
+  return boardNotices({ missingUpload: date, offBoard: [{ dept: "VASCULAR", count: 2 }, { dept: null, count: 1 }] });
 }
 
 /**

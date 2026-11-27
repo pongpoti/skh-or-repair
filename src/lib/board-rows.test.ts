@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
-import { bookingUnderWay, buildBoardRows, missingUploadDay, thaChalomRows, withoutTitle, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
+import {
+  bookingUnderWay,
+  buildBoardRows,
+  buildThaChalomRows,
+  missingUploadDay,
+  withoutTitle,
+  type BoardViewer,
+  type WorkbookCase,
+} from "./board-rows.ts";
 import { DEFAULT_REPAIR_PERIODS } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 
@@ -547,8 +555,10 @@ test("booked cases go by their time, untimed bookings after in booking order, th
   assert.equal(build(null, [early], NOBODY).rows[0].time, "09:00–10:00");
 });
 
-// Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also". There is no HOSxP list there: its rows are its bookings.
-test("รพ.ท่าฉลอม's rows: its bookings in the rooms they were booked in, by time, numbered in each room", () => {
+// Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also". Before an upload with its cases, its rows are its bookings.
+const thaChalomRows = (date: string, bookings: AddedCase[], viewer: BoardViewer) => buildThaChalomRows({ date, workbook: null, bookings, viewer }).rows;
+
+test("รพ.ท่าฉลอม's rows before its HOSxP list: its bookings in the rooms they were booked in, by time, numbered in each room", () => {
   const late = booking({ roomId: "or-1", start: 600, end: 660, place: "tha-chalom", surgeonId: "7", note: "ขอ C-arm" });
   const early = booking({ roomId: "or-1", start: 540, end: 600, place: "tha-chalom", surgeonId: "8", surgeon: "สมหญิง ดีใจ" });
   const untimed = booking({ roomId: "or-1", place: "tha-chalom", surgeonId: "8" });
@@ -571,4 +581,71 @@ test("รพ.ท่าฉลอม's rows: its bookings in the rooms they were b
   const theirs = rows.find((row) => row.id === `bk-${early.id}`);
   assert.ok(theirs && !("hn" in theirs) && !("bookingId" in theirs) && theirs.bookedBy === "สมหญิง ดีใจ");
   assert.ok(thaChalomRows(DAY, [early], MX).every((row) => row.hn === early.hn), "MX and admins see every HN");
+});
+
+// Pong, 27 Nov 2026: "Excel file include both place on one sheet", then "Leave off board and display on noti bar for
+// both places". Tuesday 17 Nov 2026 at รพ.ท่าฉลอม: OR 1 general surgery, OR 2 vascular, OR 4 ENT, the Scope room plastic.
+test("รพ.ท่าฉลอม's rows: its HOSxP cases matched with its bookings by HN, in its departments' rooms, as รพ.สมุทรสาคร's", () => {
+  const matched = wb({ hn: "0012345", operation: "Herniorrhaphy", dept: "GENSX", status: "in-progress" });
+  const vascular = wb({ dept: "VASCULAR", operation: "EVLA" });
+  const ortho = wb({ dept: "ORTHO", operation: "TKA" });
+  const unknown = wb({ dept: null });
+  const dressing = wb({ dept: "PLASTIC", operation: "Wound dressing" });
+  const booked = booking({ hn: "12345", roomId: "or-1", place: "tha-chalom", surgeonId: "7" });
+  const gone = booking({ hn: "999", roomId: "or-4", subtype: "ENT", place: "tha-chalom", surgeonId: "8" });
+  const result = buildThaChalomRows({ date: DAY, workbook: [matched, vascular, ortho, unknown, dressing], bookings: [booked, gone], viewer: MX });
+  assert.equal(result.uploaded, true);
+  assert.deepEqual(
+    result.rows.map((row) => [row.id, row.roomId, row.source, row.flag, row.procedure, row.place]),
+    [
+      [`mt-${booked.id}`, "or-1", "matched", null, "Herniorrhaphy", "tha-chalom"],
+      [`hx-${vascular.caseId}`, "or-2", "hosxp", "unbooked", "EVLA", "tha-chalom"],
+      // No dressing room there: a dressing goes by its department, flagged like any case nobody booked.
+      [`hx-${dressing.caseId}`, "scope", "hosxp", "unbooked", "Wound dressing", "tha-chalom"],
+    ],
+  );
+  assert.ok(result.rows.every((row) => !("doneBy" in row)));
+  // The booking HOSxP does not list leaves the board for MX's summary.
+  assert.deepEqual(
+    result.unmatched.map((row) => [row.id, row.roomId, row.flag, row.place]),
+    [[`bk-${gone.id}`, "or-4", "not-in-hosxp", "tha-chalom"]],
+  );
+  assert.equal(result.matched, 1);
+  assert.deepEqual(result.mismatchByRoom, { "or-2": 1, scope: 1 });
+  // No ORTHO room on a Tuesday, and no department for one: off the board, counted for the strip's notice.
+  assert.deepEqual(result.offBoard, [
+    { dept: "ORTHO", count: 1 },
+    { dept: null, count: 1 },
+  ]);
+  // HN only to who may see it.
+  const nurse = buildThaChalomRows({ date: DAY, workbook: [matched, vascular], bookings: [booked], viewer: NOBODY });
+  assert.ok(nurse.rows.every((row) => !("hn" in row)));
+  // The doctor's under-way check reads the same board.
+  const input = { date: DAY, periods: REPAIR, workbook: [matched], bookings: [booked] };
+  assert.equal(bookingUnderWay(input, booked.id, "7", "tha-chalom"), true);
+});
+
+test("a HOSxP case whose department has no room that day is left off the board and counted (Pong, 27 Nov 2026)", () => {
+  // The weekly schedule on Tuesday 23 Mar 2027: vascular surgery has no room. In place of borrowing the emptiest room.
+  const TUESDAY = "2027-03-23";
+  const P = DEFAULT_REPAIR_PERIODS;
+  const a = wb({ dept: "VASCULAR", operation: "EVLA" });
+  const b = wb({ dept: "VASCULAR", operation: "AVF" });
+  const c = wb({ dept: null });
+  const d = wb({ dept: "GENSX", operation: "Lap chole" });
+  const result = buildBoardRows({ date: TUESDAY, periods: P, workbook: [c, a, b, d], bookings: [], viewer: MX });
+  assert.deepEqual(result.rows.map((row) => row.id), [`hx-${d.caseId}`]);
+  // The department with the most cases first.
+  assert.deepEqual(result.offBoard, [
+    { dept: "VASCULAR", count: 2 },
+    { dept: null, count: 1 },
+  ]);
+  // A booking saved in a room before still shows its case there.
+  const saved = booking({ date: TUESDAY, hn: a.hn, roomId: "or-9", subtype: "VASCULAR" });
+  const withBooking = buildBoardRows({ date: TUESDAY, periods: P, workbook: [a, b], bookings: [saved], viewer: MX });
+  assert.deepEqual(withBooking.rows.map((row) => [row.id, row.roomId]), [[`mt-${saved.id}`, "or-9"]]);
+  assert.deepEqual(withBooking.offBoard, [{ dept: "VASCULAR", count: 1 }]);
+  // OB-GYN during the repair operates at อาคารแม่: off the board, but no notice.
+  const obgyn = buildBoardRows({ date: DAY, periods: REPAIR, workbook: [wb({ dept: "OBGYN" })], bookings: [], viewer: MX });
+  assert.deepEqual([obgyn.rows.length, obgyn.offBoard], [0, []]);
 });

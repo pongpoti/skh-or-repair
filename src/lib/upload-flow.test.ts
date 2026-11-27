@@ -6,8 +6,8 @@ import nextConfig from "../../next.config.ts";
 import { fileProblem, megabytes } from "../app/upload/file-check.ts";
 import type { AddedCase } from "./added-cases.ts";
 import { DEPARTMENTS } from "./allocation.ts";
-import { buildBoardRows } from "./board-rows.ts";
-import type { RepairPeriods } from "./repair.ts";
+import { buildBoardRows, buildThaChalomRows } from "./board-rows.ts";
+import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "./repair.ts";
 import { REPAIR_FROM_JAN } from "./repair-fixtures.ts";
 import {
   matchBookings,
@@ -146,7 +146,7 @@ test("the whole sample file is refused: it holds several booked days, so nothing
   assert.match(!result.ok ? result.message : "", /5 พ\.ย\. 2569/);
 });
 
-test("rows 1–17 as the file for Thu 5 Nov, in the first half as planned: 10 kept, 1 cut, 9 placed in the half's rooms", () => {
+test("rows 1–17 as the file for Thu 5 Nov, in the first half as planned: 10 kept, 9 placed in the half's rooms, 1 at ท่าฉลอม", () => {
   const result = processed(runUploadFlow({ data: xlsxOf(DAY_FILE), target: THURSDAY, periods: PLANNED, bookings: [] }));
   // The answers sheet placed these by the weekly schedule, which this app no longer uses (Pong, 18 Nov 2026). In the
   // first half's rooms: GENSX to OR 12, ORTHO to OR 13, dressing to OR 10 (900003, "I&D abscess Rt thigh", is a dressing
@@ -182,14 +182,23 @@ test("rows 1–17 as the file for Thu 5 Nov, in the first half as planned: 10 ke
       [6, 1],
     ],
   );
-  assert.deepEqual(
-    summary.cut.map((item) => [item.reason, item.count]),
-    [["tha-chalom", 1]],
-  );
+  // ท่าฉลอม's case is no longer cut (Pong, 27 Nov 2026: "Excel file include both place on one sheet"): 900012, general
+  // surgery, goes to its OR 1, GENSX's room there on a Thursday; the file's room ("ห้องผ่าตัดท่าฉลอม 2") is not read.
+  assert.deepEqual(summary.cut, []);
   assert.equal(summary.toPlace, 9);
   assert.equal(summary.placed, 9);
   assert.deepEqual(summary.unplaced, []);
   assert.equal(summary.repairHalf, 1);
+  assert.deepEqual(summary.thaChalom, {
+    toPlace: 1,
+    placed: 1,
+    rooms: [{ roomId: "or-1", room: "OR 1", dept: "GENSX", count: 1 }],
+    unplaced: [],
+  });
+  assert.deepEqual(
+    result.thaChalomCases.map((item) => [item.caseId, item.roomId, item.position, item.place]),
+    [["900012", "or-1", 1, "tha-chalom"]],
+  );
   assert.deepEqual(
     summary.rooms.map((room) => [room.room, room.dept, room.count]),
     [
@@ -290,10 +299,10 @@ test("stored cases placed again give the upload's own rooms, or the new dates' r
   // The dates moved: every case goes where an upload under the new dates would have put it, none is lost.
   assert.deepEqual(boardRooms(SECOND_HALF), roomOf(second));
   // The upload page's summary and matching follow the same rooms.
-  const summary = placedSummary(upload.summary, upload.cases, THURSDAY, SECOND_HALF);
+  const summary = placedSummary(upload.summary, upload.cases, THURSDAY, SECOND_HALF, [], upload.thaChalomCases);
   const { placed, rooms, unplaced } = second.summary;
   assert.deepEqual(summary, { ...upload.summary, placed, rooms, unplaced, repairHalf: 2 });
-  assert.deepEqual(placedSummary(upload.summary, upload.cases, THURSDAY, FIRST_HALF), upload.summary);
+  assert.deepEqual(placedSummary(upload.summary, upload.cases, THURSDAY, FIRST_HALF, [], upload.thaChalomCases), upload.summary);
   const matching = matchBookings({ date: THURSDAY, periods: SECOND_HALF, cases: upload.cases, bookings: [] });
   // Every case nobody booked, but those in the dressing room (OR 1 in the second half), where booking does not matter.
   const outsideDressing = Object.values(roomOf(second)).filter((roomId) => roomId !== "or-1");
@@ -319,6 +328,73 @@ test("during the repair OB-GYN is not placed (obstetric building) and a case wit
   const planned = processed(processWorkbook(xlsxOf(rows), THURSDAY, PLANNED));
   assert.deepEqual(roomOf(planned), roomOf(repair));
   assert.deepEqual(planned.summary.unplaced, repair.summary.unplaced);
+});
+
+// Pong, 27 Nov 2026: "Excel file include both place on one sheet", then "Leave off board and display on noti bar for both
+// places". Invented rows only. On Thu 5 Nov 2026 (week 1) ท่าฉลอม has OR 1 general surgery, OR 2 vascular, OR 4 ORTHO and
+// the Scope room EYE.
+test("ท่าฉลอม's rows: kept, placed by its own table, matched with its own bookings; no room and no department left off", () => {
+  const tc = { แผนก: "รพ.นครท่าฉลอม" };
+  const rows = [
+    HEADER,
+    rowOf({ ...ELECTIVE, ...tc, ID: 920001, HN: "0920001", ชื่อการผ่าตัด: "Herniorrhaphy", แพทย์ผู้สั่ง: "ทดสอบ ท่าฉลอมหนึ่ง (นพ.)", ชนิด: "GEN" }),
+    // Named by its room alone, or by its operation alone.
+    rowOf({ ...ELECTIVE, ID: 920002, HN: "0920002", ห้องผ่าตัด: "ห้องผ่าตัดท่าฉลอม 1", ชื่อการผ่าตัด: "Phaco Rt eye", แพทย์ผู้สั่ง: "ทดสอบ ตา (พญ.)", ชนิด: "EYE" }),
+    rowOf({ ...ELECTIVE, ID: 920003, HN: "0920003", ชื่อการผ่าตัด: "TKA Rt knee (ท่าฉลอม)", แพทย์ผู้สั่ง: "ทดสอบ เข่า (นพ.)", ชนิด: "ORTHO" }),
+    // No urology room there on a Thursday, and no department known: off the board, not lent a ว่าง room.
+    rowOf({ ...ELECTIVE, ...tc, ID: 920004, HN: "0920004", ชื่อการผ่าตัด: "TURP", แพทย์ผู้สั่ง: "ทดสอบ ไต (นพ.)", ชนิด: "URO" }),
+    rowOf({ ...ELECTIVE, ...tc, ID: 920005, HN: "0920005", ชื่อการผ่าตัด: "Excision", แพทย์ผู้สั่ง: "ไม่มี ในรายชื่อ (นพ.)" }),
+    // An emergency is dropped by the upload's rules, as at รพ.สมุทรสาคร.
+    rowOf({ ...ELECTIVE, ...tc, ID: 920006, HN: "0920006", ชื่อการผ่าตัด: "Appendectomy", แพทย์ผู้สั่ง: "ทดสอบ ท่าฉลอมหนึ่ง (นพ.)", ชนิด: "GEN", ความเร่งด่วน: "Stat" }),
+    rowOf({ ...ELECTIVE, ID: 920007, HN: "0920007", ชื่อการผ่าตัด: "Lap chole", แพทย์ผู้สั่ง: "ทดสอบ ศัลย์ (นพ.)", ชนิด: "GEN" }),
+  ];
+  const thaChalomBookings = [booking({ hn: "920001", roomId: "or-1", place: "tha-chalom" }), booking({ hn: "920099", roomId: "or-4", subtype: "ORTHO", place: "tha-chalom" })];
+  // รพ.สมุทรสาคร's booking with ท่าฉลอม's patient's HN does not match across the hospitals.
+  const bookings = [booking({ hn: "920002", roomId: "or-12" })];
+  const result = runUploadFlow({ data: xlsxOf(rows), target: THURSDAY, periods: PLANNED, bookings, thaChalomBookings });
+  assert.ok(result.ok);
+  assert.deepEqual(roomOf(result), { "920007": "or-12" });
+  assert.deepEqual(
+    result.thaChalomCases.map((item) => [item.caseId, item.roomId, item.position, item.place]),
+    [
+      ["920001", "or-1", 1, "tha-chalom"],
+      ["920002", "scope", 2, "tha-chalom"],
+      ["920003", "or-4", 3, "tha-chalom"],
+      ["920004", null, 4, "tha-chalom"],
+      ["920005", null, 5, "tha-chalom"],
+    ],
+  );
+  assert.equal(result.summary.kept, 6, "both hospitals' cases pass the rules");
+  assert.equal(result.summary.toPlace, 1);
+  assert.deepEqual(result.summary.thaChalom, {
+    toPlace: 5,
+    placed: 3,
+    rooms: [
+      { roomId: "or-1", room: "OR 1", dept: "GENSX", count: 1 },
+      { roomId: "or-4", room: "OR 4", dept: "ORTHO", count: 1 },
+      { roomId: "scope", room: "ห้อง Scope", dept: "EYE", count: 1 },
+    ],
+    unplaced: [
+      { reason: "no-department", label: "ไม่ทราบแผนก", count: 1 },
+      { reason: "no-room", label: "แผนกนี้ไม่มีห้องผ่าตัดในวันนั้น", count: 1 },
+    ],
+  });
+  assert.deepEqual(result.summary.cut, []);
+  const tcMatch = result.thaChalomMatching;
+  assert.deepEqual([tcMatch.bookings, tcMatch.matched], [2, 1]);
+  assert.deepEqual(
+    tcMatch.unbooked.map((row) => [row.room, row.hn]),
+    [
+      ["ห้อง Scope", "920002"],
+      ["OR 4", "920003"],
+    ],
+  );
+  assert.deepEqual(tcMatch.notInHosxp.map((row) => [row.room, row.hn]), [["OR 4", "920099"]]);
+  assert.deepEqual(result.matching.notInHosxp.map((row) => row.hn), ["920002"]);
+  assert.deepEqual(result.matching.unbooked.map((row) => row.hn), ["920007"]);
+  // The summary reads back as stored, and the upload page places the stored cases again the same way.
+  assert.deepEqual(readFlowSummary(JSON.parse(JSON.stringify(result.summary))), result.summary);
+  assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, PLANNED, bookings, result.thaChalomCases), result.summary);
 });
 
 test("a file that is not an .xlsx is refused with the reader's Thai message", () => {
@@ -397,9 +473,41 @@ test("the upload's own rooms are the board's: a case a doctor booked goes by the
   assert.deepEqual(counted, board.countByRoom);
   assert.deepEqual(counted, { "or-10": 1, "or-11": 2, "or-12": 5, "or-13": 1 });
   // Read again on the upload page with the same bookings: the same; without them, the name places it again.
-  assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, PLANNED, [mine]), result.summary);
+  assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, PLANNED, [mine], result.thaChalomCases), result.summary);
   const alone = placedSummary(result.summary, result.cases, THURSDAY, PLANNED);
   assert.equal(alone.rooms.find((room) => room.roomId === "or-10")?.count, 2);
+});
+
+/** A summary of nothing (an old row's zeros), for placedSummary's placement alone. */
+const EMPTY_SUMMARY = readFlowSummary({}) as FlowSummary;
+
+test("the upload counts a case where the board shows it: in its booking's room when its department has none that day", () => {
+  // Tue 23 Mar 2027, the weekly schedule: vascular surgery has no room. A booking saved in OR 9 when such a department
+  // borrowed a room (22–27 Nov 2026) keeps it, and its case shows there; the other vascular case is off the board.
+  const TUESDAY = "2027-03-23";
+  const template = processed(processSheet({ rows: DAY_FILE, date1904: false }, THURSDAY, PLANNED)).cases[0];
+  const vascular = (caseId: string, hn: string, position: number) => ({ ...template, caseId, hn, dept: "VASCULAR" as const, roomId: null, position });
+  const cases = [vascular("930001", "9300001", 1), vascular("930002", "9300002", 2)];
+  const saved = [booking({ date: TUESDAY, hn: "9300001", roomId: "or-9", subtype: "VASCULAR" })];
+  const shown = placedSummary(EMPTY_SUMMARY, cases, TUESDAY, DEFAULT_REPAIR_PERIODS, saved);
+  const board = buildBoardRows({ date: TUESDAY, periods: DEFAULT_REPAIR_PERIODS, workbook: cases, bookings: saved, viewer: { allHn: true, userId: null } });
+  assert.deepEqual(board.countByRoom, { "or-9": 1 });
+  assert.deepEqual(board.offBoard, [{ dept: "VASCULAR", count: 1 }]);
+  assert.deepEqual(Object.fromEntries(shown.rooms.map((room) => [room.roomId, room.count])), board.countByRoom);
+  assert.equal(shown.placed, 1);
+  assert.deepEqual(shown.unplaced, [{ reason: "no-room", label: "แผนกนี้ไม่มีห้องผ่าตัดในวันนั้น", count: 1 }]);
+
+  // รพ.ท่าฉลอม on a Thursday: no urology room, but a doctor booked its case in OR 2, where its board shows it.
+  const uro = { ...vascular("930003", "9300003", 1), dept: "URO" as const, place: "tha-chalom" as const };
+  const tcBookings = [booking({ hn: "9300003", roomId: "or-2", subtype: "VASCULAR", place: "tha-chalom" })];
+  const tc = placedSummary({ ...EMPTY_SUMMARY, thaChalom: { toPlace: 1, placed: 0, rooms: [], unplaced: [] } }, [], THURSDAY, PLANNED, [], [uro], tcBookings);
+  const tcBoard = buildThaChalomRows({ date: THURSDAY, workbook: [uro], bookings: tcBookings, viewer: { allHn: true, userId: null } });
+  assert.deepEqual(tcBoard.countByRoom, { "or-2": 1 });
+  assert.deepEqual(tc.thaChalom, { toPlace: 1, placed: 1, rooms: [{ roomId: "or-2", room: "OR 2", dept: "VAS", count: 1 }], unplaced: [] });
+  // Without the booking it has no room there.
+  assert.deepEqual(placedSummary({ ...EMPTY_SUMMARY, thaChalom: { toPlace: 1, placed: 0, rooms: [], unplaced: [] } }, [], THURSDAY, PLANNED, [], [uro]).thaChalom?.unplaced, [
+    { reason: "no-room", label: "แผนกนี้ไม่มีห้องผ่าตัดในวันนั้น", count: 1 },
+  ]);
 });
 
 test("matching: a booking with no operation name and no HN reads as such; no bookings flags every case", () => {
@@ -438,6 +546,17 @@ test("a stored summary reads back as it was saved; anything else gives zeros or 
     rooms: [],
     unplaced: [],
     repairHalf: null,
+    thaChalom: null,
+  });
+  // ท่าฉลอม's rooms are checked against its own table: the Scope room reads back, an OR 5 does not.
+  const tc = readFlowSummary({
+    thaChalom: { toPlace: 3, placed: 2, rooms: [{ roomId: "scope", dept: "EYE", count: 1 }, { roomId: "or-5", count: 1 }], unplaced: [{ reason: "no-room", count: 1 }] },
+  });
+  assert.deepEqual(tc?.thaChalom, {
+    toPlace: 3,
+    placed: 2,
+    rooms: [{ roomId: "scope", room: "ห้อง Scope", dept: "EYE", count: 1 }],
+    unplaced: [{ reason: "no-room", label: "แผนกนี้ไม่มีห้องผ่าตัดในวันนั้น", count: 1 }],
   });
 });
 

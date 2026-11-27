@@ -36,23 +36,32 @@ export const metadata: Metadata = { title: "อัปโหลดตาราง
 
 const clockTime = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: TIME_ZONE });
 
+type Shown = { summary: FlowSummary | null; matching: MatchReport | null; thaChalomMatching: MatchReport | null };
+
 /**
- * The latest upload's summary and its cases against the target day's bookings, read now: a doctor may book after the
- * upload, and an admin may move the repair's dates, so the matching and the rooms are worked out on every visit, as
- * the board does, rather than taken from the upload. The stored summary stands, and there is no matching, when the
- * database cannot give the cases.
+ * The latest upload's summary and its cases against the target day's bookings, each hospital's with its own, read now:
+ * a doctor may book after the upload, and an admin may move the repair's dates, so the matching and the rooms are
+ * worked out on every visit, as the boards do, rather than taken from the upload. The stored summary stands, and there
+ * is no matching, when the database cannot give the cases. รพ.ท่าฉลอม's only from an upload that kept its cases.
  */
-async function latestOf(pool: Pool, upload: Upload, periods: RepairPeriods): Promise<{ summary: FlowSummary | null; matching: MatchReport | null }> {
+async function latestOf(pool: Pool, upload: Upload, periods: RepairPeriods): Promise<Shown> {
   const stored = readFlowSummary(upload.summary);
+  const date = upload.targetDate;
   try {
-    const [cases, bookings] = await Promise.all([casesOf(pool, upload.id), listCasesOn(pool, upload.targetDate)]);
+    const [cases, bookings, tcCases, tcBookings] = await Promise.all([
+      casesOf(pool, upload.id),
+      listCasesOn(pool, date),
+      upload.thaChalom ? casesOf(pool, upload.id, "tha-chalom") : [],
+      upload.thaChalom ? listCasesOn(pool, date, "tha-chalom") : [],
+    ]);
     return {
-      summary: stored ? placedSummary(stored, cases, upload.targetDate, periods, bookings) : null,
-      matching: matchBookings({ date: upload.targetDate, periods, cases, bookings }),
+      summary: stored ? placedSummary(stored, cases, date, periods, bookings, tcCases, tcBookings) : null,
+      matching: matchBookings({ date, periods, cases, bookings }),
+      thaChalomMatching: upload.thaChalom ? matchBookings({ date, periods, cases: tcCases, bookings: tcBookings, place: "tha-chalom" }) : null,
     };
   } catch (error) {
     console.error(`[upload] matching unavailable (${(error as Error).name})`);
-    return { summary: stored, matching: null };
+    return { summary: stored, matching: null, thaChalomMatching: null };
   }
 }
 
@@ -106,6 +115,7 @@ export default async function UploadPage() {
               fileName={latest.fileName}
               summary={shown?.summary ?? null}
               matching={shown?.matching ?? null}
+              thaChalomMatching={shown?.thaChalomMatching ?? null}
             />
           ) : target ? (
             <section className="card p-4 sm:p-5" aria-labelledby="latest-upload-title" data-testid="upload-latest">

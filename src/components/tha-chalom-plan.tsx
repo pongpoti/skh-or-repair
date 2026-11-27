@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { MISMATCH_LABEL } from "@/components/floor-plan";
 import { readableTextOn } from "@/lib/allocation";
 import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha-chalom-schedule";
 
@@ -11,7 +12,8 @@ import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha
  * between morning (above) and afternoon (below) when they differ, the board's closed-room stripes for OR 3 while it is
  * turned into an intervention room, and plain for a room no one has (ว่าง). Without a day the ORs keep Pong's brown and
  * "OR". Given `onSelect` (the board, Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also"), a room some department has
- * that day is a button that opens its cases, as on รพ.สมุทรสาคร's plan; OR 3 and a ว่าง room are not. The colours are the
+ * that day is a button that opens its cases, as on รพ.สมุทรสาคร's plan; OR 3 and a ว่าง room are not. A room with HOSxP
+ * cases nobody booked has รพ.สมุทรสาคร's amber "!" triangle in its top left corner (`mismatches`). The colours are the
  * board's plan's own (globals.css .tcp-*); the classes are prefixed, so the drawing's names (room, frame) never meet the
  * app's.
  */
@@ -40,6 +42,8 @@ type Or = {
   id: string;
   number: string;
   d: string;
+  /** The OR's left edge, for the "!" mark. */
+  left: number;
   /** Where the number's ring sits, as drawn. */
   x: number;
   ringY: number;
@@ -50,10 +54,10 @@ type Or = {
 
 /** Each OR: its chamfered outline, and where its number sits (the white ring, the number, its label under it). */
 const ORS: readonly Or[] = [
-  { id: "or-1", number: "1", d: "M422.25,135 H561.25 L579.25,153 V262 L561.25,280 H422.25 L404.25,262 V153 Z", x: 491.75, ringY: 189.5, top: 135, bottom: 280 },
-  { id: "or-2", number: "2", d: "M414.25,383 H561.25 L579.25,401 V504 L561.25,522 H414.25 L396.25,504 V401 Z", x: 487.75, ringY: 434.5, top: 383, bottom: 522 },
-  { id: "or-3", number: "3", d: "M414.25,526 H561.25 L579.25,544 V666 L561.25,684 H414.25 L396.25,666 V544 Z", x: 487.75, ringY: 587, top: 526, bottom: 684 },
-  { id: "or-4", number: "4", d: "M149.25,496 H265.25 L283.25,514 V670 L265.25,688 H149.25 L131.25,670 V514 Z", x: 207.25, ringY: 574, top: 496, bottom: 688 },
+  { id: "or-1", number: "1", d: "M422.25,135 H561.25 L579.25,153 V262 L561.25,280 H422.25 L404.25,262 V153 Z", left: 404.25, x: 491.75, ringY: 189.5, top: 135, bottom: 280 },
+  { id: "or-2", number: "2", d: "M414.25,383 H561.25 L579.25,401 V504 L561.25,522 H414.25 L396.25,504 V401 Z", left: 396.25, x: 487.75, ringY: 434.5, top: 383, bottom: 522 },
+  { id: "or-3", number: "3", d: "M414.25,526 H561.25 L579.25,544 V666 L561.25,684 H414.25 L396.25,666 V544 Z", left: 396.25, x: 487.75, ringY: 587, top: 526, bottom: 684 },
+  { id: "or-4", number: "4", d: "M149.25,496 H265.25 L283.25,514 V670 L265.25,688 H149.25 L131.25,670 V514 Z", left: 131.25, x: 207.25, ringY: 574, top: 496, bottom: 688 },
 ];
 
 /** The other rooms, as drawn: `grid` is a scrub area (the gridded floor). */
@@ -83,8 +87,8 @@ const SCOPE = { x: 78.25, y: 190, w: 98, h: 80 };
 /** The tag's text and the department's label in the Scope room, smaller than an OR's: the room is half as wide. */
 const SCOPE_TAG = 17;
 
-/** What makes a room a button: the board's choice, and the room's cases that day. */
-type Pick = { selectedId: string | null; onSelect: (id: string) => void; cases: Record<string, number> };
+/** What makes a room a button: the board's choice, and the room's cases that day (and those nobody booked). */
+type Pick = { selectedId: string | null; onSelect: (id: string) => void; cases: Record<string, number>; mismatches: Record<string, number> };
 
 /**
  * The room's floor as the button that opens it, with its name, its day and, when it has none, ไม่มีเคส as รพ.สมุทรสาคร's
@@ -94,6 +98,7 @@ function pressable(id: string, label: string, pick: Pick | null) {
   if (!pick) return {};
   const parts = [label];
   if ((pick.cases[id] ?? 0) === 0) parts.push("ไม่มีเคส");
+  if ((pick.mismatches[id] ?? 0) > 0) parts.push(MISMATCH_LABEL);
   return {
     tabIndex: 0,
     role: "button" as const,
@@ -107,6 +112,21 @@ function pressable(id: string, label: string, pick: Pick | null) {
       }
     },
   };
+}
+
+/**
+ * รพ.สมุทรสาคร's mark for a room with HOSxP cases nobody booked (components/floor-plan.tsx MismatchMark), at this plan's
+ * scale: an amber triangle with "!" (globals.css .tcp-mismatch).
+ */
+function MismatchMark({ cx, cy, r = 19 / SCALE }: { cx: number; cy: number; r?: number }) {
+  return (
+    <g className="fp-mismatch tcp-mismatch" data-testid="tcp-mismatch">
+      <path className="fp-mark fp-mark-mismatch" d={`M${cx} ${cy - r}L${cx + r * 0.95} ${cy + r * 0.7}L${cx - r * 0.95} ${cy + r * 0.7}Z`} />
+      <text className="fp-mismatch-text" x={cx} y={cy + 3 / SCALE} dy="0.35em">
+        !
+      </text>
+    </g>
+  );
 }
 
 /** A room no one has: the board's empty-room floor. */
@@ -200,6 +220,9 @@ function OrRoom({ or, entry, pick }: { or: Or; entry: ThaChalomRoomDay | null; p
       ) : (
         <Label use={entry.am} x={or.x} y={labelY} />
       )}
+      {button && (button.mismatches[or.id] ?? 0) > 0 ? (
+        <MismatchMark cx={or.left + 30 / SCALE} cy={entry.split ? middle : or.top + 30 / SCALE} />
+      ) : null}
     </g>
   );
 }
@@ -247,6 +270,8 @@ function ScopeRoom({ entry, pick }: { entry: ThaChalomRoomDay | null; pick: Pick
       />
       {tag}
       <Label use={use} x={x} y={labelY} />
+      {/* Smaller in the small room, clear of its tag. */}
+      {button && (button.mismatches.scope ?? 0) > 0 ? <MismatchMark cx={SCOPE.x + 13} cy={SCOPE.y + 12} r={10} /> : null}
     </g>
   );
 }
@@ -261,6 +286,7 @@ export function ThaChalomPlan({
   selectedId = null,
   onSelect,
   cases = {},
+  mismatches = {},
 }: {
   className?: string;
   day?: readonly ThaChalomRoomDay[] | null;
@@ -270,9 +296,11 @@ export function ThaChalomPlan({
   onSelect?: (id: string) => void;
   /** The cases in each room that day. */
   cases?: Record<string, number>;
+  /** The HOSxP cases nobody booked in each room (lib/board-rows.ts mismatchByRoom). */
+  mismatches?: Record<string, number>;
 }) {
   const byId = new Map((day ?? []).map((entry) => [entry.room.id as string, entry]));
-  const pick: Pick | null = onSelect ? { selectedId, onSelect, cases } : null;
+  const pick: Pick | null = onSelect ? { selectedId, onSelect, cases, mismatches } : null;
   return (
     <svg
       viewBox="25.5 98.5 590.25 626"

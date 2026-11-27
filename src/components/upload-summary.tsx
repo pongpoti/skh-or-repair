@@ -1,5 +1,5 @@
 import { Notice } from "@/components/auth-shell";
-import type { FlowSummary, MatchReport, MatchRow } from "@/lib/upload-flow";
+import type { FlowSummary, MatchReport, MatchRow, RoomCount, UnplacedCount } from "@/lib/upload-flow";
 
 function Stat({ label, value, unit }: { label: string; value: number; unit: string }) {
   return (
@@ -13,11 +13,12 @@ function Stat({ label, value, unit }: { label: string; value: number; unit: stri
 }
 
 /** A heading and its lines of "what · how many"; nothing when there are no lines. */
-function Counts({ title, lines }: { title: string; lines: { key: string; label: string; count: number }[] }) {
+function Counts({ title, lines, level = 3 }: { title: string; lines: { key: string; label: string; count: number }[]; level?: 3 | 4 }) {
   if (lines.length === 0) return null;
+  const Heading = level === 3 ? "h3" : "h4";
   return (
     <div>
-      <h3 className="text-sm font-bold text-ink">{title}</h3>
+      <Heading className="text-sm font-bold text-ink">{title}</Heading>
       <ul className="mt-1.5 divide-y divide-line rounded-xl border border-line bg-white/70 text-sm">
         {lines.map((line) => (
           <li key={line.key} className="flex items-baseline justify-between gap-3 px-3 py-2">
@@ -35,10 +36,10 @@ function Mismatches({ title, badge, tone, rows, testId }: { title: string; badge
   if (rows.length === 0) return null;
   return (
     <div data-testid={testId}>
-      <h4 className="flex flex-wrap items-center gap-2 text-sm font-bold text-ink">
+      <h5 className="flex flex-wrap items-center gap-2 text-sm font-bold text-ink">
         <span className={`badge ${tone}`}>{badge}</span>
         {title} {rows.length} รายการ
-      </h4>
+      </h5>
       <ul className="mt-1.5 divide-y divide-line rounded-xl border border-line bg-white/70 text-sm">
         {rows.map((row) => (
           <li key={row.key} className="px-3 py-2">
@@ -56,10 +57,85 @@ function Mismatches({ title, badge, tone, rows, testId }: { title: string; badge
   );
 }
 
+const mismatchesOf = (matching: MatchReport | null) => (matching ? matching.unbooked.length + matching.notInHosxp.length : 0);
+
+/**
+ * One hospital's part: where its cases went, which were left off and why, and how they match its doctors' bookings.
+ * รพ.สมุทรสาคร's test ids are the page's first ones; รพ.ท่าฉลอม's end in -tc.
+ */
+function Hospital({
+  name,
+  rooms,
+  unplaced,
+  matching,
+  suffix,
+}: {
+  name: string;
+  rooms: RoomCount[] | null;
+  unplaced: UnplacedCount[];
+  matching: MatchReport | null;
+  suffix: "" | "-tc";
+}) {
+  return (
+    <section className="space-y-3" aria-label={name} data-testid={`upload-hospital${suffix}`}>
+      <h3 className="text-base font-bold text-ink">{name}</h3>
+      {rooms ? (
+        <>
+          <Counts
+            level={4}
+            title="ลงห้องผ่าตัด"
+            lines={rooms.map((room) => ({
+              key: room.roomId,
+              label: room.dept ? `${room.room} · ${room.dept}` : room.room,
+              count: room.count,
+            }))}
+          />
+          <Counts level={4} title="ไม่ได้ลงห้อง" lines={unplaced.map((item) => ({ key: item.reason, label: item.label, count: item.count }))} />
+        </>
+      ) : null}
+      <div className="space-y-3">
+        <h4 className="text-sm font-bold text-ink">เทียบกับการจอง</h4>
+        {matching ? (
+          <>
+            <p className="text-sm text-ink-2" data-testid={`upload-matching${suffix}`}>
+              แพทย์จองไว้ {matching.bookings} รายการ · ตรงกัน {matching.matched} รายการ
+            </p>
+            {mismatchesOf(matching) === 0 ? (
+              <Notice tone="success">ไม่มีรายการที่ไม่ตรงกับการจอง</Notice>
+            ) : (
+              <>
+                <Mismatches
+                  title="เคสใน HOSxP ที่ไม่มีการจอง"
+                  badge="ไม่มีการจอง"
+                  tone="badge-warning"
+                  rows={matching.unbooked}
+                  testId={`upload-unbooked${suffix}`}
+                />
+                <Mismatches
+                  title="การจองที่ไม่พบใน HOSxP"
+                  badge="ไม่พบใน HOSxP"
+                  // The board's "ไม่พบใน HOSxP" badge (globals.css), so the two pages say it alike.
+                  tone="badge-stop"
+                  rows={matching.notInHosxp}
+                  testId={`upload-not-in-hosxp${suffix}`}
+                />
+              </>
+            )}
+          </>
+        ) : (
+          <Notice tone="warning">โหลดการจองไม่ได้ ลองโหลดหน้าใหม่</Notice>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /**
  * The latest upload of the cycle on the upload page: when and by whom, what the file held, what was left off and
- * why, where the cases went, and how they match the doctors' bookings. Only MX and admins see this page, so the
- * mismatches carry HN.
+ * why, then each hospital's part (the file holds both: Pong, 27 Nov 2026, "Excel file include both place on one
+ * sheet"): where its cases went and how they match its doctors' bookings. The counts at the top are both hospitals'.
+ * Only MX and admins see this page, so the mismatches carry HN. An upload saved before 27 Nov 2026 cut รพ.ท่าฉลอม's
+ * cases (its line under ไม่นำขึ้นตาราง), so it has no part for it.
  */
 export function UploadSummary({
   time,
@@ -67,6 +143,7 @@ export function UploadSummary({
   fileName,
   summary,
   matching,
+  thaChalomMatching = null,
 }: {
   /** The upload's time in Bangkok, "15:12". */
   time: string;
@@ -76,8 +153,11 @@ export function UploadSummary({
   summary: FlowSummary | null;
   /** Null when the bookings cannot be read. */
   matching: MatchReport | null;
+  /** รพ.ท่าฉลอม's: null when the bookings cannot be read or the upload has no list for it. */
+  thaChalomMatching?: MatchReport | null;
 }) {
-  const mismatches = matching ? matching.unbooked.length + matching.notInHosxp.length : 0;
+  const tc = summary?.thaChalom ?? null;
+  const mismatches = mismatchesOf(matching) + (tc ? mismatchesOf(thaChalomMatching) : 0);
   const left = summary
     ? [
         ...(summary.duplicates > 0 ? [{ key: "dup", label: "ID ซ้ำ นับครั้งเดียว", count: summary.duplicates }] : []),
@@ -104,60 +184,16 @@ export function UploadSummary({
             <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Stat label="อ่านได้" value={summary.rows} unit="แถว" />
               <Stat label="ผ่านเกณฑ์" value={summary.kept} unit="เคส" />
-              <Stat label="ลงห้องผ่าตัด" value={summary.placed} unit="เคส" />
+              <Stat label="ลงห้องผ่าตัด" value={summary.placed + (tc?.placed ?? 0)} unit="เคส" />
               <Stat label="ไม่ตรงกับการจอง" value={mismatches} unit="รายการ" />
             </dl>
             <Counts title="ไม่นำขึ้นตาราง" lines={left} />
-            <Counts
-              title="ลงห้องผ่าตัด"
-              lines={summary.rooms.map((room) => ({
-                key: room.roomId,
-                label: room.dept ? `${room.room} · ${room.dept}` : room.room,
-                count: room.count,
-              }))}
-            />
-            <Counts
-              title="ไม่ได้ลงห้อง"
-              lines={summary.unplaced.map((item) => ({ key: item.reason, label: item.label, count: item.count }))}
-            />
           </>
         ) : (
           <Notice tone="info">ไม่มีสรุปของไฟล์นี้</Notice>
         )}
-
-        <div className="space-y-3">
-          <h3 className="text-sm font-bold text-ink">เทียบกับการจอง</h3>
-          {matching ? (
-            <>
-              <p className="text-sm text-ink-2" data-testid="upload-matching">
-                แพทย์จองไว้ {matching.bookings} รายการ · ตรงกัน {matching.matched} รายการ
-              </p>
-              {mismatches === 0 ? (
-                <Notice tone="success">ไม่มีรายการที่ไม่ตรงกับการจอง</Notice>
-              ) : (
-                <>
-                  <Mismatches
-                    title="เคสใน HOSxP ที่ไม่มีการจอง"
-                    badge="ไม่มีการจอง"
-                    tone="badge-warning"
-                    rows={matching.unbooked}
-                    testId="upload-unbooked"
-                  />
-                  <Mismatches
-                    title="การจองที่ไม่พบใน HOSxP"
-                    badge="ไม่พบใน HOSxP"
-                    // The board's "ไม่พบใน HOSxP" badge (globals.css), so the two pages say it alike.
-                    tone="badge-stop"
-                    rows={matching.notInHosxp}
-                    testId="upload-not-in-hosxp"
-                  />
-                </>
-              )}
-            </>
-          ) : (
-            <Notice tone="warning">โหลดการจองไม่ได้ ลองโหลดหน้าใหม่</Notice>
-          )}
-        </div>
+        <Hospital name="รพ.สมุทรสาคร" rooms={summary?.rooms ?? null} unplaced={summary?.unplaced ?? []} matching={matching} suffix="" />
+        {tc ? <Hospital name="รพ.ท่าฉลอม" rooms={tc.rooms} unplaced={tc.unplaced} matching={thaChalomMatching} suffix="-tc" /> : null}
       </div>
     </section>
   );

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
-import type { CaseAdding } from "@/components/suite-board";
+import type { BoardView, CaseAdding } from "@/components/suite-board";
 import { ThaChalomBoard } from "@/components/tha-chalom-board";
 import { TopBar } from "@/components/top-bar";
 import { addDays, BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
@@ -8,7 +8,7 @@ import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requestPath, requireUser } from "@/lib/auth/server";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, relationTo, type BoardDay } from "@/lib/board-day";
-import { thaChalomRows, type BoardRow } from "@/lib/board-rows";
+import { buildThaChalomRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
 import { db } from "@/lib/db";
@@ -21,6 +21,7 @@ import { thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedul
 import type { SessionUser } from "@/lib/tokens";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
+import { workbookFor, workbookForDay } from "@/lib/workbook-store";
 import { addThaChalomCase, deleteThaChalomCase, editCase, thaChalomDayBookings, undoThaChalomCancel } from "@/app/(board)/actions";
 
 export const dynamic = "force-dynamic";
@@ -33,19 +34,33 @@ export const dynamic = "force-dynamic";
  * รพ.สมุทรสาคร's board on the same day. The bar has รพ.สมุทรสาคร's buttons for the same people (Pong, 27 Nov 2026:
  * "Arrange component of ท่าฉลอม exact same as สมทุรสาคร"): จัดการระบบ for admins, อัปโหลดตาราง for MX and admins, and
  * วิธีใช้งาน in the account menu of doctors and admins. Its doctors book its rooms (Pong, 27 Nov 2026: "Add booking btn on
- * ท่าฉลอม also"), and the day's bookings are its rooms' cases (there is no HOSxP list here).
+ * ท่าฉลอม also"), and MX's HOSxP upload holds its cases too (Pong, 27 Nov 2026: "Excel file include both place on one
+ * sheet"): its rooms' cases are the two matched, as on รพ.สมุทรสาคร's board.
  */
 
 /**
- * The day's bookings as rows, with an HN only for who may see it (the doctor who booked, MX and admins), the booking
- * form's needs for a doctor, and whether the viewer may upload. A database problem returns null, and the page goes to
- * the outage page, as รพ.สมุทรสาคร's board does.
+ * The day's HOSxP cases and bookings as rows (lib/board-rows.ts buildThaChalomRows), with an HN only for who may see it
+ * (the doctor who booked, MX and admins), the booking form's needs for a doctor, and whether the viewer may upload. The
+ * HOSxP list is รพ.สมุทรสาคร's board's: the latest upload of the cycle for the board's own day, the latest for the day
+ * whichever cycle made it for a day picked (`picked`), each only from an upload that kept this hospital's cases. A
+ * database problem returns null, and the page goes to the outage page, as รพ.สมุทรสาคร's board does.
  */
-async function loadBoard(user: SessionUser, date: string, day: BoardDay): Promise<{ rows: BoardRow[]; adding: CaseAdding | null; upload: boolean } | null> {
+async function loadBoard(
+  user: SessionUser,
+  date: string,
+  day: BoardDay,
+  picked: boolean,
+): Promise<{ board: Omit<BoardView, "date" | "mismatchCount">; adding: CaseAdding | null; upload: boolean } | null> {
   try {
     const pool = await db();
-    const [doctor, bookings, viewer] = await Promise.all([doctorFor(pool, user), listCasesOn(pool, date, "tha-chalom"), boardViewer(pool, user)]);
-    const rows = thaChalomRows(date, bookings, viewer);
+    const [doctor, bookings, workbook, viewer] = await Promise.all([
+      doctorFor(pool, user),
+      listCasesOn(pool, date, "tha-chalom"),
+      picked ? workbookForDay(pool, date, "tha-chalom") : workbookFor(pool, day.cycleDay, day.boardDate, "tha-chalom"),
+      boardViewer(pool, user),
+    ]);
+    const built = buildThaChalomRows({ date, workbook: workbook?.cases ?? null, bookings, viewer });
+    const board = { rows: built.rows, uploaded: built.uploaded, mismatchByRoom: built.mismatchByRoom, offBoard: built.offBoard };
     let adding: CaseAdding | null = null;
     if (doctor) {
       const [mine, { holidays, unlisted }] = await Promise.all([
@@ -68,7 +83,7 @@ async function loadBoard(user: SessionUser, date: string, day: BoardDay): Promis
       };
     }
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
-    return { rows, adding, upload: viewer.allHn };
+    return { board, adding, upload: viewer.allHn };
   } catch (error) {
     console.error("[tha-chalom] cases unavailable:", (error as Error).message);
     return null;
@@ -87,7 +102,8 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
   const picked = thaChalomPickedDay(params.date, day.today, holidays);
   const date = picked ?? day.boardDate;
   const datePick = { today: day.today, current: day.boardDate, ...range, holidays, unlisted };
-  const loaded = await loadBoard(user, date, day);
+  // Picking the board's own day counts as no pick, as on รพ.สมุทรสาคร's board.
+  const loaded = await loadBoard(user, date, day, date !== day.boardDate);
   // Outside the try of loadBoard: redirect() works by throwing.
   if (!loaded) redirect(unavailablePath("server", await requestPath()));
 
@@ -113,7 +129,7 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
       <ThaChalomBoard
         date={date}
         pick={datePick}
-        rows={loaded.rows}
+        board={loaded.board}
         roomId={typeof params.room === "string" ? params.room : null}
         adding={loaded.adding}
         periods={periods}

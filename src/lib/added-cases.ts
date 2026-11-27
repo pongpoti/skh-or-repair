@@ -280,14 +280,6 @@ const NO_ROOM_TEXT = {
  */
 export const POOLED_ROOM_NOTE = "ห้องที่จองน้อยกว่า";
 
-/**
- * What the department's room card says on a day the doctor's department has no room in the weekly schedule, so the
- * booking borrows another room (borrowsRoom; Pong, 22 Nov 2026): in place of the room until the doctor has a booking
- * that day, and under it.
- */
-export const BORROWED_ROOM_NAME = "ห้องที่จองน้อยที่สุด";
-export const BORROWED_ROOM_NOTE = "สาขาคุณไม่มีห้องในวันนั้น";
-
 /** What a room card the doctor cannot pick says under its name, by the reason (the full reason is under the cards). */
 export const NO_ROOM_NOTE: Readonly<Record<NoRoomReason, string>> = {
   "obgyn-building": "ผ่าตัดที่อาคารแม่",
@@ -349,6 +341,28 @@ export function placeBookingRoom(
 }
 
 /**
+ * placeBookingRoom for the form and the server: for a new booking, and for an edit of `editing` (the booking as saved,
+ * with the doctor's subtype) that keeps its day. Such an edit keeps the department room the booking was saved in when its
+ * department has no room that day: a room borrowed from 22 to 27 Nov 2026, before Pong's "Leave off board and display on
+ * noti bar for both places" ended borrowing. The board still shows the booking there (bookedRoom), so its doctor may
+ * still change its time, HN, operation or note; only another day needs a room of the department's own.
+ */
+export function roomToBook(
+  place: PlaceId | undefined,
+  subtype: string | null | undefined,
+  operation: string,
+  date: string,
+  periods: RepairPeriods,
+  choice: RoomChoice,
+  editing?: Pick<AddedCase, "subtype" | "operation" | "date" | "roomId" | "dressing" | "place">,
+): BookingRoom {
+  const room = placeBookingRoom(place, subtype, operation, date, periods, choice);
+  if (room.ok || room.reason !== "no-room" || choice !== "dept" || !editing || editing.date !== date) return room;
+  if (bookedChoice(editing, periods) !== "dept") return room;
+  return { ok: true, roomId: bookedRoom(editing, periods).roomId, dressing: false };
+}
+
+/**
  * The department rooms a booking may take on `date`: the pool bookingRoom chooses from for "dept", in number order. More
  * than one on a day the department holds several rooms (GENSX in OR 2 and OR 5 on a Monday of the weekly schedule);
  * empty when it has none.
@@ -358,18 +372,6 @@ export function deptRooms(subtype: string | null | undefined, operation: string,
   if (dept === "OBGYN" && repairOn(date, periods) !== null) return [];
   const candidates = candidateRooms({ procedure: operation, dept, emergency: false, choice: "dept" }, date, periods);
   return candidates.ok ? candidates.rooms : [];
-}
-
-/**
- * Whether the doctor's department has no room of its own on `date` in the weekly schedule, so a booking borrows the
- * open room with the fewest bookings (lib/placement.ts spareRooms; Pong, 22 Nov 2026: "Open room with fewest cases").
- * deptRooms then gives those rooms.
- */
-export function borrowsRoom(subtype: string | null | undefined, operation: string, date: string, periods: RepairPeriods): boolean {
-  const dept = bookingDept(subtype);
-  if (dept === "OBGYN" && repairOn(date, periods) !== null) return false;
-  const candidates = candidateRooms({ procedure: operation, dept, emergency: false, choice: "dept" }, date, periods);
-  return candidates.ok && candidates.spare === true;
 }
 
 /**
@@ -700,7 +702,7 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
     if (typeof raw.scrubDoes !== "boolean") return refuse("room", `ห้องทำแผล: ตอบก่อนว่า ${SCRUB_QUESTION}`);
     scrubDoes = raw.scrubDoes;
   }
-  const room = placeBookingRoom(place, subtype, operation, date, periods, choice);
+  const room = roomToBook(place, subtype, operation, date, periods, choice, keepsDay ? editing : undefined);
   // No room that day: another day may have one.
   if (!room.ok) return refuse(room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
 

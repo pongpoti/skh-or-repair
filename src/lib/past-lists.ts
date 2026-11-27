@@ -69,7 +69,7 @@ export function splitByDay(sheet: Sheet, today: string): SplitDays {
   return { ok: true, days, skipped: { later, noDate } };
 }
 
-/** One past workday's list, as an upload stores it. */
+/** One past workday's list, as an upload stores it: both hospitals' cases. */
 export type PastDay = { date: string; cases: PlacedCase[]; summary: FlowSummary };
 
 export type PastLists = {
@@ -93,7 +93,9 @@ export function pastLists(
     }
     // Every row is booked for this day and the header is the file's, so the pipeline cannot refuse it.
     const processed = processSheet(day.sheet, day.date, input.periods, input.options);
-    if (processed.ok) days.push({ date: day.date, cases: processed.cases, summary: processed.summary });
+    // รพ.สมุทรสาคร's cases only: the export holds รพ.ท่าฉลอม's too (Pong, 27 Nov 2026), but its board shows no past day,
+    // so an import keeps none of its patients.
+    if (processed.ok) days.push({ date: day.date, cases: processed.cases, summary: { ...processed.summary, thaChalom: null } });
   }
   return { days, offDays };
 }

@@ -10,8 +10,9 @@ import type { XlsxCell } from "./xlsx.ts";
  * Pure and isomorphic: lib/xlsx.ts reads the file, this module reads its rows. The steps follow the extraction rules
  * written with Pong (sections 2 to 10): find the columns by their Thai headers, clean the values, check that every row
  * is booked for the target day (rule set B, step one), drop what is not an in-hours elective case (rule set B, step
- * two), count a repeated case ID once, and cut the rows the board never shows whatever the rooms are (rule set C:
- * Tha Chalom). Choosing a room is placeCase's job (lib/placement.ts), by the schedule in force.
+ * two), count a repeated case ID once, and split the rows by hospital: one export holds รพ.สมุทรสาคร's and
+ * รพ.ท่าฉลอม's cases (Pong, 27 Nov 2026: "Excel file include both place on one sheet"; rule set C cut ท่าฉลอม's before).
+ * Choosing a room is placement's job (lib/placement.ts placeAll, lib/tha-chalom-schedule.ts placeThaChalom).
  *
  * Privacy: the export holds patient name, age, AN, diagnosis, illnesses and costs. Only the name is read (Pong, 16 Nov
  * 2026: "Add patient name line above HN"), to show beside the HN to those who may see it; the rest are never read into a
@@ -656,10 +657,11 @@ export function filterForUpload(rows: readonly WorkbookRow[]): FilterResult {
 // Rule set C: the cuts that do not depend on rooms
 
 /**
- * "vascular" is no longer applied: the utilisation report's cut of vascular surgery on Tuesday to Thursday (Tha
- * Chalom's quota) belonged to the usual schedule, and the board follows the schedule in force instead (Pong, 18 Nov
- * 2026: "This is temporary OR schedule: stick to the interim schedule"). It stays here so uploads stored before still
- * read back with their counts.
+ * No cut is applied any more. "vascular" went first: the utilisation report's cut of vascular surgery on Tuesday to
+ * Thursday (Tha Chalom's quota) belonged to the usual schedule, and the board follows the schedule in force instead
+ * (Pong, 18 Nov 2026: "This is temporary OR schedule: stick to the interim schedule"). "tha-chalom" went on 27 Nov 2026,
+ * when รพ.ท่าฉลอม got its own board, filled from the same upload (boardCuts). Both stay here so uploads stored before
+ * still read back with their counts.
  */
 export type CutReason = "tha-chalom" | "vascular";
 
@@ -669,21 +671,22 @@ export const CUT_REASONS: Readonly<Record<CutReason, string>> = {
 };
 
 export type CutRow = { caseId: string; line: number; reason: CutReason; label: string };
-export type CutResult = { kept: WorkbookRow[]; cut: CutRow[] };
+export type CutResult = {
+  /** รพ.สมุทรสาคร's cases. */
+  kept: WorkbookRow[];
+  /** รพ.ท่าฉลอม's cases (WorkbookRow.thaChalom), for its own board. */
+  thaChalom: WorkbookRow[];
+  /** Always empty now (CutReason). */
+  cut: CutRow[];
+};
 
 /**
- * The board never shows Tha Chalom's cases: they operate at รพ.นครท่าฉลอม, not here. Everything else goes to the rooms
- * of the schedule in force (placeCase, lib/placement.ts): during the repair the interim schedule, where a department
- * with no room of its own, vascular surgery included, takes the mixed room; otherwise the weekly schedule.
+ * The kept rows by hospital: รพ.ท่าฉลอม's (its แผนก, room or operation names it, WorkbookRow.thaChalom) for its board
+ * (Pong, 27 Nov 2026: "Excel file include both place on one sheet"; they were cut before), the rest for รพ.สมุทรสาคร's,
+ * each to the rooms of its own schedule.
  */
 export function boardCuts(kept: readonly WorkbookRow[]): CutResult {
-  const out: WorkbookRow[] = [];
-  const cut: CutRow[] = [];
-  for (const row of kept) {
-    if (row.thaChalom) cut.push({ caseId: row.caseId, line: row.line, reason: "tha-chalom", label: CUT_REASONS["tha-chalom"] });
-    else out.push(row);
-  }
-  return { kept: out, cut };
+  return { kept: kept.filter((row) => !row.thaChalom), thaChalom: kept.filter((row) => row.thaChalom), cut: [] };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -698,7 +701,7 @@ export type UploadSummary = {
   /** Rules that dropped at least one row, in rule order. */
   dropped: { rule: DropRule; reason: string; count: number }[];
   cut: { reason: CutReason; label: string; count: number }[];
-  /** Cases left for placeCase. */
+  /** รพ.สมุทรสาคร's cases to place (ท่าฉลอม's are lib/upload-flow.ts FlowSummary.thaChalom). */
   toPlace: number;
 };
 
@@ -725,8 +728,9 @@ export type PreparedUpload =
   | { ok: true; rows: WorkbookRow[]; filter: FilterResult; cuts: CutResult; summary: UploadSummary };
 
 /**
- * Parse, guard, filter and cut in one call, for the upload action: `prepareUpload(readXlsx(file), target)` once the
- * read is ok. The cases to place are `cuts.kept`. An export with no case rows passes (nothing to refuse).
+ * Parse, guard, filter and split in one call, for the upload action: `prepareUpload(readXlsx(file), target)` once the
+ * read is ok. The cases to place are `cuts.kept` (รพ.สมุทรสาคร) and `cuts.thaChalom`. An export with no case rows passes
+ * (nothing to refuse).
  */
 export function prepareUpload(
   sheet: { rows: SheetRows; date1904: boolean },

@@ -252,5 +252,68 @@ describe("workbook uploads (database)", () => {
     await assert.rejects(insert("shift", "night"), check);
     await assert.rejects(insert("status", "booked"), check);
     await assert.rejects(insert("hn", null), (e: { code?: string }) => e.code === "23502");
+    // รพ.ท่าฉลอม's rooms only with its place (OR 1 to 4 and the Scope room), and only the two hospitals.
+    const atPlace = (place: string, room: string | null) =>
+      pool.query(
+        `INSERT INTO workbook_cases (upload_id, case_id, operation, surgeon, position, hn, status, room_id, place)
+         VALUES ($1, 'x', 'op', 'นพ. ก', 1, '1', 'scheduled', $2, $3)`,
+        [saved.id, room, place],
+      );
+    for (const room of ["or-1", "or-4", "scope", null]) await atPlace("tha-chalom", room);
+    for (const room of ["or-5", "or-13", "Scope"]) await assert.rejects(atPlace("tha-chalom", room), check, room);
+    await assert.rejects(atPlace("skh", "scope"), check, "รพ.สมุทรสาคร has no Scope room");
+    await assert.rejects(atPlace("elsewhere", "or-1"), check, "an unknown hospital");
+  });
+
+  // Pong, 27 Nov 2026: "Excel file include both place on one sheet".
+  test("each hospital reads its own cases of an upload; an upload saved before kept no list for รพ.ท่าฉลอม", async () => {
+    const tc = (position: number, more: Partial<PlacedCase> = {}) => placed(position, { caseId: String(80000 + position), roomId: "scope", place: "tha-chalom", ...more });
+    const saved = await saveUpload(pool, upload({ cases: [placed(1), tc(1), placed(2), tc(2, { roomId: null })] }));
+    assert.equal(saved.thaChalom, true);
+    const skh = await workbookFor(pool, "2026-11-16", "2026-11-17");
+    assert.deepEqual(skh?.cases.map((item) => item.caseId), ["70001", "70002"]);
+    const thaChalom = await workbookFor(pool, "2026-11-16", "2026-11-17", "tha-chalom");
+    assert.deepEqual(
+      thaChalom?.cases.map((item) => [item.caseId, item.roomId, item.position]),
+      [
+        ["80001", "scope", 1],
+        ["80002", null, 2],
+      ],
+    );
+    assert.deepEqual((await workbookForDay(pool, "2026-11-17", "tha-chalom"))?.cases.length, 2);
+    assert.deepEqual((await casesOf(pool, saved.id, "tha-chalom")).map((item) => item.caseId), ["80001", "80002"]);
+    // An upload from before the change (tha_chalom false) is a list for รพ.สมุทรสาคร only.
+    await pool.query("UPDATE workbook_uploads SET tha_chalom = false WHERE id = $1", [saved.id]);
+    assert.equal(await workbookFor(pool, "2026-11-16", "2026-11-17", "tha-chalom"), null);
+    assert.equal(await workbookForDay(pool, "2026-11-17", "tha-chalom"), null);
+    assert.equal((await workbookFor(pool, "2026-11-16", "2026-11-17"))?.cases.length, 2);
+    // A past import keeps รพ.สมุทรสาคร's list only: รพ.ท่าฉลอม's board shows no past day.
+    await savePastLists(pool, {
+      cycleDay: "2026-11-27",
+      uploadedAt: new Date("2026-11-27T10:00:00+07:00"),
+      uploadedBy: "U-admin",
+      uploaderName: null,
+      fileName: "past.xlsx",
+      lists: [{ targetDate: "2026-11-05", totalRows: 2, kept: 2, placed: 1, summary: null, cases: [placed(1), tc(1)] }],
+    });
+    assert.equal(await workbookForDay(pool, "2026-11-05", "tha-chalom"), null);
+    assert.deepEqual((await workbookForDay(pool, "2026-11-05"))?.cases.map((item) => item.caseId), ["70001"]);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM workbook_cases WHERE place = 'tha-chalom' AND upload_id <> $1", [saved.id])).rows[0].n, 0);
+  });
+
+  test("an upload deletes รพ.ท่าฉลอม's cases of the days before its cycle day; รพ.สมุทรสาคร's stay for the calendar", async () => {
+    const tc = (position: number) => placed(position, { caseId: String(80000 + position), roomId: "or-1", place: "tha-chalom" });
+    const tuesday = await saveUpload(pool, upload({ cases: [placed(1), tc(1)] }));
+    // The next cycle's upload, for Wednesday: Tuesday's list there is still today's, so it stays.
+    const wednesday = await saveUpload(
+      pool,
+      upload({ cycleDay: "2026-11-17", targetDate: "2026-11-18", uploadedAt: new Date("2026-11-17T15:10:00+07:00"), cases: [placed(1), tc(1)] }),
+    );
+    assert.deepEqual((await casesOf(pool, tuesday.id, "tha-chalom")).map((item) => item.caseId), ["80001"]);
+    // Thursday's, made on Wednesday: Tuesday has passed.
+    await saveUpload(pool, upload({ cycleDay: "2026-11-18", targetDate: "2026-11-19", uploadedAt: new Date("2026-11-18T15:10:00+07:00"), cases: [placed(1), tc(1)] }));
+    assert.deepEqual(await casesOf(pool, tuesday.id, "tha-chalom"), []);
+    assert.deepEqual((await casesOf(pool, tuesday.id)).map((item) => item.caseId), ["70001"], "รพ.สมุทรสาคร's Tuesday stays");
+    assert.deepEqual((await casesOf(pool, wednesday.id, "tha-chalom")).map((item) => item.caseId), ["80001"], "Wednesday's is today's");
   });
 });

@@ -164,19 +164,20 @@ const GONE = "การจองนี้ถูกยกเลิกไปแล
 const PAST = "ผ่านวันผ่าตัดแล้ว แก้ไม่ได้";
 
 /**
- * Whether today's booking is on a row HOSxP says is under way or over (lib/board-rows.ts bookingUnderWay): the row's
- * actions then offer only booking again, and the server refuses an edit or a cancel. Only today's list can say so.
+ * Whether today's booking is on a row HOSxP says is under way or over (lib/board-rows.ts bookingUnderWay), on its
+ * hospital's board: the row's actions then offer only booking again, and the server refuses an edit or a cancel. Only
+ * today's list can say so.
  */
 async function startedToday(pool: Awaited<ReturnType<typeof db>>, booking: AddedCase, today: string, surgeonId: string, periods?: RepairPeriods): Promise<boolean> {
-  // รพ.ท่าฉลอม has no HOSxP list on the board.
-  if (booking.date !== today || booking.place === "tha-chalom") return false;
+  if (booking.date !== today) return false;
+  const place: PlaceId = booking.place === "tha-chalom" ? "tha-chalom" : "skh";
   const [workbook, bookings, inForce] = await Promise.all([
-    workbookForDay(pool, today),
-    listCasesOn(pool, today),
+    workbookForDay(pool, today, place),
+    listCasesOn(pool, today, place),
     periods ? Promise.resolve(periods) : getRepairPeriods(pool),
   ]);
   if (!workbook) return false;
-  return bookingUnderWay({ date: today, periods: inForce, workbook: workbook.cases, bookings }, booking.id, surgeonId);
+  return bookingUnderWay({ date: today, periods: inForce, workbook: workbook.cases, bookings }, booking.id, surgeonId, place);
 }
 
 /**

@@ -10,9 +10,6 @@ import {
   bookingChange,
   bookingRoom,
   bookingState,
-  BORROWED_ROOM_NAME,
-  BORROWED_ROOM_NOTE,
-  borrowsRoom,
   checkCase,
   cleanNote,
   cleanOperation,
@@ -31,6 +28,7 @@ import {
   NO_ROOM_NOTE,
   NOTE_ONLY_TEXT,
   placeBookingRoom,
+  roomToBook,
   placeRoomName,
   POOLED_ROOM_NOTE,
   byTime,
@@ -114,10 +112,10 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   assert.deepEqual(room("URO", "TURP", "2026-11-11"), { ok: true, roomId: "or-11", dressing: false }, "the first half's mixed room");
   // an empty name still shows the department's room in the form
   assert.deepEqual(room("ORTHO", "", FIRST), { ok: true, roomId: "or-13", dressing: false });
-  // Chest medicine has no period of its own: OR 4 on Mondays in the weekly schedule (21 Nov 2026); other days it borrows
-  // the open room with the fewest bookings (22 Nov 2026), OR 2 with none yet. At the weekend no room.
+  // Chest medicine has no period of its own: OR 4 on Mondays in the weekly schedule (21 Nov 2026), no room other days
+  // (Pong, 27 Nov 2026: a department with no room that day borrows none, "Leave off board"). At the weekend no room.
   assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-22"), { ok: true, roomId: "or-4", dressing: false });
-  assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-23"), { ok: true, roomId: "or-2", dressing: false });
+  assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-23"), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" });
   assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-27"), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" });
   assert.deepEqual(room("CHEST", "Bronchoscopy", FIRST), { ok: true, roomId: "or-11", dressing: false }, "the repair's mixed room");
   // the surgeon decides (Pong, 15 Nov 2026): a name that reads like a dressing stays in the department's room
@@ -422,39 +420,41 @@ test("a department with two rooms: a doctor's bookings stay in one, the first ta
   assert.deepEqual(bookedRoom(made("7", "or-5", { date: "2026-12-14" }), P), { roomId: "or-12", dressing: false }, "the repair");
 });
 
-test("a department with no room that day borrows the open room with the fewest bookings (Pong, 22 Nov 2026)", () => {
+test("a department with no room that day books none (Pong, 27 Nov 2026: in place of borrowing the emptiest room)", () => {
   const P = DEFAULT_REPAIR_PERIODS;
   const TUESDAY = "2027-03-23"; // the weekly schedule: vascular surgery has no room
-  const SPARE = ["or-2", "or-4", "or-5", "or-6", "or-7", "or-9", "or-10", "or-11", "or-12", "or-13"];
-  assert.equal(borrowsRoom("VASCULAR", "EVLA", TUESDAY, P), true);
-  assert.deepEqual(deptRooms("VASCULAR", "EVLA", TUESDAY, P), SPARE, "every open room but the dressing, SCOPE and emergency rooms");
-  assert.equal(borrowsRoom("GENSX", "Lap chole", TUESDAY, P), false, "a department with its own room");
-  assert.equal(borrowsRoom("VASCULAR", "EVLA", "2026-12-14", P), false, "the repair has its mixed room");
-  assert.equal(borrowsRoom("VASCULAR", "EVLA", "2027-03-27", P), false, "the weekend");
-  assert.equal(BORROWED_ROOM_NAME, "ห้องที่จองน้อยที่สุด");
-  assert.equal(BORROWED_ROOM_NOTE, "สาขาคุณไม่มีห้องในวันนั้น");
-  // The server gives the room with the fewest bookings, any department's, then the doctor's later bookings join it.
-  const made = (surgeonId: string, roomId: string, subtype: string): AddedCase => ({
-    id: `${surgeonId}-${roomId}`,
+  const NO_ROOM = { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" };
+  assert.deepEqual(bookingRoom("VASCULAR", "EVLA", TUESDAY, P, "dept"), NO_ROOM);
+  assert.deepEqual(deptRooms("VASCULAR", "EVLA", TUESDAY, P), []);
+  assert.deepEqual(bookingRoom("VASCULAR", "EVLA", "2026-12-14", P, "dept"), { ok: true, roomId: "or-11", dressing: false }, "the repair's mixed room");
+  // A booking saved in a borrowed room before stays there (bookedRoom keeps the saved room when none can be worked out).
+  const saved: AddedCase = {
+    id: "9",
     date: TUESDAY,
     start: null,
     end: null,
-    roomId,
+    roomId: "or-9",
     hn: "1234567",
-    operation: "operation",
+    operation: "EVLA",
     shift: "in",
     dressing: false,
     scrubDoes: null,
     note: "",
-    surgeonId,
-    surgeon: `หมอ ${surgeonId}`,
-    subtype,
-  });
-  const own = SPARE.filter((id) => id !== "or-9").map((id, i) => made(`o${i}`, id, "VASCULAR"));
-  assert.equal(roomAmong(SPARE, "7", TUESDAY, own, P), "or-9", "the room nobody booked");
-  assert.equal(roomAmong(SPARE, "7", TUESDAY, [...own, made("7", "or-4", "VASCULAR")], P), "or-4", "the doctor's own earlier booking");
-  // A saved borrowed room stays while it is still one of those rooms.
-  assert.deepEqual(bookedRoom(made("7", "or-9", "VASCULAR"), P), { roomId: "or-9", dressing: false });
+    surgeonId: "7",
+    surgeon: "หมอ 7",
+    subtype: "VASCULAR",
+  };
+  assert.deepEqual(bookedRoom(saved, P), { roomId: "or-9", dressing: false });
+  // Its doctor may still edit it on its own day: the edit keeps that room. Another day needs a room of the department's own.
+  const context = { today: "2027-03-15", earliest: "2027-03-16", periods: P, subtype: "VASCULAR", holidays: [], editing: saved };
+  const input = { date: TUESDAY, hn: "1234567", operation: "EVLA", shift: "in", start: 600, end: 660, note: "ขอ C-arm" };
+  const edited = checkCase(input, context);
+  assert.ok(edited.ok && edited.value.roomId === "or-9" && edited.value.start === 600 && edited.value.note === "ขอ C-arm", JSON.stringify(edited));
+  assert.deepEqual(roomToBook(undefined, "VASCULAR", "EVLA", TUESDAY, P, "dept", saved), { ok: true, roomId: "or-9", dressing: false });
+  const moved = checkCase({ ...input, date: "2027-03-30" }, context);
+  assert.ok(!moved.ok && moved.field === "date" && moved.error === NO_ROOM.error, `another Tuesday: ${JSON.stringify(moved)}`);
+  assert.deepEqual(roomToBook(undefined, "VASCULAR", "EVLA", TUESDAY, P, "dept"), NO_ROOM, "a new booking gets none");
+  assert.equal(checkCase(input, { ...context, editing: undefined }).ok, false, "nor does a new booking on that Tuesday");
 });
 
 // Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete and other functions".

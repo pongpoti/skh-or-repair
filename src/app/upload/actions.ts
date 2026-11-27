@@ -10,7 +10,7 @@ import { bangkokParts, now } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { thaiDate } from "@/lib/days";
 import { HOLIDAYS_UNAVAILABLE } from "@/lib/holidays";
-import { BOARD_PATH } from "@/lib/places";
+import { BOARD_PATH, THA_CHALOM_PATH } from "@/lib/places";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { isMx } from "@/lib/roles";
 import { runUploadFlow } from "@/lib/upload-flow";
@@ -60,8 +60,13 @@ export async function uploadWorkbook(form: FormData): Promise<UploadResult> {
       return { ok: false, error: `ตอนนี้รับตารางของ${thaiDate(target, "short")} โหลดหน้าใหม่แล้วลองอีกครั้ง` };
     }
 
-    const [periods, bookings] = await Promise.all([getRepairPeriods(pool), listCasesOn(pool, target)]);
-    const flow = runUploadFlow({ data: new Uint8Array(await file.arrayBuffer()), target, periods, bookings });
+    // The file holds both hospitals' cases (Pong, 27 Nov 2026): each is matched with its own doctors' bookings.
+    const [periods, bookings, thaChalomBookings] = await Promise.all([
+      getRepairPeriods(pool),
+      listCasesOn(pool, target),
+      listCasesOn(pool, target, "tha-chalom"),
+    ]);
+    const flow = runUploadFlow({ data: new Uint8Array(await file.arrayBuffer()), target, periods, bookings, thaChalomBookings });
     if (!flow.ok) return { ok: false, error: flow.message };
 
     const { summary } = flow;
@@ -76,17 +81,20 @@ export async function uploadWorkbook(form: FormData): Promise<UploadResult> {
       kept: summary.kept,
       placed: summary.placed,
       summary,
-      cases: flow.cases,
+      cases: [...flow.cases, ...flow.thaChalomCases],
     });
-    // The board's next cycle and this page's latest upload.
+    // Both boards' next cycle and this page's latest upload.
     revalidatePath(BOARD_PATH);
+    revalidatePath(THA_CHALOM_PATH);
     revalidatePath("/upload");
 
     // An upload is the board's list from 16:00 of its day (lib/board-day.ts), so one made later shows at once.
     const when = bangkokParts(at).minutes < TURNOVER_MINUTES ? "ขึ้นกระดานเวลา 16:00 น." : "ขึ้นกระดานแล้ว";
+    const tc = summary.thaChalom;
+    const thaChalom = tc && tc.toPlace > 0 ? ` · ท่าฉลอม ${tc.placed} จาก ${tc.toPlace}` : "";
     return {
       ok: true,
-      message: `บันทึกตารางของ${thaiDate(target, "short")} แล้ว ลงห้อง ${summary.placed} จาก ${summary.toPlace} เคส · ${when}`,
+      message: `บันทึกตารางของ${thaiDate(target, "short")} แล้ว ลงห้อง ${summary.placed} จาก ${summary.toPlace} เคส${thaChalom} · ${when}`,
     };
   } catch (error) {
     console.error(`[upload] the upload failed (${errorKind(error)})`);

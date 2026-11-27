@@ -2,7 +2,8 @@
 """Builds tests/fixtures/e2e-or-export.xlsx, the HOSxP file the end-to-end tests upload (tests/e2e/run.mjs).
 
 It is the made-up sample export (tests/fixtures/sample-or-export.xlsx) cut to rows 1-17, the rows that make one
-day's file (the sample's own answers: 9 kept, 7 dropped, 1 repeated ID, 2 cut), moved from Thu 5 Nov 2026 to the
+day's file (the sample's own answers: 9 kept, 7 dropped, 1 repeated ID, 2 cut; the app no longer cuts them: the
+vascular case stays since 18 Nov 2026, รพ.ท่าฉลอม's goes to its own board since 27 Nov 2026), moved from Thu 5 Nov 2026 to the
 e2e upload's day, Tue 17 Nov 2026. Every date column moves by the same 12 days, so the rules see the same gaps
 between request, booking and operation, with one exception: 900007, "Appendectomy (on call)", is keyed in on its
 operation day rather than the day before, so its "on call" still drops it (Pong, 18 Nov 2026: "If it is booked in

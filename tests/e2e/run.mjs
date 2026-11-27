@@ -1395,9 +1395,14 @@ async function main() {
         assert((await page.locator(`[data-testid="${id}"]`).count()) === 0, `nothing of รพ.สมุทรสาคร's: ${id}`);
       }
       // รพ.สมุทรสาคร's notice strip above the plan (Pong, 27 Nov 2026: "No booking button and notification bar on
-      // ท่าฉลอม"), empty: its one notice (no HOSxP list yet) means nothing here
+      // ท่าฉลอม"), with its notices too since the HOSxP file fills this board (Pong, 27 Nov 2026: "Excel file include
+      // both place on one sheet"): no file for the day yet
       assert((await page.locator('[data-testid="notice-strip"]').count()) === 1, "the notice strip");
-      assert((await page.locator("[data-notice-id]").count()) === 0, "with no notices");
+      assert(
+        JSON.stringify(await page.$$eval("[data-notice-id]", (els) => els.map((el) => el.dataset.noticeId))) === JSON.stringify(["no-upload"]),
+        `ท่าฉลอม's notices: ${JSON.stringify(await page.$$eval("[data-notice-id]", (els) => els.map((el) => el.dataset.noticeId)))}`,
+      );
+      assert((await plainText(page, '[data-testid="no-upload-alert"]')).startsWith("ยังไม่มีตาราง HOSxP ของ "), "no HOSxP list for the day yet");
       const tcMenu = await menuLinks();
       assert(JSON.stringify(tcMenu) === JSON.stringify(skhMenu), `the same account menu: ${JSON.stringify(tcMenu)} / ${JSON.stringify(skhMenu)}`);
       // the logo goes to ท่าฉลอม's own day, as รพ.สมุทรสาคร's goes to its board
@@ -2158,14 +2163,25 @@ async function main() {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${APP}/skh?notices=all`, { waitUntil: "networkidle" });
       const kinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      // since 16 Nov 2026 the only kind is ยังไม่มีตาราง HOSxP (Pong: no วันหยุด, โหลดไม่สำเร็จ or ไม่ตรง badges)
-      assert(JSON.stringify(kinds) === JSON.stringify(["no-upload"]), `every notice: ${JSON.stringify(kinds)}`);
+      // since 16 Nov 2026 ยังไม่มีตาราง HOSxP (Pong: no วันหยุด, โหลดไม่สำเร็จ or ไม่ตรง badges), since 27 Nov 2026 the
+      // cases no room takes too ("Leave off board and display on noti bar for both places"), with made-up counts
+      assert(JSON.stringify(kinds) === JSON.stringify(["no-upload", "no-room"]), `every notice: ${JSON.stringify(kinds)}`);
+      assert((await plainText(page, '[data-testid="no-room-alert"] .notice-badge-text')) === "ไม่มีห้อง 3 เคส", `the no-room badge, short beside the other: ${await plainText(page, '[data-testid="no-room-alert"]')}`);
+      assert((await page.locator('[data-testid="no-room-alert"] svg[data-icon="no-room"]').count()) === 1, "the no-room badge's icon");
       await noSideScroll(page, "the test notices at 390px");
-      for (const [file, open] of [["board-test-notices.png", null], ["board-test-notices-open.png", "no-upload"]]) {
+      for (const [file, open] of [["board-test-notices.png", null], ["board-test-notices-open.png", "no-upload"], ["board-test-notices-no-room.png", "no-room"]]) {
         if (open) {
+          if (await page.isVisible('[data-testid="notice-bubble"]')) {
+            await page.keyboard.press("Escape");
+            await page.locator('[data-testid="notice-bubble"]').waitFor({ state: "detached" });
+          }
           await page.click(`[data-notice-id="${open}"]`);
           await page.waitForSelector('[data-testid="notice-bubble"]');
           await page.waitForTimeout(400);
+        }
+        if (open === "no-room") {
+          const bubble = await plainText(page, '[data-testid="notice-bubble"]');
+          assert(bubble.includes("3 เคสไม่มีห้องผ่าตัด") && bubble.includes("ศัลยกรรมหลอดเลือด 2 เคส · ไม่ทราบสาขา 1 เคส"), `the no-room bubble: ${bubble}`);
         }
         await page.screenshot({ path: join(SCREENS, file) });
         shots.push(file);
@@ -3837,18 +3853,32 @@ async function main() {
       await page.click('[data-testid="upload-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"] [role="status"]'));
       assert(
-        (await result()) === "บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว ลงห้อง 8 จาก 8 เคส · ขึ้นกระดานเวลา 16:00 น.",
+        (await result()) === "บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว ลงห้อง 8 จาก 8 เคส · ท่าฉลอม 1 จาก 1 · ขึ้นกระดานเวลา 16:00 น.",
         `saved: ${await result()}`,
       );
       await page.waitForSelector('[data-testid="upload-matching"]');
       assert((await textOf(page, '[data-testid="upload-latest"] h2 + p')) === `15:20 น. · ${RP.mx.name}`, "when and by whom");
       const stats = await page.$$eval('[data-testid="upload-latest"] dd', (els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
-      // 4 HOSxP cases nobody booked (not the 2 dressings: nobody need book the dressing room) and 1 booking HOSxP lacks.
-      // Of the 9 kept only Tha Chalom's case is cut: the vascular case goes to the mixed room OR 11 (Pong, 18 Nov 2026:
-      // "Vas stay on others room if not emer").
-      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "8 เคส", "5 รายการ"]), `counts: ${JSON.stringify(stats)}`);
+      // All 9 kept go to a room: 8 at รพ.สมุทรสาคร, the vascular case in the mixed room OR 11 (Pong, 18 Nov 2026: "Vas stay
+      // on others room if not emer"), and รพ.ท่าฉลอม's in its general surgery room, OR 1 on a Tuesday (Pong, 27 Nov 2026:
+      // "Excel file include both place on one sheet"). 5 HOSxP cases nobody booked (not the 2 dressings: nobody need book
+      // the dressing room), รพ.ท่าฉลอม's among them, and 1 booking HOSxP lacks.
+      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "9 เคส", "6 รายการ"]), `counts: ${JSON.stringify(stats)}`);
       const latest = await textOf(page, '[data-testid="upload-latest"]');
-      for (const line of ["ยกเลิกการผ่าตัด", "เคสของ รพ.นครท่าฉลอม", "OR 12 · GENSX", "ID ซ้ำ นับครั้งเดียว"]) assert(latest.includes(line), `summary shows ${line}`);
+      for (const line of ["ยกเลิกการผ่าตัด", "OR 12 · GENSX", "ID ซ้ำ นับครั้งเดียว"]) assert(latest.includes(line), `summary shows ${line}`);
+      assert(!latest.includes("เคสของ รพ.นครท่าฉลอม"), "รพ.ท่าฉลอม's case is no longer left off");
+      // each hospital's part: รพ.สมุทรสาคร's, then รพ.ท่าฉลอม's, with its room and the case nobody booked there
+      assert(
+        JSON.stringify(await page.$$eval('[data-testid^="upload-hospital"] > h3', (els) => els.map((el) => el.textContent.trim()))) ===
+          JSON.stringify(["รพ.สมุทรสาคร", "รพ.ท่าฉลอม"]),
+        "a part for each hospital",
+      );
+      const tcPart = await textOf(page, '[data-testid="upload-hospital-tc"]');
+      assert(tcPart.includes("OR 1 · GENSX") && !tcPart.includes("OR 12"), `รพ.ท่าฉลอม's rooms: ${tcPart}`);
+      assert((await textOf(page, '[data-testid="upload-matching-tc"]')) === "แพทย์จองไว้ 0 รายการ · ตรงกัน 0 รายการ", `ท่าฉลอม's matching: ${await textOf(page, '[data-testid="upload-matching-tc"]')}`);
+      const tcUnbooked = await page.$$eval('[data-testid="upload-unbooked-tc"] li', (els) => els.map((el) => el.textContent));
+      assert(tcUnbooked.length === 1 && tcUnbooked[0].includes("HN 7000012") && tcUnbooked[0].includes("OR 1"), `ท่าฉลอม's case nobody booked: ${JSON.stringify(tcUnbooked)}`);
+      assert((await page.locator('[data-testid="upload-not-in-hosxp-tc"]').count()) === 0, "no ท่าฉลอม booking HOSxP lacks");
       assert((await textOf(page, '[data-testid="upload-matching"]')) === "แพทย์จองไว้ 3 รายการ · ตรงกัน 2 รายการ", `matching: ${await textOf(page, '[data-testid="upload-matching"]')}`);
       assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 4, "four HOSxP cases nobody booked, outside the dressing room");
       const missing = await textOf(page, '[data-testid="upload-not-in-hosxp"]');
@@ -3864,7 +3894,11 @@ async function main() {
       const cases = (
         await db.query("SELECT (to_jsonb(w) - 'patient_name')::text AS j, patient_name, hn, room_id FROM workbook_cases w WHERE upload_id = $1 ORDER BY position", [up[0].id])
       ).rows;
-      assert(cases.length === 8 && cases.some((c) => c.hn === "7000015" && c.room_id === "or-12"), `stored cases: ${cases.length}`);
+      assert(cases.length === 9 && cases.some((c) => c.hn === "7000015" && c.room_id === "or-12"), `stored cases: ${cases.length}`);
+      // each with its hospital: รพ.ท่าฉลอม's one in its own OR 1, numbered from 1 there
+      const byPlace = (await db.query("SELECT place, room_id, position, hn FROM workbook_cases WHERE upload_id = $1 AND place = 'tha-chalom'", [up[0].id])).rows;
+      assert(JSON.stringify(byPlace) === JSON.stringify([{ place: "tha-chalom", room_id: "or-1", position: 1, hn: "7000012" }]), `ท่าฉลอม's stored case: ${JSON.stringify(byPlace)}`);
+      assert((await db.query("SELECT tha_chalom FROM workbook_uploads WHERE id = $1", [up[0].id])).rows[0].tha_chalom === true, "the upload holds ท่าฉลอม's list");
       // The name (Pong, 16 Nov 2026: "Add patient name line above HN") in its own column, the made-up one from the file.
       assert(cases.every((c) => /^ตัวอย่าง ผู้ป่วย\d+$/.test(c.patient_name ?? "")), "each case keeps the patient's name");
       assert(cases.every((c) => !/ผู้ป่วย|ประกัน|690000|ปี \d/.test(c.j)), "no other patient field (age, AN, cover) stored");
@@ -4075,6 +4109,27 @@ async function main() {
       assert(patients(html.mx).size >= 7, `MX sees the patients' names: ${[...patients(html.mx)]}`);
       assert(patients(html.nurse).size === 0, "no patient's name in the nurse's page");
       assert(patients(html.drX).size === 1 && patients(html.drY).size === 1, `each doctor sees only their own patient's name: ${[...patients(html.drX)]} ${[...patients(html.drY)]}`);
+      assert(!html.mx.includes("7000012"), "รพ.ท่าฉลอม's case is not on รพ.สมุทรสาคร's board");
+
+      // รพ.ท่าฉลอม's board from the same file (Pong, 27 Nov 2026: "Excel file include both place on one sheet"): on Tuesday
+      // too, its general surgery case nobody booked in OR 1 with the database icon, the amber mark on the plan, no notice
+      // now that the file is in; the HN for MX, none for a nurse
+      await page.goto(`${APP}/tha-chalom?room=or-1`, { waitUntil: "networkidle" });
+      await page.waitForSelector(".room-sheet.is-open .case-row");
+      assert((await page.getAttribute("header time", "datetime")) === "2026-11-17", "ท่าฉลอม's board on Tuesday too");
+      assert(JSON.stringify(await sheetRows(page)) === JSON.stringify([["hosxp", "unbooked", "HN 7000012"]]), `ท่าฉลอม's OR 1: ${JSON.stringify(await sheetRows(page))}`);
+      assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["hosxp"]), `ท่าฉลอม's icons: ${JSON.stringify(await rowIcons(page))}`);
+      assert((await page.locator("[data-notice-id]").count()) === 0, "uploaded: no notice at ท่าฉลอม");
+      assert((await page.locator('.tcp-or[data-room="or-1"] [data-testid="tcp-mismatch"]').count()) === 1, "OR 1's mismatch mark on the plan");
+      assert((await page.locator('[data-testid="tcp-mismatch"]').count()) === 1, "and no other room's");
+      assert(((await page.getAttribute('.tcp-or[data-room="or-1"] .tcp-or-shape', "aria-label")) ?? "").includes("ข้อมูลไม่ตรงกับการจอง"), "the mark said aloud");
+      await ownerShot(page, "tha-chalom-room-after-upload.png");
+      await page.goto(`${APP}/tha-chalom`, { waitUntil: "networkidle" });
+      await ownerShot(page, "tha-chalom-after-upload.png");
+      const tcMx = (await htmlAs(RP.mx, "/tha-chalom?room=or-1")).html;
+      const tcNurse = (await htmlAs(RP.nurse, "/tha-chalom?room=or-1")).html;
+      assert(tcMx.includes("7000012") && !tcNurse.includes("7000012"), "ท่าฉลอม's HN for MX, not for a nurse");
+      assert(!tcMx.includes("7000015"), "nothing of รพ.สมุทรสาคร's on ท่าฉลอม's board");
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       await ctx.close();
       rmSync(NOW_FILE, { force: true });
@@ -5066,7 +5121,7 @@ async function main() {
       // with the test notices too, the demo's badge stays first
       await page.goto(`${APP}/skh?demo=1&notices=all`, { waitUntil: "networkidle" });
       const both = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      assert(JSON.stringify(both) === JSON.stringify(["demo", "no-upload"]), `the demo with every notice: ${JSON.stringify(both)}`);
+      assert(JSON.stringify(both) === JSON.stringify(["demo", "no-upload", "no-room"]), `the demo with every notice: ${JSON.stringify(both)}`);
 
       // ครึ่งหลัง: its first workday, Wednesday 27 Jan 2027, by its address
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
