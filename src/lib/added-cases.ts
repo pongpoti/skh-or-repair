@@ -128,7 +128,7 @@ export function daySlots(day: readonly AddedCase[], periods: RepairPeriods, view
   }));
 }
 
-/** A booking's time, or null for one made before the form asked. */
+/** A booking's time, or null for one without (the doctor left ระบุเวลา off, or booked before the form asked). */
 export function timeOf(booking: Pick<CaseInput, "start" | "end">): TimeRange | null {
   return booking.start !== null && booking.end !== null ? { start: booking.start, end: booking.end } : null;
 }

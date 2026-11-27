@@ -46,7 +46,7 @@ import {
   type DaySlot,
   type RoomChoice,
 } from "@/lib/added-cases";
-import { busyTimes, isFree, lengthText, rangeText, TIME_MISSING_TEXT, TIME_TAKEN_TEXT, type TimeRange } from "@/lib/booking-time";
+import { isFree, lengthText, rangeText, type RoomTimes, TIME_MISSING_TEXT, TIME_TAKEN_TEXT, type TimeRange } from "@/lib/booking-time";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate } from "@/lib/days";
 import { displayHn, normalizeHn } from "@/lib/hn";
@@ -260,15 +260,25 @@ export function AddCase({
     if (locked && !prevLocked && editing) {
       const picked = bookedChoice(editing, periods);
       const own = editing.hn ? displayHn(editing.hn) : "";
-      const typed = normalizeHn(hn) !== normalizeHn(own) || operation.trim() !== editing.operation || choice !== picked;
+      const ownTime = timeOf(editing);
+      const typed =
+        normalizeHn(hn) !== normalizeHn(own) ||
+        operation.trim() !== editing.operation ||
+        choice !== picked ||
+        time?.start !== ownTime?.start ||
+        time?.end !== ownTime?.end;
       setHn(own);
       setOperation(editing.operation);
       setChoice(picked);
       setScrubDoes(picked === "dressing" && typeof editing.scrubDoes === "boolean" ? editing.scrubDoes : null);
+      // The time too, and the switch with it: both are locked now, so a time turned off or moved could not be put back.
+      setTime(ownTime);
+      setTimed(ownTime !== null);
+      setTimeKept(null);
       if (typed && prevLockFirst !== first) {
         setAbout("save");
         setInvalid(null);
-        setError(`${NOTE_ONLY_TEXT} HN การผ่าตัด และห้องกลับเป็นแบบเดิม`);
+        setError(`${NOTE_ONLY_TEXT} HN การผ่าตัด ห้อง และเวลากลับเป็นแบบเดิม`);
         setDone("");
       }
     }
@@ -574,7 +584,7 @@ export function AddCase({
       return;
     }
     // Turned on, the time is wanted.
-    if (timed && !time && !locked) {
+    if (timed && !time && timeOpen) {
       refuse(TIME_MISSING_TEXT, "time");
       return;
     }
@@ -659,17 +669,18 @@ export function AddCase({
   const loading = !read || read.version !== version;
   const slots = read?.slots ?? [];
   const selfId = mode === "edit" && editing ? editing.id : null;
-  const busy = busyTimes(
-    shownRooms.map((roomId) =>
-      slots
-        .filter((slot) => slot.roomId === roomId && slot.id !== selfId)
-        .map(timeOf)
-        .filter((item): item is TimeRange => item !== null),
-    ),
+  const busy: RoomTimes = shownRooms.map((roomId) =>
+    slots
+      .filter((slot) => slot.roomId === roomId && slot.id !== selfId)
+      .map(timeOf)
+      .filter((item): item is TimeRange => item !== null),
   );
   const timeFree = time === null || isFree(time, busy);
   // A time another booking has (kept from another day, or taken meanwhile) shows as taken until another is picked.
   const clash = !loading && !locked && !timeFree;
+  // Whether a time can be given at all: not on a closed day, nor at รพ.ท่าฉลอม on a day without the department's room
+  // (it lends none, and has no dressing room to fall back on).
+  const timeOpen = !locked && !(tc && !room.ok);
   const shownName = room.ok ? (shownRooms.length > 1 ? shownRooms.map(label).join(" / ") : label(room.roomId)) : "";
   const prevDay = dayStep(-1);
   const nextDay = dayStep(1);
@@ -865,7 +876,7 @@ export function AddCase({
                 role="switch"
                 aria-checked={timed}
                 className="time-toggle"
-                disabled={locked || (tc && !room.ok)}
+                disabled={!timeOpen}
                 onClick={() => giveTime(!timed)}
                 data-testid="case-time-toggle"
               >
@@ -888,8 +899,7 @@ export function AddCase({
                   setTime(next);
                   edited("time");
                 }}
-                // รพ.ท่าฉลอม has no dressing room to fall back on: a day without the department's room has no time to pick.
-                readOnly={locked || (tc && !room.ok)}
+                readOnly={!timeOpen}
                 clash={clash}
                 invalid={invalid === "time"}
                 describedBy={describe("time")}
@@ -1152,7 +1162,7 @@ export function AddCase({
                       <span className="font-bold text-ink">{rangeText(time)} น.</span>{" "}
                       <span className="whitespace-nowrap text-muted">{lengthText(time)}</span>
                     </>
-                  ) : timed && !locked ? (
+                  ) : timed && timeOpen ? (
                     <span className="text-muted">เลือกเวลาที่ต้องการ</span>
                   ) : (
                     <span className="text-muted">ไม่ระบุเวลา</span>

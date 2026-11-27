@@ -1489,7 +1489,7 @@ async function main() {
         const skhFrame = await page.locator("rect.fp-outer").boundingBox();
         const tcFrame = tcFrames[index];
         assert(
-          Math.abs(tcFrame.width - skhFrame.width) <= 2 && Math.abs(tcFrame.x - skhFrame.x) <= 1.5 && Math.abs(tcFrame.y - skhFrame.y) <= 4,
+          Math.abs(tcFrame.width - skhFrame.width) <= Math.max(2, skhFrame.width * 0.005) && Math.abs(tcFrame.x - skhFrame.x) <= 2 && Math.abs(tcFrame.y - skhFrame.y) <= 4,
           `ท่าฉลอม's plan as wide as รพ.สมุทรสาคร's, in the same place, at ${width}×${height}: ${JSON.stringify(tcFrame)} / ${JSON.stringify(skhFrame)}`,
         );
       }

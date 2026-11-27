@@ -3,15 +3,16 @@
 import { useRef, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { DaySlot } from "@/lib/added-cases";
 import {
-  busyTimes,
   clockText,
   DAY_END,
   DAY_START,
+  DEFAULT_LENGTH,
   dragTime,
   endChoices,
   lanes,
   lengthText,
   rangeText,
+  type RoomTimes,
   startAt,
   startChoices,
   tapTime,
@@ -35,12 +36,13 @@ type Drag = { edge: "start" | "end" | "move"; y: number; from: TimeRange; moved:
 /**
  * The booking form's day view (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar (just
  * like in google calendar app) then show form input"): the day from 08:30 to 15:30 in half hours, the bookings already
- * in the room (`rooms`: one room, or a department's rooms that day, where a time is taken only when all of them are),
+ * in the room (`rooms`: one room, or a department's rooms that day, where a time is free when one of them has all of it free),
  * and the doctor's time: a tap on a free half hour gives an hour from there (cut short by the next booking or 15:30),
  * and its handles, or the time itself, drag in 15-minute steps, never over a booking (Pong, 27 Nov 2026: "No, a booked
  * time is taken"). The arrow keys move a handle, or the time, by 15 minutes. Above it, เริ่ม and ถึง lists in 15-minute
  * steps set the same time without dragging (Pong, 27 Nov 2026: "it is hard to expand time range (hard to click and to
- * select)"), a taken one disabled. `selfId` is an edit's own booking, left out. `readOnly`: a closed day's booking, whose
+ * select)"), a taken one disabled; a new start keeps the length last given, so stepping through the starts with the
+ * arrow keys past a booking does not shorten it for good. `selfId` is an edit's own booking, left out. `readOnly`: a closed day's booking, whose
  * time cannot change.
  */
 export function DayView({
@@ -71,9 +73,21 @@ export function DayView({
   const inRooms = slots.filter((slot) => rooms.includes(slot.roomId) && slot.id !== selfId);
   const timed = inRooms.filter((slot): slot is DaySlot & TimeRange => slot.start !== null && slot.end !== null);
   const untimed = inRooms.length - timed.length;
-  const busy = busyTimes(rooms.map((room) => timed.filter((slot) => slot.roomId === room)));
+  const busy: RoomTimes = rooms.map((room) => timed.filter((slot) => slot.roomId === room));
   const several = rooms.length > 1;
   const drag = useRef<Drag | null>(null);
+  // The length a new start keeps: the time's length before a run of start picks, so stepping through the starts with the
+  // arrow keys past a booking does not leave it cut short. A tap, a drag or the ถึง list starts afresh.
+  const wanted = useRef<number | null>(null);
+  const give = (next: TimeRange | null) => {
+    wanted.current = null;
+    onChange(next);
+  };
+  function pickStart(start: number) {
+    const length = value ? (wanted.current ?? value.end - value.start) : DEFAULT_LENGTH;
+    wanted.current = length;
+    onChange(startAt(value, start, busy, length));
+  }
 
   function begin(edge: Drag["edge"], event: ReactPointerEvent<HTMLElement>) {
     if (!value || readOnly || event.button !== 0) return;
@@ -88,7 +102,7 @@ export function DayView({
     const delta = (event.clientY - now.y) / PER_MINUTE;
     if (Math.abs(delta) >= TIME_STEP / 2) now.moved = true;
     const next = dragTime(now.from, now.edge, delta, busy);
-    if (!value || next.start !== value.start || next.end !== value.end) onChange(next);
+    if (!value || next.start !== value.start || next.end !== value.end) give(next);
   }
   function end(event: ReactPointerEvent<HTMLElement>) {
     if (!drag.current) return;
@@ -100,7 +114,7 @@ export function DayView({
     const step = event.key === "ArrowUp" ? -TIME_STEP : event.key === "ArrowDown" ? TIME_STEP : 0;
     if (!step) return;
     event.preventDefault();
-    onChange(dragTime(value, edge, step, busy));
+    give(dragTime(value, edge, step, busy));
   }
 
   const label = (roomId: string) => {
@@ -118,7 +132,7 @@ export function DayView({
               className="field tabular-nums"
               value={value?.start ?? ""}
               disabled={loading}
-              onChange={(event) => onChange(startAt(value, Number(event.target.value), busy))}
+              onChange={(event) => pickStart(Number(event.target.value))}
               aria-invalid={invalid || undefined}
               aria-describedby={describedBy}
               data-testid="day-start"
@@ -142,8 +156,9 @@ export function DayView({
               className="field tabular-nums"
               value={value?.end ?? ""}
               disabled={loading || !value}
-              onChange={(event) => value && onChange({ start: value.start, end: Number(event.target.value) })}
+              onChange={(event) => value && give({ start: value.start, end: Number(event.target.value) })}
               aria-invalid={invalid || undefined}
+              aria-describedby={describedBy}
               data-testid="day-end"
             >
               {value ? (
@@ -153,6 +168,7 @@ export function DayView({
                   .map((choice) => (
                     <option key={choice.minute} value={choice.minute} disabled={!choice.free}>
                       {clockText(choice.minute)} ({lengthText({ start: value.start, end: choice.minute })})
+                      {choice.free ? "" : " จองแล้ว"}
                     </option>
                   ))
               ) : (
@@ -193,7 +209,7 @@ export function DayView({
                   type="button"
                   className="day-slot-button"
                   disabled={readOnly || loading || free === null}
-                  onClick={() => onChange(free)}
+                  onClick={() => give(free)}
                   aria-label={free ? `เลือก ${rangeText(free)}` : `${clockText(start)} มีการจองแล้ว`}
                   data-testid="day-slot"
                   data-time={start}

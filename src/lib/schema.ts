@@ -281,9 +281,9 @@ CREATE INDEX IF NOT EXISTS cases_day_queue_idx ON cases (op_date, queued_at) WHE
 
 -- The booking's time on its day (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar"):
 -- start_min and end_min are minutes after midnight, Thailand time, on 15-minute steps from 08:30 (510) to 15:30 (930),
--- the end after the start (lib/booking-time.ts). Both NULL for a booking made before the form asked. Two bookings in one
--- room never share a minute (app/(board)/actions.ts checks it under an advisory lock on the day). Applied to existing
--- databases too.
+-- the end after the start (lib/booking-time.ts). Both NULL for a booking without a time (the form's ระบุเวลา switch is
+-- off by default, Pong 27 Nov 2026), or one made before the form asked. Two timed bookings in one room never share a
+-- minute (app/(board)/actions.ts checks it under an advisory lock on the day). Applied to existing databases too.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'start_min' AND NOT attisdropped) THEN
