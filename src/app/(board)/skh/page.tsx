@@ -54,6 +54,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
       uploaded: built.uploaded,
       mismatchCount: built.mismatchCount,
       mismatchByRoom: built.mismatchByRoom,
+      offBoard: built.offBoard,
     };
     let adding: CaseAdding | null = null;
     let tutorialDue = false;
@@ -125,8 +126,9 @@ async function simBoard(day: BoardDay, periods: RepairPeriods): Promise<{ board:
       uploaded: built.uploaded,
       mismatchCount: built.mismatchCount,
       mismatchByRoom: built.mismatchByRoom,
+      offBoard: built.offBoard,
     };
-    return { board, notices: [SIM_NOTICE, ...boardNotices({ missingUpload: cases ? null : day.boardDate })] };
+    return { board, notices: [SIM_NOTICE, ...boardNotices({ missingUpload: cases ? null : day.boardDate, offBoard: built.offBoard })] };
   } catch (error) {
     console.error("[board] simulated bookings unavailable:", (error as Error).message);
     return null;

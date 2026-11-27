@@ -15,7 +15,7 @@ import { RoomPill, type RoomPillPart } from "@/components/room-pill";
 import type { AddedCase } from "@/lib/added-cases";
 import { boardNotices, type BoardNotice } from "@/lib/board-notices";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
-import { missingUploadDay, type BoardRow, type BoardRows } from "@/lib/board-rows";
+import { missingUploadDay, type BoardRow, type BoardRows, type OffBoardCount } from "@/lib/board-rows";
 import { boardHref, thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import { BOARD_PATH } from "@/lib/places";
@@ -34,7 +34,18 @@ export type BoardView = Pick<BoardRows, "uploaded" | "mismatchCount" | "mismatch
   /** The board's date, YYYY-MM-DD: today until 16:00, then the next workday (lib/board-day.ts), or the day picked. */
   date: string;
   rows: readonly BoardRow[];
+  /** The HOSxP cases no room takes that day, for the strip's notice (BoardRows.offBoard); none when left out. */
+  offBoard?: readonly OffBoardCount[];
 };
+
+const NO_OFF_BOARD: readonly OffBoardCount[] = [];
+
+/** The board's own notices (lib/board-notices.ts): no HOSxP list yet, and the HOSxP cases no room takes that day. */
+export function useBoardNotices(board: Pick<BoardView, "date" | "uploaded" | "offBoard"> | null, casesUnavailable: boolean): readonly BoardNotice[] {
+  const missingUpload = missingUploadDay(board, casesUnavailable);
+  const offBoard = board?.offBoard ?? NO_OFF_BOARD;
+  return useMemo(() => boardNotices({ missingUpload, offBoard }), [missingUpload, offBoard]);
+}
 
 /** A room's rows in their order. */
 function rowsOf(rows: readonly BoardRow[], roomId: string): BoardRow[] {
@@ -161,14 +172,7 @@ function RoomOverview({
                 {/* The warning sits right after the badge, as in the samples. */}
                 <span className="flex min-w-0 flex-1 items-center gap-2.5">
                   <RoomPillFor room={room} allocation={allocation} />
-                  {mismatch ? (
-                    <span className="shrink-0 text-late" title="ข้อมูลไม่ตรงกับการจอง">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01" />
-                      </svg>
-                      <span className="sr-only">ข้อมูลไม่ตรงกับการจอง</span>
-                    </span>
-                  ) : null}
+                  {mismatch ? <MismatchWarning /> : null}
                 </span>
                 <span className={`shrink-0 text-sm tabular-nums ${count ? "font-semibold text-ink-2" : "text-muted"}`}>
                   {count ? `${count} รายการ` : "ไม่มีรายการ"}
@@ -179,6 +183,18 @@ function RoomOverview({
         })}
       </ul>
     </div>
+  );
+}
+
+/** The open-room list's warning for a room with HOSxP cases nobody booked (both hospitals' lists). */
+export function MismatchWarning() {
+  return (
+    <span className="shrink-0 text-late" title="ข้อมูลไม่ตรงกับการจอง">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01" />
+      </svg>
+      <span className="sr-only">ข้อมูลไม่ตรงกับการจอง</span>
+    </span>
   );
 }
 
@@ -377,8 +393,7 @@ export function SuiteBoard({
   if (!adding && addRequest) setAddRequest(null);
 
   const operations = board?.rows ?? NONE;
-  const missingUpload = missingUploadDay(board, casesUnavailable);
-  const ownNotices = useMemo(() => boardNotices({ missingUpload }), [missingUpload]);
+  const ownNotices = useBoardNotices(board, casesUnavailable);
   const notices = givenNotices ?? ownNotices;
   // A notice can go while its bubble is open (the 16:00 refresh, an upload): forget it, so its bubble does not open
   // again by itself when the notice comes back, and the next Escape is not spent on it.

@@ -7,11 +7,22 @@ import { NoTableIcon } from "@/components/no-table-icon";
 
 /**
  * The icons are Lucide's (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): database (in
- * NoTableIcon), flask-conical, chevron-down and x.
+ * NoTableIcon), flask-conical, door-closed, chevron-down and x.
  */
-function Glyph({ size = 16, children }: { size?: number; children: ReactNode }) {
+function Glyph({ size = 16, name, children }: { size?: number; name?: string; children: ReactNode }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      data-icon={name}
+    >
       {children}
     </svg>
   );
@@ -19,6 +30,15 @@ function Glyph({ size = 16, children }: { size?: number; children: ReactNode }) 
 
 function NoticeGlyph({ icon, size = 16 }: { icon: NoticeIcon; size?: number }) {
   if (icon === "no-table") return <NoTableIcon size={size} />;
+  if (icon === "no-room") {
+    return (
+      <Glyph size={size} name="no-room">
+        <path d="M18 20V6a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v14" />
+        <path d="M2 20h20" />
+        <path d="M14 12v.01" />
+      </Glyph>
+    );
+  }
   return (
     <Glyph size={size}>
       <path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2" />

@@ -19,9 +19,30 @@ test("the one notice (Pong, 16 Nov 2026): no HOSxP table yet, with the database-
   assert.ok(noUpload.detail.includes("15:00–16:00"), "the bubble says when MX uploads");
 });
 
-test("test mode's every notice is that one badge: no holiday, load failure or mismatch badges", () => {
+test("test mode's every notice is the two badges: no holiday, load failure or mismatch badges", () => {
   const ids = everyNotice("2026-11-16").map((notice) => notice.id);
-  assert.deepEqual(ids, ["no-upload"]);
+  assert.deepEqual(ids, ["no-upload", "no-room"]);
+});
+
+// Pong, 27 Nov 2026: "Leave off board and display on noti bar for both places".
+test("the no-room notice: the HOSxP cases no room takes that day, per department, with a closed door", () => {
+  assert.deepEqual(boardNotices({ missingUpload: null, offBoard: [] }), [], "none to count, no notice");
+  const notices = boardNotices({
+    missingUpload: null,
+    offBoard: [
+      { dept: "VASCULAR", count: 2 },
+      { dept: null, count: 1 },
+    ],
+  });
+  assert.equal(notices.length, 1);
+  const [noRoom] = notices;
+  assert.deepEqual(
+    [noRoom.id, noRoom.tone, noRoom.icon, noRoom.testId, noRoom.text, noRoom.short],
+    ["no-room", "alert", "no-room", "no-room-alert", "3 เคสไม่มีห้องผ่าตัด", "ไม่มีห้อง 3 เคส"],
+  );
+  assert.equal(noRoom.detail, "ไม่ได้ลงกระดาน เพราะสาขาไม่มีห้องในวันนั้น: ศัลยกรรมหลอดเลือด 2 เคส · ไม่ทราบสาขา 1 เคส");
+  // Counts and departments only: no patient, no surgeon.
+  assert.doesNotMatch(JSON.stringify(noRoom), /HN|\d{6,}/);
 });
 
 test("a badge says the whole message alone and its short form with others (the demo's)", () => {

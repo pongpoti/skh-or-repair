@@ -2169,6 +2169,9 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 .tcp-grid-box { fill: url(#tcp-grid); stroke: var(--fp-detail); stroke-width: 1.5; }
 /* An OR takes the day's department colour (--tcp-fill) when the page has a day; Pong's brown otherwise. */
 .tcp-or-shape { fill: var(--tcp-fill, var(--brand-top)); stroke: var(--fp-wall); stroke-width: 3; }
+/* รพ.สมุทรสาคร's "!" mark (.fp-mark-mismatch) at this plan's scale: its 5 stroke and 26px text divided by 1.534. */
+.tcp-mismatch .fp-mark { stroke-width: 3.3; }
+.tcp-mismatch .fp-mismatch-text { font-size: 17px; }
 .tcp-or-ring { fill: #fff; }
 .tcp-or.is-open .tcp-or-ring,
 .tcp-or.is-free .tcp-or-ring { stroke: var(--fp-wall); stroke-width: 1.6; }

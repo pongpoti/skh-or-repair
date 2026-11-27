@@ -2,6 +2,7 @@ import { addDays } from "./days.ts";
 import { DEPARTMENTS, weekdayIndex, weekOfMonth, type Department, type DeptCode, type RoomAllocation } from "./allocation.ts";
 import { PICK_AHEAD_DAYS } from "./board-day.ts";
 import { isWorkday, type Holiday } from "./holidays.ts";
+import type { PlaceableCase, Placement } from "./placement.ts";
 
 /**
  * รพ.ท่าฉลอม's weekly OR schedule, as Pong sent it on 26 Nov 2026 (the hospital's table "ข้อมูลการจัดตารางล่าสุด ณ วันที่
@@ -177,4 +178,34 @@ export function thaChalomPickedDay(value: unknown, today: string, holidays: read
   const { min, max } = thaChalomPickRange(today);
   if (value < min || value > max) return null;
   return isWorkday(value, holidays) ? value : null;
+}
+
+/**
+ * Where รพ.ท่าฉลอม's HOSxP cases go on `date` (Pong, 27 Nov 2026: "Excel file include both place on one sheet", MX's
+ * upload holds both hospitals' cases): each in the room the table gives its department that day (thaChalomBookingRoom,
+ * the room its doctors book), the surgeon's own department by name as at รพ.สมุทรสาคร (lib/workbook-store.ts toCase), a
+ * case coded SCOPE as a general surgeon's. A department with no room that day has none, and a case with no department
+ * none either: the board leaves them off and its notice counts them (Pong, 27 Nov 2026: "Leave off board and display on
+ * noti bar for both places"). No ว่าง room is lent, and there is no dressing or emergency room (the upload keeps only
+ * in-hours elective cases). A department has one room a day here, so a booking's room adds nothing.
+ */
+export function placeThaChalom(cases: readonly Pick<PlaceableCase, "dept">[], date: string): Placement[] {
+  return cases.map((item): Placement => {
+    const dept = item.dept === "SCOPE" ? "GENSX" : item.dept;
+    if (!dept) return { ok: false, reason: "no-department" };
+    const roomId = thaChalomBookingRoom(dept, date);
+    return roomId ? { ok: true, roomId } : { ok: false, reason: "no-room" };
+  });
+}
+
+/** The day's rooms that take cases (openRooms), by id. */
+export function thaChalomOpenIds(date: string): Set<string> {
+  return new Set(openRooms(thaChalomDay(date)).map((entry) => entry.room.id));
+}
+
+/** A room's department code on `date`, as the upload summary labels it ("EYE", or "EYE/ENT" for OR 4 on a Wednesday). */
+export function thaChalomRoomDept(roomId: string, date: string): string | null {
+  const allocation = thaChalomAllocation(roomId, date);
+  if (!allocation?.am) return allocation?.pm?.label ?? null;
+  return allocation.split && allocation.pm ? `${allocation.am.label}/${allocation.pm.label}` : allocation.am.label;
 }

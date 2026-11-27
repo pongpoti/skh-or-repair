@@ -1,11 +1,13 @@
 import { NO_OPERATION_LABEL, type AddedCase } from "./added-cases.ts";
 import { allocationFor } from "./allocation.ts";
 import { UPLOAD_CLOSES_MINUTES, UPLOAD_OPENS_MINUTES } from "./board-day.ts";
-import { buildBoardRows, withBookedChoices, type WorkbookCase } from "./board-rows.ts";
+import { boardPlacements, buildBoardRows, buildThaChalomRows, thaChalomBoardPlacements, type WorkbookCase } from "./board-rows.ts";
 import { bangkokParts } from "./days.ts";
-import { placeAll, UNPLACED_TEXT, type UnplacedReason } from "./placement.ts";
+import type { PlaceId } from "./places.ts";
+import { UNPLACED_TEXT, type Placement, type UnplacedReason } from "./placement.ts";
 import { repairOn, type RepairPeriods } from "./repair.ts";
 import { getRoom, roomLabel, ROOMS } from "./rooms.ts";
+import { THA_CHALOM_ROOM_LIST, thaChalomRoom, thaChalomRoomDept } from "./tha-chalom-schedule.ts";
 import type { PlacedCase } from "./workbook-store.ts";
 import {
   CUT_REASONS,
@@ -21,9 +23,10 @@ import { readXlsx, type XlsxCell } from "./xlsx.ts";
 
 /**
  * MX's upload, from the file's bytes to the cases the board stores, with nothing but arguments: read the .xlsx
- * (lib/xlsx.ts), parse, check every row is booked for the target day, filter and cut (lib/workbook.ts, rule sets B
- * and C), place each case on the target day under the repair periods (lib/placement.ts), count it all for the
- * summary, and compare the cases with the doctors' bookings (lib/board-rows.ts). No database, clock or network, so
+ * (lib/xlsx.ts), parse, check every row is booked for the target day, filter and split by hospital (lib/workbook.ts),
+ * place each case on the target day (lib/placement.ts under the repair periods; รพ.ท่าฉลอม's by its own table,
+ * lib/tha-chalom-schedule.ts), count it all for the summary, and compare each hospital's cases with its doctors'
+ * bookings (lib/board-rows.ts). No database, clock or network, so
  * the whole pipeline is tested on the sample file; app/upload/actions.ts adds the role, the window and the save.
  *
  * The summary holds counts only, so it can be stored with the upload (workbook_uploads.summary). The matching lists
@@ -62,9 +65,22 @@ export type RoomCount = { roomId: string; room: string; dept: string | null; cou
 
 export type UnplacedCount = { reason: UnplacedReason; label: string; count: number };
 
+/** Where รพ.ท่าฉลอม's cases went (Pong, 27 Nov 2026: "Excel file include both place on one sheet"). */
+export type ThaChalomSummary = {
+  /** Its kept cases. */
+  toPlace: number;
+  placed: number;
+  /** Its rooms that took at least one case, in the table's order. */
+  rooms: RoomCount[];
+  /** Its cases left off the board, by reason (no department, no room that day). */
+  unplaced: UnplacedCount[];
+};
+
 /**
  * What the upload page shows and workbook_uploads.summary stores: lib/workbook.ts's counts (rows read, repeated IDs,
  * kept, dropped by rule, cut by reason, left to place), then where the cases went. Counts only: no HN, case ID or name.
+ * The counts of the rules are both hospitals'; toPlace and the rest of the placement รพ.สมุทรสาคร's, and `thaChalom`
+ * รพ.ท่าฉลอม's.
  */
 export type FlowSummary = UploadSummary & {
   placed: number;
@@ -74,6 +90,8 @@ export type FlowSummary = UploadSummary & {
   unplaced: UnplacedCount[];
   /** The repair half the target day falls in, or null when the weekly schedule applies. */
   repairHalf: 1 | 2 | null;
+  /** รพ.ท่าฉลอม's cases, or null for an upload saved before 27 Nov 2026, which cut them (UploadSummary.cut). */
+  thaChalom: ThaChalomSummary | null;
 };
 
 /**
@@ -82,7 +100,7 @@ export type FlowSummary = UploadSummary & {
  */
 const capped = (text: string, max: number) => (text.length > max ? text.slice(0, max) : text);
 
-function placedCase(row: WorkbookRow, roomId: string | null, position: number): PlacedCase {
+function placedCase(row: WorkbookRow, roomId: string | null, position: number, place: PlaceId = "skh"): PlacedCase {
   return {
     caseId: capped(row.caseId, 64),
     hn: capped(row.hn, 32),
@@ -98,6 +116,7 @@ function placedCase(row: WorkbookRow, roomId: string | null, position: number): 
     urgency: row.urgency,
     bookedTime: row.bookedTime,
     position,
+    ...(place === "skh" ? {} : { place }),
   };
 }
 
@@ -110,19 +129,12 @@ function roomDept(roomId: string, date: string, periods: RepairPeriods): string 
 
 export type Placed<T extends PlacedCase = PlacedCase> = { cases: T[]; rooms: RoomCount[]; unplaced: UnplacedCount[]; placed: number };
 
-/**
- * Places each case on `date` in file order (lib/placement.ts placeAll, as the board does when it is read, a case a
- * doctor booked by the doctor's choice of room) and counts where they went. Every case is kept, placed or not (roomId null): the board leaves an unplaced case off, but the
- * stored list still says what HOSxP holds.
- */
-export function placeCases<T extends PlacedCase>(
+/** Each case with the room `placements` gave it, and the counts per room (`roomsOf`, in order) and per reason. */
+function counted<T extends PlacedCase>(
   items: readonly T[],
-  date: string,
-  periods: RepairPeriods,
-  bookings: readonly AddedCase[] = [],
+  placements: readonly Placement[],
+  roomsOf: (load: ReadonlyMap<string, number>) => RoomCount[],
 ): Placed<T> {
-  // A case a doctor booked goes by the doctor's choice of room, as on the board.
-  const placements = placeAll(withBookedChoices(items, bookings, date, periods), date, periods);
   const load = new Map<string, number>();
   const missed = new Map<UnplacedReason, number>();
   const cases = items.map((item, index) => {
@@ -131,16 +143,54 @@ export function placeCases<T extends PlacedCase>(
     else missed.set(placement.reason, (missed.get(placement.reason) ?? 0) + 1);
     return { ...item, roomId: placement.ok ? placement.roomId : null };
   });
-  const rooms = ROOMS.filter((room) => load.has(room.id)).map((room) => ({
-    roomId: room.id,
-    room: roomLabel(room),
-    dept: roomDept(room.id, date, periods),
-    count: load.get(room.id) ?? 0,
-  }));
   const unplaced = (Object.keys(UNPLACED_TEXT) as UnplacedReason[])
     .filter((reason) => missed.has(reason))
     .map((reason) => ({ reason, label: UNPLACED_TEXT[reason], count: missed.get(reason) ?? 0 }));
-  return { cases, rooms, unplaced, placed: cases.length - [...missed.values()].reduce((sum, n) => sum + n, 0) };
+  return { cases, rooms: roomsOf(load), unplaced, placed: cases.length - [...missed.values()].reduce((sum, n) => sum + n, 0) };
+}
+
+/**
+ * Places each case on `date` where the board shows it (lib/board-rows.ts boardPlacements: lib/placement.ts placeAll in
+ * file order, a case a doctor booked by the doctor's choice of room, or in the booking's own room when placement gives
+ * none) and counts where they went. Every case is kept, placed or not (roomId null): the board leaves an unplaced case
+ * off, but the stored list still says what HOSxP holds.
+ */
+export function placeCases<T extends PlacedCase>(
+  items: readonly T[],
+  date: string,
+  periods: RepairPeriods,
+  bookings: readonly AddedCase[] = [],
+): Placed<T> {
+  const placements = boardPlacements(items, bookings, date, periods);
+  return counted(items, placements, (load) =>
+    ROOMS.filter((room) => load.has(room.id)).map((room) => ({
+      roomId: room.id,
+      room: roomLabel(room),
+      dept: roomDept(room.id, date, periods),
+      count: load.get(room.id) ?? 0,
+    })),
+  );
+}
+
+/**
+ * รพ.ท่าฉลอม's cases placed on `date` where its board shows them (by its table, lib/tha-chalom-schedule.ts placeThaChalom;
+ * a case a doctor booked whose department the table gives no room that day, in the booking's room), with its doctors'
+ * `bookings`, counted as placeCases counts รพ.สมุทรสาคร's.
+ */
+export function placeThaChalomCases<T extends PlacedCase>(items: readonly T[], date: string, bookings: readonly AddedCase[] = []): Placed<T> {
+  return counted(items, thaChalomBoardPlacements(items, bookings, date), (load) =>
+    THA_CHALOM_ROOM_LIST.filter((room) => load.has(room.id)).map((room) => ({
+      roomId: room.id,
+      room: room.name,
+      dept: thaChalomRoomDept(room.id, date),
+      count: load.get(room.id) ?? 0,
+    })),
+  );
+}
+
+/** รพ.ท่าฉลอม's part of the summary, from its placed cases. */
+function thaChalomSummary(placed: Placed): ThaChalomSummary {
+  return { toPlace: placed.cases.length, placed: placed.placed, rooms: placed.rooms, unplaced: placed.unplaced };
 }
 
 /**
@@ -156,11 +206,21 @@ export function placeRows(rows: readonly WorkbookRow[], date: string, periods: R
   );
 }
 
+/** รพ.ท่าฉลอม's kept rows as they are stored (each hospital's numbered from 1 in file order), placed on `date`. */
+export function placeThaChalomRows(rows: readonly WorkbookRow[], date: string, bookings: readonly AddedCase[] = []): Placed {
+  return placeThaChalomCases(
+    rows.map((row, index) => placedCase(row, null, index + 1, "tha-chalom")),
+    date,
+    bookings,
+  );
+}
+
 /**
  * A stored upload's summary with its placement (placed, per room, not placed, the repair's half) worked out again from
  * its stored cases under the dates in force now, as the board places them: an admin may have moved the repair's dates
  * since the upload, and a booking made since moves its case to the room the doctor chose. The counts of the rules (rows
- * read, dropped, cut) stay as stored.
+ * read, dropped, cut) stay as stored. รพ.ท่าฉลอม's part, from its stored cases (`thaChalomCases`) and its bookings, only
+ * for an upload that kept them (FlowSummary.thaChalom).
  */
 export function placedSummary(
   summary: FlowSummary,
@@ -168,6 +228,8 @@ export function placedSummary(
   date: string,
   periods: RepairPeriods,
   bookings: readonly AddedCase[] = [],
+  thaChalomCases: readonly PlacedCase[] = [],
+  thaChalomBookings: readonly AddedCase[] = [],
 ): FlowSummary {
   const placed = placeCases(cases, date, periods, bookings);
   return {
@@ -176,6 +238,7 @@ export function placedSummary(
     rooms: placed.rooms,
     unplaced: placed.unplaced,
     repairHalf: repairOn(date, periods)?.half ?? null,
+    thaChalom: summary.thaChalom ? thaChalomSummary(placeThaChalomCases(thaChalomCases, date, thaChalomBookings)) : null,
   };
 }
 
@@ -184,8 +247,10 @@ export type FlowRefusal = { ok: false; error: "file" | "headers" | "dates"; mess
 
 export type ProcessedUpload = {
   ok: true;
-  /** Every case left after the filter and the cuts, in file order, with its room (null when not placed). */
+  /** รพ.สมุทรสาคร's cases left after the filter, in file order, with its room (null when not placed). */
   cases: PlacedCase[];
+  /** รพ.ท่าฉลอม's, the same way (each with `place`). */
+  thaChalomCases: PlacedCase[];
   summary: FlowSummary;
 };
 
@@ -193,7 +258,7 @@ export type FlowOptions = Omit<ParseOptions, "date1904">;
 
 /**
  * The pipeline from sheet rows (lib/xlsx.ts readXlsx) for the target day under `periods`; a case one of `bookings`
- * matches goes by the doctor's choice of room, as on the board.
+ * (รพ.สมุทรสาคร's) or `thaChalomBookings` matches goes where the board shows it, as the doctor booked it.
  */
 export function processSheet(
   sheet: { rows: readonly (readonly XlsxCell[])[]; date1904: boolean },
@@ -201,19 +266,23 @@ export function processSheet(
   periods: RepairPeriods,
   options: FlowOptions = {},
   bookings: readonly AddedCase[] = [],
+  thaChalomBookings: readonly AddedCase[] = [],
 ): FlowRefusal | ProcessedUpload {
   const prepared = prepareUpload(sheet, target, options);
   if (!prepared.ok) return { ok: false, error: prepared.error, message: prepared.message };
   const placed = placeRows(prepared.cuts.kept, target, periods, bookings);
+  const thaChalom = placeThaChalomRows(prepared.cuts.thaChalom, target, thaChalomBookings);
   return {
     ok: true,
     cases: placed.cases,
+    thaChalomCases: thaChalom.cases,
     summary: {
       ...prepared.summary,
       placed: placed.placed,
       rooms: placed.rooms,
       unplaced: placed.unplaced,
       repairHalf: repairOn(target, periods)?.half ?? null,
+      thaChalom: thaChalomSummary(thaChalom),
     },
   };
 }
@@ -225,10 +294,11 @@ export function processWorkbook(
   periods: RepairPeriods,
   options: FlowOptions = {},
   bookings: readonly AddedCase[] = [],
+  thaChalomBookings: readonly AddedCase[] = [],
 ): FlowRefusal | ProcessedUpload {
   const book = readXlsx(data);
   if (!book.ok) return { ok: false, error: "file", message: book.message };
-  return processSheet(book, target, periods, options, bookings);
+  return processSheet(book, target, periods, options, bookings, thaChalomBookings);
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -260,33 +330,41 @@ export type MatchReport = {
 
 /**
  * The upload's cases against the doctors' bookings on `date`, the board's way (lib/board-rows.ts buildBoardRows, as
- * MX sees it): the unbooked cases are exactly the board's mismatch alert, and the bookings HOSxP does not list are the
- * ones the board leaves off since it has the upload (BoardRows.unmatched). Rows the board would leave off anyway (a case
- * not placed, a booking in a room that does not operate that day) are not listed here either.
+ * MX sees it; buildThaChalomRows for รพ.ท่าฉลอม's, `place`): the unbooked cases are exactly the board's mismatch alert,
+ * and the bookings HOSxP does not list are the ones the board leaves off since it has the upload (BoardRows.unmatched).
+ * Rows the board would leave off anyway (a case not placed, a booking in a room that does not operate that day) are not
+ * listed here either. `cases` and `bookings` are the one hospital's.
  */
 export function matchBookings(input: {
   date: string;
   periods: RepairPeriods;
   cases: readonly WorkbookCase[];
   bookings: readonly AddedCase[];
+  place?: PlaceId;
 }): MatchReport {
-  const board = buildBoardRows({
+  const tc = input.place === "tha-chalom";
+  const rowsInput = {
     date: input.date,
     periods: input.periods,
     workbook: input.cases,
     bookings: input.bookings,
     viewer: { allHn: true, userId: null },
-  });
+  };
+  const board = tc ? buildThaChalomRows(rowsInput) : buildBoardRows(rowsInput);
+  const roomName = (roomId: string) => {
+    if (tc) return thaChalomRoom(roomId)?.name ?? roomId;
+    const room = getRoom(roomId);
+    return room ? roomLabel(room) : roomId;
+  };
   // The board's own mismatches, and the bookings it leaves off because HOSxP does not list them (Pong, 15 Nov 2026).
   const listed = (flag: "unbooked" | "not-in-hosxp"): MatchRow[] =>
     (flag === "unbooked" ? board.rows : board.unmatched)
       .filter((row) => row.flag === flag)
       .map((row) => {
-        const room = getRoom(row.roomId);
         return {
           key: row.id,
           roomId: row.roomId,
-          room: room ? roomLabel(room) : row.roomId,
+          room: roomName(row.roomId),
           surgeon: (flag === "not-in-hosxp" ? row.bookedBy : row.surgeon) ?? row.surgeon,
           hn: row.hn ?? null,
           operation: row.procedure || NO_OPERATION_LABEL,
@@ -309,19 +387,28 @@ export type UploadFlowInput = {
   /** The workday the file must list (lib/holidays.ts nextWorkdayAfter of the upload's Bangkok date). */
   target: string;
   periods: RepairPeriods;
-  /** The doctors' bookings (lib/cases.ts listCasesOn the target day); others are ignored. */
+  /** รพ.สมุทรสาคร's doctors' bookings (lib/cases.ts listCasesOn the target day); others are ignored. */
   bookings: readonly AddedCase[];
+  /** รพ.ท่าฉลอม's (listCasesOn the target day there). */
+  thaChalomBookings?: readonly AddedCase[];
   options?: FlowOptions;
 };
 
-export type UploadFlowResult = FlowRefusal | (ProcessedUpload & { matching: MatchReport });
+export type UploadFlowResult = FlowRefusal | (ProcessedUpload & { matching: MatchReport; thaChalomMatching: MatchReport });
 
-/** From the file's bytes to the cases to store, the summary and the matching with the bookings. */
+/** From the file's bytes to the cases to store, the summary and each hospital's matching with its bookings. */
 export function runUploadFlow(input: UploadFlowInput): UploadFlowResult {
-  const processed = processWorkbook(input.data, input.target, input.periods, input.options, input.bookings);
+  const processed = processWorkbook(input.data, input.target, input.periods, input.options, input.bookings, input.thaChalomBookings);
   if (!processed.ok) return processed;
   const matching = matchBookings({ date: input.target, periods: input.periods, cases: processed.cases, bookings: input.bookings });
-  return { ...processed, matching };
+  const thaChalomMatching = matchBookings({
+    date: input.target,
+    periods: input.periods,
+    cases: processed.thaChalomCases,
+    bookings: input.thaChalomBookings ?? [],
+    place: "tha-chalom",
+  });
+  return { ...processed, matching, thaChalomMatching };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -331,6 +418,31 @@ const count = (v: unknown): number => (typeof v === "number" && Number.isSafeInt
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 const list = (v: unknown): Record<string, unknown>[] =>
   Array.isArray(v) ? v.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null) : [];
+
+/** A stored summary's placement reasons, with today's labels. */
+const unplacedOf = (v: unknown): UnplacedCount[] =>
+  list(v)
+    .filter((item) => typeof item.reason === "string" && Object.hasOwn(UNPLACED_TEXT, item.reason))
+    .map((item) => ({
+      reason: item.reason as UnplacedReason,
+      label: UNPLACED_TEXT[item.reason as UnplacedReason],
+      count: count(item.count),
+    }));
+
+/** รพ.ท่าฉลอม's part read back: its rooms checked against its own table (their ids are รพ.สมุทรสาคร's too). */
+function readThaChalom(v: unknown): ThaChalomSummary | null {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return null;
+  const t = v as Record<string, unknown>;
+  return {
+    toPlace: count(t.toPlace),
+    placed: count(t.placed),
+    rooms: list(t.rooms).flatMap((item) => {
+      const room = thaChalomRoom(text(item.roomId));
+      return room ? [{ roomId: room.id, room: room.name, dept: text(item.dept) || null, count: count(item.count) }] : [];
+    }),
+    unplaced: unplacedOf(t.unplaced),
+  };
+}
 
 /**
  * A summary read back from workbook_uploads.summary (jsonb), checked field by field: a row written by an older version
@@ -358,13 +470,8 @@ export function readFlowSummary(json: unknown): FlowSummary | null {
       const room = getRoom(text(item.roomId));
       return room ? [{ roomId: room.id, room: roomLabel(room), dept: text(item.dept) || null, count: count(item.count) }] : [];
     }),
-    unplaced: list(v.unplaced)
-      .filter((item) => typeof item.reason === "string" && Object.hasOwn(UNPLACED_TEXT, item.reason))
-      .map((item) => ({
-        reason: item.reason as UnplacedReason,
-        label: UNPLACED_TEXT[item.reason as UnplacedReason],
-        count: count(item.count),
-      })),
+    unplaced: unplacedOf(v.unplaced),
     repairHalf: half,
+    thaChalom: readThaChalom(v.thaChalom),
   };
 }

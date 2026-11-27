@@ -47,6 +47,7 @@ test("pastLists: each past workday goes through MX's pipeline; weekends and holi
     [
       ["2026-11-02", 0],
       ["2026-11-04", 1],
+      // 9 at รพ.สมุทรสาคร; not 900012, ท่าฉลอม's, whose board shows no past day (Pong, 27 Nov 2026: one export holds both).
       ["2026-11-05", 9],
       ["2026-11-06", 0],
     ],
@@ -58,6 +59,7 @@ test("pastLists: each past workday goes through MX's pipeline; weekends and holi
   assert.ok(thursday.ok);
   const listed = lists.days.find((day) => day.date === "2026-11-05");
   assert.deepEqual(listed?.cases, thursday.cases, "the same cases, rooms and order as MX's upload of that day");
-  assert.deepEqual(listed?.summary, thursday.summary);
+  assert.equal(thursday.thaChalomCases.length, 1, "MX's upload keeps ท่าฉลอม's case");
+  assert.deepEqual(listed?.summary, { ...thursday.summary, thaChalom: null });
   assert.equal(listed?.summary.repairHalf, 1, "placed in the first half's rooms");
 });

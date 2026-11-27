@@ -18,9 +18,6 @@ import {
   bookedAlready,
   bookedChoice,
   bookedRoom,
-  BORROWED_ROOM_NAME,
-  BORROWED_ROOM_NOTE,
-  borrowsRoom,
   checkCase,
   cleanOperation,
   closedDayNote,
@@ -37,6 +34,7 @@ import {
   placeRoomName,
   POOLED_ROOM_NOTE,
   REQUEUE_TEXT,
+  roomToBook,
   SCRUB_NO,
   SCRUB_QUESTION,
   SCRUB_YES,
@@ -626,15 +624,13 @@ export function AddCase({
           .map((item) => bookedRoom(item, periods))
           .find((item) => !item.dressing && pooled.includes(item.roomId))?.roomId ?? null)
       : null;
-  const deptPlaced = placeBookingRoom(place, doctor.subtype, name, date, periods, "dept");
+  // An edit on its own day keeps a room borrowed before 27 Nov 2026 (lib/added-cases.ts roomToBook), as the server does.
+  const deptPlaced = roomToBook(place, doctor.subtype, name, date, periods, "dept", keepsDay && editing ? { ...editing, subtype: doctor.subtype } : undefined);
   const deptRoom = deptPlaced.ok && ownRoom ? { ...deptPlaced, roomId: ownRoom } : deptPlaced;
   const deptChoices = pooled.length > 1 && !ownRoom ? pooled : null;
-  // A department with no room that day borrows the open room with the fewest bookings (Pong, 22 Nov 2026).
-  const borrowed = !tc && borrowsRoom(doctor.subtype, name, date, periods);
   const dressingRoom = placeBookingRoom(place, doctor.subtype, name, date, periods, "dressing");
   const room = choice === "dressing" ? dressingRoom : deptRoom;
-  const allocation =
-    deptRoom.ok && !(borrowed && deptChoices) ? (tc ? thaChalomAllocation(deptRoom.roomId, date) : allocationFor(deptRoom.roomId, date, periods)) : null;
+  const allocation = deptRoom.ok ? (tc ? thaChalomAllocation(deptRoom.roomId, date) : allocationFor(deptRoom.roomId, date, periods)) : null;
   const label = (roomId: string) => placeRoomName(roomId, place);
   // The day view: the bookings in the room the doctor's choice gives (a department's rooms that day, when the server
   // still picks one of them), the doctor's own edited booking left out.
@@ -970,21 +966,9 @@ export function AddCase({
                   </span>
                 ) : null}
                 <span className="text-[0.9375rem] font-bold" data-testid="case-room-dept-name">
-                  {deptRoom.ok
-                    ? deptChoices
-                      ? borrowed
-                        ? BORROWED_ROOM_NAME
-                        : deptChoices.map(label).join(" / ")
-                      : label(deptRoom.roomId)
-                    : "ห้องของสาขา"}
+                  {deptRoom.ok ? (deptChoices ? deptChoices.map(label).join(" / ") : label(deptRoom.roomId)) : "ห้องของสาขา"}
                 </span>
-                {deptRoom.ok && borrowed ? (
-                  <span className="text-xs text-muted" data-testid="case-room-borrowed">
-                    {BORROWED_ROOM_NOTE}
-                  </span>
-                ) : deptRoom.ok && deptChoices ? (
-                  <span className="text-xs text-muted">{POOLED_ROOM_NOTE}</span>
-                ) : null}
+                {deptRoom.ok && deptChoices ? <span className="text-xs text-muted">{POOLED_ROOM_NOTE}</span> : null}
                 {!allocation && !deptRoom.ok ? <span className="text-xs">{NO_ROOM_NOTE[deptRoom.reason]}</span> : null}
               </label>
               {/* รพ.ท่าฉลอม has no dressing room to book (Pong, 27 Nov 2026: "own department's room only"). */}

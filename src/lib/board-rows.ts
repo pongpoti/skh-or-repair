@@ -3,15 +3,16 @@ import { rangeText } from "./booking-time.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
 import type { PlaceId } from "./places.ts";
-import { isDressingCase, placeAll, roomsHeldBy, type RoomChoice } from "./placement.ts";
+import { isDressingCase, placeAll, roomsHeldBy, type Placement, type RoomChoice } from "./placement.ts";
 import type { RepairPeriods } from "./repair.ts";
 import { roomUse } from "./rooms.ts";
 import type { CaseStatus, Operation, Shift } from "./schedule.ts";
+import { placeThaChalom, thaChalomOpenIds } from "./tha-chalom-schedule.ts";
 import { subtypeLabel } from "./user-labels.ts";
 
 /**
- * The board's case rows during the repair: the HOSxP workbook's cases (the latest upload of the cycle,
- * lib/workbook-store.ts) and the doctors' bookings (lib/cases.ts), matched one to one by HN. Pure and isomorphic; the
+ * The board's case rows, at both hospitals: the HOSxP workbook's cases (the latest upload of the cycle,
+ * lib/workbook-store.ts, the hospital's own) and the doctors' bookings (lib/cases.ts), matched one to one by HN. Pure and isomorphic; the
  * server page builds the rows and hands the client only what the viewer may see (an HN only to the doctor who booked
  * the case, MX and admins).
  */
@@ -65,9 +66,16 @@ export type BoardRow = Operation & {
    * of where it came from. Left out in every other room.
    */
   doneBy?: DoneBy;
-  /** รพ.ท่าฉลอม's rows say so (thaChalomRows), for their rooms' names; รพ.สมุทรสาคร's leave it out. */
+  /** รพ.ท่าฉลอม's rows say so (buildThaChalomRows), for their rooms' names; รพ.สมุทรสาคร's leave it out. */
   place?: PlaceId;
 };
+
+/**
+ * HOSxP cases left off the board because no room takes them that day (Pong, 27 Nov 2026: "Leave off board and display
+ * on noti bar for both places"), per department: their department has no room that day (null: no department is known),
+ * nor did a booking put them in one. For the strip's notice (lib/board-notices.ts): counts only, no patient.
+ */
+export type OffBoardCount = { dept: DeptCode | null; count: number };
 
 /**
  * The surgeon as a row names them: without the title (Pong, 16 Nov 2026: "No นพ พญ prefix"), so every doctor's name
@@ -140,6 +148,8 @@ export type BoardRows = {
   mismatchByRoom: Record<string, number>;
   /** Rows per room. */
   countByRoom: Record<string, number>;
+  /** The HOSxP cases no room takes that day, the department with the most first. */
+  offBoard: OffBoardCount[];
 };
 
 /** Where a booking goes on its day (lib/added-cases.ts bookedRoom), per booking. */
@@ -192,19 +202,54 @@ function bookedOf(booking: AddedCase | undefined, rooms: BookingRooms): { choice
 }
 
 /**
- * Each workbook case with the room choice of the booking it pairs with on `date` (as buildBoardRows pairs them), in the
- * order given; for the upload's own summary (lib/upload-flow.ts), so it counts the rooms the board shows.
+ * Where `date`'s board at รพ.สมุทรสาคร shows each workbook case (in the order given), as a placement: the room, or why it
+ * has none. The upload's own summary counts by it (lib/upload-flow.ts), so MX's numbers are the board's.
  */
-export function withBookedChoices<T extends WorkbookCase>(
-  cases: readonly T[],
-  bookings: readonly AddedCase[],
-  date: string,
-  periods: RepairPeriods,
-): (T & { choice?: RoomChoice; bookedRoom?: string })[] {
+export function boardPlacements(cases: readonly WorkbookCase[], bookings: readonly AddedCase[], date: string, periods: RepairPeriods): Placement[] {
   const today = bookings.filter((item) => item.date === date);
-  const rooms = new Map(today.map((booking) => [booking, bookedRoom(booking, periods)]));
-  const pairs = pairCases([...cases].sort((a, b) => a.position - b.position), today, rooms);
-  return cases.map((item) => ({ ...item, ...bookedOf(pairs.get(item), rooms) }));
+  return placementsShown(cases, today, skhLayout(today, date, periods));
+}
+
+/** boardPlacements for รพ.ท่าฉลอม's board, with its doctors' `bookings`. */
+export function thaChalomBoardPlacements(cases: readonly WorkbookCase[], bookings: readonly AddedCase[], date: string): Placement[] {
+  const today = bookings.filter((item) => item.date === date);
+  return placementsShown(cases, today, thaChalomLayout(today, date));
+}
+
+function placementsShown(cases: readonly WorkbookCase[], today: readonly AddedCase[], layout: Layout): Placement[] {
+  const shown = showCases([...cases].sort((a, b) => a.position - b.position), today, layout);
+  return cases.map((item): Placement => {
+    const at = shown.get(item);
+    if (at?.roomId) return { ok: true, roomId: at.roomId };
+    return at && !at.placement.ok ? at.placement : { ok: false, reason: "no-room" };
+  });
+}
+
+/** Where the board shows a workbook case: its paired booking, its placement, and its room (null: left off). */
+type Shown = { booking: AddedCase | undefined; placement: Placement; roomId: string | null };
+
+/**
+ * Where the board shows each workbook case (`cases` in file order). Each is paired with a booking by HN (pairCases) and
+ * placed by the layout's rules with that booking's choice of room, and shows in the room placement gives it when that
+ * room operates that day (a department's booking never in the dressing room). A matched case placement gives no such
+ * room shows in its booking's own room when that one operates (its department is not known, or has no room that day and
+ * the booking was saved in one: a room borrowed from 22 to 27 Nov 2026). Otherwise it is left off (roomId null).
+ */
+function showCases<T extends WorkbookCase>(cases: readonly T[], today: readonly AddedCase[], layout: Layout): Map<T, Shown> {
+  const { bookingRooms, placeCases, dressingRooms, open } = layout;
+  const pairs = pairCases(cases, today, bookingRooms);
+  const placements = placeCases(cases.map((item) => ({ ...item, ...bookedOf(pairs.get(item), bookingRooms) })));
+  return new Map(
+    cases.map((item, index): [T, Shown] => {
+      const booking = pairs.get(item);
+      const placement = placements[index];
+      const placed = placement.ok ? placement.roomId : null;
+      if (!booking) return [item, { booking, placement, roomId: open(placed) ? placed : null }];
+      const own = bookingRooms.get(booking) ?? { roomId: booking.roomId, dressing: false };
+      const fits = (roomId: string | null): roomId is string => open(roomId) && (own.dressing || !dressingRooms.includes(roomId));
+      return [item, { booking, placement, roomId: fits(placed) ? placed : fits(own.roomId) ? own.roomId : null }];
+    }),
+  );
 }
 
 /**
@@ -237,7 +282,9 @@ function departmentName(dept: DeptCode | null): string | null {
  * placed room, flagged "unbooked" (but not in the dressing room, where booking does not matter). A booking left over shows in its room until a workbook is uploaded; after that it is
  * no real patient (Pong, 15 Nov 2026: "remove that row because no real patient set"), so it goes to `unmatched`,
  * flagged "not-in-hosxp", for MX's upload summary alone. A row whose room is not open that day (closed, a recovery or
- * instrument room, or a workbook case not placed) is left off the board.
+ * instrument room, or a workbook case not placed) is left off the board; the workbook cases no room takes, their
+ * department having none that day (or none known), are counted for the strip's notice (offBoard; Pong, 27 Nov 2026:
+ * "Leave off board and display on noti bar for both places").
  *
  * In each room the booked cases come first, by their time (Pong, 27 Nov 2026: booked on the form's day view), then those
  * without one in booking order, then the cases nobody booked in the workbook's order (Pong, 15 Nov 2026: "first priority
@@ -246,29 +293,80 @@ function departmentName(dept: DeptCode | null): string | null {
  * the booking order.
  */
 export function buildBoardRows({ date, periods, workbook, bookings, viewer }: BoardRowsInput): BoardRows {
-  const uploaded = workbook !== null;
   const today = bookings.filter((item) => item.date === date);
-  const bookingRooms = new Map(today.map((booking) => [booking, bookedRoom(booking, periods)]));
+  return mergeRows({ workbook, today, viewer }, skhLayout(today, date, periods));
+}
+
+/** รพ.สมุทรสาคร's way, for `today`'s bookings on `date`. */
+function skhLayout(today: readonly AddedCase[], date: string, periods: RepairPeriods): Layout {
+  return {
+    bookingRooms: new Map(today.map((booking) => [booking, bookedRoom(booking, periods)])),
+    // A matched case is placed by the doctor's choice of room instead of its name, and by the workbook's other rules
+    // (emergencies, NEURO and CVT) as any other case; in a department with several rooms it keeps its booking's room,
+    // and each surgeon's cases stay in one room (placeAll).
+    placeCases: (cases) => placeAll(cases, date, periods),
+    dressingRooms: roomsHeldBy("INFECT", date, periods),
+    open: (roomId): roomId is string => roomId !== null && roomUse(roomId, date, periods) === "open",
+  };
+}
+
+/**
+ * รพ.ท่าฉลอม's rows on `date`, by buildBoardRows' rules (Pong, 27 Nov 2026: "Excel file include both place on one sheet":
+ * MX's upload holds its cases too): its HOSxP cases matched with its doctors' bookings by HN, in the room its table gives
+ * each case's department that day (lib/tha-chalom-schedule.ts placeThaChalom), a booking in the room it was booked in.
+ * No dressing room, and no repair to move rooms. Before an upload with its cases (`workbook` null), its bookings alone.
+ * Every row says it is รพ.ท่าฉลอม's (BoardRow.place), for its room's name.
+ */
+export function buildThaChalomRows({ date, workbook, bookings, viewer }: Omit<BoardRowsInput, "periods">): BoardRows {
+  const today = bookings.filter((item) => item.date === date);
+  return mergeRows({ workbook, today, viewer }, thaChalomLayout(today, date));
+}
+
+/** รพ.ท่าฉลอม's way, for `today`'s bookings there on `date`. */
+function thaChalomLayout(today: readonly AddedCase[], date: string): Layout {
+  const open = thaChalomOpenIds(date);
+  return {
+    bookingRooms: new Map(today.map((booking) => [booking, { roomId: booking.roomId, dressing: false }])),
+    placeCases: (cases) => placeThaChalom(cases, date),
+    dressingRooms: [],
+    open: (roomId): roomId is string => roomId !== null && open.has(roomId),
+    place: "tha-chalom",
+  };
+}
+
+/** What the two hospitals' boards do their own way. */
+type Layout = {
+  /** Where each of the day's bookings is. */
+  bookingRooms: BookingRooms;
+  /** Where each workbook case goes, in the order given, each with its paired booking's choice of room. */
+  placeCases: (cases: (WorkbookCase & { choice?: RoomChoice; bookedRoom?: string })[]) => Placement[];
+  /** The day's dressing rooms, where a case nobody booked is no mismatch. */
+  dressingRooms: readonly string[];
+  /** Whether a room operates that day. */
+  open: (roomId: string | null) => roomId is string;
+  /** The hospital its rows say, when not รพ.สมุทรสาคร. */
+  place?: PlaceId;
+};
+
+/** buildBoardRows' merge, for either hospital's `layout`. */
+function mergeRows(
+  { workbook, today, viewer }: { workbook: readonly WorkbookCase[] | null; today: readonly AddedCase[]; viewer: BoardViewer },
+  layout: Layout,
+): BoardRows {
+  const { bookingRooms, dressingRooms, open, place } = layout;
+  const uploaded = workbook !== null;
   const cases = [...(workbook ?? [])].sort((a, b) => a.position - b.position);
 
-  const pairs = pairCases(cases, today, bookingRooms);
-  const taken = new Set(pairs.values());
-  // A matched case is placed by the doctor's choice of room instead of its name, and by the workbook's other rules
-  // (emergencies, NEURO and CVT) as any other case; in a department with several rooms it keeps its booking's room, and
-  // each surgeon's cases stay in one room (placeAll).
-  const placements = placeAll(
-    cases.map((item) => ({ ...item, ...bookedOf(pairs.get(item), bookingRooms) })),
-    date,
-    periods,
-  );
-  const dressingRooms = roomsHeldBy("INFECT", date, periods);
-  const placedIn = new Map<WorkbookCase, string | null>();
-  cases.forEach((item, index) => {
-    const placement = placements[index];
-    placedIn.set(item, placement.ok ? placement.roomId : null);
-  });
+  const shown = showCases(cases, today, layout);
+  const taken = new Set([...shown.values()].flatMap((at) => (at.booking ? [at.booking] : [])));
+  // A case left off because no room takes it (its department has none that day, or none is known; not obstetrics and
+  // gynaecology in the repair, which operates in its own building) is counted for the strip's notice.
+  const offBoard = new Map<DeptCode | null, number>();
+  const leaveOff = (item: WorkbookCase, placement: Placement) => {
+    if (!placement.ok && placement.reason !== "obgyn-building") offBoard.set(item.dept, (offBoard.get(item.dept) ?? 0) + 1);
+  };
+  const hospital = place ? { place } : {};
 
-  const open = (roomId: string | null): roomId is string => roomId !== null && roomUse(roomId, date, periods) === "open";
   // The doctor who made a booking sees its HN; MX and admins see every HN.
   const ownBooking = (booking: AddedCase) => viewer.userId !== null && booking.surgeonId === viewer.userId;
   const seesHn = (booking: AddedCase) => viewer.allHn || ownBooking(booking);
@@ -281,15 +379,12 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   const bookingIndex = new Map(today.map((booking, index) => [booking, index]));
 
   for (const item of cases) {
-    const booking = pairs.get(item);
+    const { booking, placement, roomId } = shown.get(item) as Shown;
+    if (!roomId) {
+      leaveOff(item, placement);
+      continue;
+    }
     if (booking) {
-      const placed = placedIn.get(item) ?? null;
-      const own = bookingRooms.get(booking) ?? { roomId: booking.roomId, dressing: false };
-      // Where MX's list places it by the doctor's choice; the booking's own room when the case cannot be placed (its
-      // department is not known), but a department's booking never in the dressing room.
-      const fits = (roomId: string | null): roomId is string => open(roomId) && (own.dressing || !dressingRooms.includes(roomId));
-      const roomId = fits(placed) ? placed : fits(own.roomId) ? own.roomId : null;
-      if (!roomId) continue;
       const hn = booking.hn ?? normalizeHn(item.hn);
       booked.push({
         start: startOf(booking),
@@ -312,17 +407,16 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
           ...timeText(booking),
           ...noteOf(booking),
           ...doneByIn(roomId, dressingRooms, booking),
+          ...hospital,
         },
       });
       continue;
     }
-    const placed = placedIn.get(item) ?? null;
-    if (!open(placed)) continue;
     // In the dressing room a case nobody booked is no mismatch: booking it does not matter there (Pong, 15 Nov 2026).
-    const dressingRoom = dressingRooms.includes(placed);
+    const dressingRoom = dressingRooms.includes(roomId);
     unbooked.push({
       id: `hx-${item.caseId}`,
-      roomId: placed,
+      roomId,
       procedure: item.operation,
       surgeon: withoutTitle(item.surgeon),
       specialty: departmentName(item.dept),
@@ -332,7 +426,8 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       flag: dressingRoom ? null : "unbooked",
       ...(viewer.allHn ? { hn: normalizeHn(item.hn) } : {}),
       ...(viewer.allHn && item.patientName ? { patientName: item.patientName } : {}),
-      ...doneByIn(placed, dressingRooms),
+      ...doneByIn(roomId, dressingRooms),
+      ...hospital,
     });
   }
 
@@ -357,6 +452,7 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
       ...timeText(booking),
       ...noteOf(booking),
       ...doneByIn(roomId, dressingRooms, booking),
+      ...hospital,
     };
     if (uploaded) unmatchedRows.push(row);
     else booked.push({ start: startOf(booking), at: index, row });
@@ -381,7 +477,9 @@ export function buildBoardRows({ date, periods, workbook, bookings, viewer }: Bo
   });
 
   const unmatched = unmatchedRows.map((row, index): BoardRow => ({ ...row, order: index + 1 }));
-  return { rows: numbered, unmatched, uploaded, matched: pairs.size, mismatchCount, mismatchByRoom, countByRoom };
+  // The department with the most cases first; on a tie, the one first in the file (a Map keeps that order).
+  const off = [...offBoard.entries()].map(([dept, count]) => ({ dept, count })).sort((a, b) => b.count - a.count);
+  return { rows: numbered, unmatched, uploaded, matched: taken.size, mismatchCount, mismatchByRoom, countByRoom, offBoard: off };
 }
 
 /** When a booking was made, as its row says it. */
@@ -398,43 +496,6 @@ function timeText(booking: AddedCase): { time?: string } {
 const startOf = (booking: AddedCase) => booking.start ?? Infinity;
 
 /**
- * รพ.ท่าฉลอม's case rows on `date` (Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also"): its doctors' bookings alone, in
- * the room each was booked in, as the board shows bookings before MX's upload (there is no HOSxP list for this hospital):
- * by time, then the booking order, numbered in each room. The HN only to whoever may see it (BoardViewer).
- */
-export function thaChalomRows(date: string, bookings: readonly AddedCase[], viewer: BoardViewer): BoardRow[] {
-  const own = (booking: AddedCase) => viewer.userId !== null && booking.surgeonId === viewer.userId;
-  const sorted = bookings
-    .map((booking, index) => ({ booking, index }))
-    .filter(({ booking }) => booking.date === date)
-    .sort((a, b) => startOf(a.booking) - startOf(b.booking) || a.index - b.index);
-  const order = new Map<string, number>();
-  return sorted.map(({ booking }): BoardRow => {
-    const slot = (order.get(booking.roomId) ?? 0) + 1;
-    order.set(booking.roomId, slot);
-    return {
-      id: `bk-${booking.id}`,
-      roomId: booking.roomId,
-      order: slot,
-      procedure: booking.operation || NO_OPERATION_LABEL,
-      surgeon: booking.surgeon,
-      specialty: subtypeLabel("DR", booking.subtype),
-      status: "scheduled",
-      shift: booking.shift,
-      source: "booking",
-      flag: null,
-      ...((viewer.allHn || own(booking)) && booking.hn ? { hn: booking.hn } : {}),
-      bookedBy: booking.surgeon,
-      ...(own(booking) ? { bookingId: booking.id } : {}),
-      ...when(booking),
-      ...timeText(booking),
-      ...noteOf(booking),
-      place: "tha-chalom",
-    };
-  });
-}
-
-/**
  * The day to name in the board's "no HOSxP list yet" alert, or null. The board's rows come only from MX's uploads, in
  * the repair and outside it (the weekly export no longer feeds the board), so a day without one is news to everyone:
  * otherwise an empty room could not be told from a missing list. Not when the cases could not be read (whether there is
@@ -446,11 +507,12 @@ export function missingUploadDay(board: { date: string; uploaded: boolean } | nu
 
 /**
  * Whether the doctor's booking `bookingId` is on a row HOSxP says is under way or over (UNDER_WAY), on its day's board as
- * `input` builds it: the server's check before an edit or a cancel (app/(board)/actions.ts), the same rule the row's
- * actions show.
+ * `input` builds it at `place`: the server's check before an edit or a cancel (app/(board)/actions.ts), the same rule the
+ * row's actions show.
  */
-export function bookingUnderWay(input: Omit<BoardRowsInput, "viewer">, bookingId: string, surgeonId: string): boolean {
-  const built = buildBoardRows({ ...input, viewer: { allHn: false, userId: surgeonId } });
+export function bookingUnderWay(input: Omit<BoardRowsInput, "viewer">, bookingId: string, surgeonId: string, place: PlaceId = "skh"): boolean {
+  const viewer = { allHn: false, userId: surgeonId };
+  const built = place === "tha-chalom" ? buildThaChalomRows({ ...input, viewer }) : buildBoardRows({ ...input, viewer });
   const row = [...built.rows, ...built.unmatched].find((item) => item.bookingId === bookingId);
   return row !== undefined && UNDER_WAY.has(row.status);
 }

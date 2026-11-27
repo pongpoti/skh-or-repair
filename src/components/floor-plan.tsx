@@ -25,7 +25,7 @@ const MARK_LABEL: Record<Exclude<RoomMark, null>, string> = {
 };
 
 /** Read out with a room whose cases do not match the bookings (lib/board-rows.ts flags). */
-const MISMATCH_LABEL = "ข้อมูลไม่ตรงกับการจอง";
+export const MISMATCH_LABEL = "ข้อมูลไม่ตรงกับการจอง";
 
 /**
  * Where the repair zone's tag sits in each half: in a corridor inside the zone, clear of every room's number, so the

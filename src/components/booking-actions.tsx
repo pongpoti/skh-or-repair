@@ -229,8 +229,14 @@ export function BookingSheet({
   const room = booking ? getRoom(booking.roomId) : undefined;
   const where = booking ? bookedRoom(booking, own.periods) : null;
   const placeRoom = getRoom(row?.roomId ?? where?.roomId ?? null) ?? room;
-  // รพ.ท่าฉลอม's rooms by its own names ("ห้อง Scope").
-  const roomName = booking ? (atThaChalom(booking) ? placeRoomName(booking.roomId, booking.place) : placeRoom ? roomLabel(placeRoom) : booking.roomId) : "";
+  // รพ.ท่าฉลอม's rooms by its own names ("ห้อง Scope"): the row's, where MX's list puts a matched case, as at รพ.สมุทรสาคร.
+  const roomName = booking
+    ? atThaChalom(booking)
+      ? placeRoomName(row?.roomId ?? booking.roomId, booking.place)
+      : placeRoom
+        ? roomLabel(placeRoom)
+        : booking.roomId
+    : "";
   const heading = booking ? [roomName, row ? `ลำดับ ${row.order}` : null, thaiDate(booking.date, "short")].filter(Boolean).join(" · ") : "";
 
   function act(run: () => void) {

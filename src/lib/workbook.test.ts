@@ -120,13 +120,12 @@ test("the Thai reasons for the upload summary", () => {
   });
 });
 
-test("board cuts: of the 10 kept, only Tha Chalom's 900012 goes, 9 are left to place", () => {
+test("by hospital: of the 10 kept, Tha Chalom's 900012 goes to its own board, 9 to รพ.สมุทรสาคร's, none is cut", () => {
   const { kept } = filterForUpload(parsed());
   const cuts = boardCuts(kept);
-  assert.deepEqual(
-    cuts.cut.map(({ caseId, reason }) => ({ caseId, reason })),
-    [{ caseId: "900012", reason: "tha-chalom" }],
-  );
+  // Pong, 27 Nov 2026: "Excel file include both place on one sheet" (they were cut before).
+  assert.deepEqual(cuts.cut, []);
+  assert.deepEqual(cuts.thaChalom.map((row) => row.caseId), ["900012"]);
   // 900013 is vascular surgery on a Thursday. The utilisation report cut it as Tha Chalom's quota; the board now
   // follows the schedule in force instead and leaves the room to placeCase (Pong, 18 Nov 2026: "stick to the interim
   // schedule").
@@ -448,9 +447,7 @@ test("prepareUpload: refusals, and the summary holds counts only", () => {
       { rule: 5, reason: "เวลาผ่าตัดนอกช่วง 08:00–15:00 น.", count: 1 },
       { rule: 6, reason: "Urgency แต่ไม่ระบุเวลา", count: 1 },
     ],
-    cut: [
-      { reason: "tha-chalom", label: "เคสของ รพ.นครท่าฉลอม", count: 1 },
-    ],
+    cut: [],
     toPlace: 9,
   });
   assert.equal(JSON.stringify(day.summary).includes("99000"), false); // no HN

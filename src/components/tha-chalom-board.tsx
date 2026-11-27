@@ -5,28 +5,36 @@ import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { AddCase, type CaseRequest } from "@/components/add-case";
 import type { OwnBookings } from "@/components/booking-actions";
 import type { DatePick } from "@/components/board-date-picker";
-import { BoardNotices } from "@/components/board-notices";
+import { BoardNotices, noticeBadge } from "@/components/board-notices";
 import { CaseList, isCaseBubbleOpen } from "@/components/case-list";
 import { DaySwipe } from "@/components/day-swipe";
 import { RoomPill, type RoomPillPart } from "@/components/room-pill";
-import { CLOSE_ICON, EXPAND_ICON, isPopoverOpen, PLUS, RoomCard, RoomHead, SHRINK_ICON, type CaseAdding } from "@/components/suite-board";
+import {
+  CLOSE_ICON,
+  EXPAND_ICON,
+  isPopoverOpen,
+  MismatchWarning,
+  PLUS,
+  RoomCard,
+  RoomHead,
+  SHRINK_ICON,
+  useBoardNotices,
+  type BoardView,
+  type CaseAdding,
+} from "@/components/suite-board";
 import { ThaChalomPlan } from "@/components/tha-chalom-plan";
-import type { BoardNotice } from "@/lib/board-notices";
 import type { BoardRow } from "@/lib/board-rows";
 import { boardHref, thaiDate } from "@/lib/days";
 import { THA_CHALOM_PATH } from "@/lib/places";
 import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "@/lib/repair";
 import { openRooms, thaChalomAllocation, thaChalomDay, usageText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha-chalom-schedule";
 
-
-/** ท่าฉลอม's notice strip has no notices (ThaChalomBoard). */
-const NO_NOTICES: readonly BoardNotice[] = [];
-const noNotice = () => {};
 /** A free half's badge: the plan's light floor, with dark text. */
 const FREE_COLOR = "#E6DCCF";
 /** OR 3 under works: the board's closed-room taupe. */
 const CLOSED_COLOR = "#B4A594";
 const NONE: readonly BoardRow[] = [];
+const NO_MISMATCH: Record<string, number> = {};
 
 function partOf(use: ThaChalomUse, part: string | null): RoomPillPart {
   const color = use.kind === "dept" ? use.dept.color : use.kind === "closed" ? CLOSED_COLOR : FREE_COLOR;
@@ -45,14 +53,17 @@ function partsOf(entry: ThaChalomRoomDay): RoomPillPart[] {
  * among them on the days it is in use. Its doctors book its rooms there too (Pong, 27 Nov 2026: "Add booking btn on
  * ท่าฉลอม also"): the จองห้อง button under the plan opens the booking form for this hospital (their department's room
  * in its table only), and a tap on an open room, on the plan or in the list, shows its booked cases in รพ.สมุทรสาคร's
- * sheet (bottom sheet on a phone, the card beside the plan on a computer), the doctor's own with their actions. There is
- * no HOSxP list here, so a row is a booking.
+ * sheet (bottom sheet on a phone, the card beside the plan on a computer), the doctor's own with their actions. MX's
+ * HOSxP upload holds its cases too (Pong, 27 Nov 2026: "Excel file include both place on one sheet"): its rows are
+ * รพ.สมุทรสาคร's kind (lib/board-rows.ts buildThaChalomRows), HOSxP cases matched with the bookings by HN, with the same
+ * icons and "!" marks, and the strip above the plan has รพ.สมุทรสาคร's notices: no HOSxP list yet for the day, and the
+ * cases no room takes that day ("Leave off board and display on noti bar for both places").
  */
 export function ThaChalomBoard({
   date,
   pick,
   pathname = THA_CHALOM_PATH,
-  rows = NONE,
+  board = null,
   roomId = null,
   adding = null,
   periods = DEFAULT_REPAIR_PERIODS,
@@ -60,8 +71,11 @@ export function ThaChalomBoard({
   date: string;
   pick: DatePick | null;
   pathname?: string;
-  /** The day's booked cases (lib/board-rows.ts thaChalomRows), with an HN only where the viewer may see it. */
-  rows?: readonly BoardRow[];
+  /**
+   * The day's rows (lib/board-rows.ts buildThaChalomRows), with an HN only where the viewer may see it, and what the
+   * strip's notices need; none (the preview) shows no cases and no notice.
+   */
+  board?: Pick<BoardView, "rows" | "uploaded" | "mismatchByRoom" | "offBoard"> | null;
   /** The room open from the address (?room=), when it is open that day. */
   roomId?: string | null;
   /** Shown to doctors: the จองห้อง button and its booking form. */
@@ -70,6 +84,13 @@ export function ThaChalomBoard({
   periods?: RepairPeriods;
 }) {
   const router = useRouter();
+  const rows = board?.rows ?? NONE;
+  const mismatches = board?.mismatchByRoom ?? NO_MISMATCH;
+  const notices = useBoardNotices(board ? { date, uploaded: board.uploaded, offBoard: board.offBoard } : null, false);
+  // The notice whose chat bubble is open (BoardNotices); forgotten when its notice goes (a refresh, an upload).
+  const [noticeId, setNoticeId] = useState<string | null>(null);
+  if (noticeId !== null && !notices.some((notice) => notice.id === noticeId)) setNoticeId(null);
+  const noTable = notices.some((notice) => notice.id === "no-upload");
   const day = useMemo(() => thaChalomDay(date), [date]);
   const open = useMemo(() => openRooms(day), [day]);
   const selectable = (id: string | null) => (id ? (open.find((entry) => entry.room.id === id) ?? null) : null);
@@ -118,6 +139,13 @@ export function ThaChalomBoard({
       if (event.key !== "Escape") return;
       // Escape in a dialog (the booking form, the date picker's card) or an open popover (the account menu) is theirs.
       if (addRequest || document.querySelector("dialog[open]") || isPopoverOpen()) return;
+      // Then an open notice bubble's, as on รพ.สมุทรสาคร's board: its badge gets the focus back only from the strip.
+      if (noticeId) {
+        const id = noticeId;
+        setNoticeId(null);
+        if (document.activeElement?.closest("[data-notice-strip]")) noticeBadge(id)?.focus();
+        return;
+      }
       choose(null);
     }
     window.addEventListener("keydown", onKey);
@@ -147,9 +175,8 @@ export function ThaChalomBoard({
       <div className="relative mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col overflow-hidden sm:px-3 lg:flex-row lg:gap-6 lg:px-6 lg:pt-3 lg:pb-4">
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:overflow-visible">
           {/* รพ.สมุทรสาคร's notice strip, the same height, so the plan sits where its plan does (Pong, 27 Nov 2026: "No
-              booking button and notification bar on ท่าฉลอม"). Empty: its one notice, no HOSxP list yet, has no meaning
-              here, where the day's cases are its bookings. */}
-          <BoardNotices notices={NO_NOTICES} openId={null} onOpenChange={noNotice} />
+              booking button and notification bar on ท่าฉลอม"), with its notices. */}
+          <BoardNotices notices={notices} openId={noticeId} onOpenChange={setNoticeId} />
           {/* The plan stops above the จองห้อง button and its glow, as on รพ.สมุทรสาคร's board. */}
           <DaySwipe
             day={date}
@@ -158,7 +185,14 @@ export function ThaChalomBoard({
             className={`flex min-h-0 flex-1 overflow-hidden p-1 lg:p-0 ${adding ? "pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.75rem)] lg:pb-[4.5rem]" : ""}`}
           >
             {/* Filling the box as รพ.สมุทรสาคร's plan does, with the same margins (globals.css .tc-plan). */}
-            <ThaChalomPlan day={day} className="tc-plan" selectedId={selectedId} onSelect={(id) => choose(selectedId === id ? null : id)} cases={counts} />
+            <ThaChalomPlan
+              day={day}
+              className="tc-plan"
+              selectedId={selectedId}
+              onSelect={(id) => choose(selectedId === id ? null : id)}
+              cases={counts}
+              mismatches={mismatches}
+            />
           </DaySwipe>
           {adding ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[5] flex justify-center lg:bottom-0">
@@ -198,7 +232,7 @@ export function ThaChalomBoard({
         >
           {entry ? (
             <div className="flex min-h-0 flex-1 flex-col">
-              <RoomHead title={entry.room.name} count={cases.length} allocation={allocation} noTable={false} headingRef={headingRef} handle>
+              <RoomHead title={entry.room.name} count={cases.length} allocation={allocation} noTable={noTable} headingRef={headingRef} handle>
                 <button
                   type="button"
                   className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0"
@@ -228,7 +262,7 @@ export function ThaChalomBoard({
                     title={entry.room.name}
                     count={cases.length}
                     allocation={allocation}
-                    noTable={false}
+                    noTable={noTable}
                     headingRef={cardHeadingRef}
                     headingId="room-full-title"
                     eyebrow={thaiDate(date, "short")}
@@ -267,6 +301,7 @@ export function ThaChalomBoard({
                 <ul className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-1.5">
                   {open.map((item) => {
                     const count = counts[item.room.id] ?? 0;
+                    const mismatch = (mismatches[item.room.id] ?? 0) > 0;
                     return (
                       <li key={item.room.id} data-testid="tc-room" data-room={item.room.id}>
                         <button
@@ -275,7 +310,8 @@ export function ThaChalomBoard({
                           onClick={() => choose(item.room.id)}
                           data-testid={`tc-open-${item.room.id}`}
                         >
-                          <span className="flex min-w-0 flex-1 items-center">
+                          {/* The warning sits right after the badge, as in รพ.สมุทรสาคร's list. */}
+                          <span className="flex min-w-0 flex-1 items-center gap-2.5">
                             <RoomPill
                               prefix={item.room.prefix}
                               number={item.room.number}
@@ -283,6 +319,7 @@ export function ThaChalomBoard({
                               parts={partsOf(item)}
                               testId={`tc-pill-${item.room.id}`}
                             />
+                            {mismatch ? <MismatchWarning /> : null}
                           </span>
                           <span className={`shrink-0 text-sm tabular-nums ${count ? "font-semibold text-ink-2" : "text-muted"}`}>
                             {count ? `${count} รายการ` : "ไม่มีรายการ"}
