@@ -61,7 +61,8 @@ export type BoardRow = Operation & {
   /**
    * A row in the dressing room: who does the dressing, the scrub nurse ("scrub", ฝาก scrub ทำ) or the doctor
    * ("surgeon", แพทย์ทำเอง), from the booking's answer to "scrub ทำให้แทนไหม ?". A case without that answer (nobody
-   * booked it in the dressing room) is the doctor's, as the question asks whether the scrub does it instead. In the
+   * booked it in the dressing room) is the doctor's, as the question asks whether the scrub does it instead, except a
+   * HOSxP case nobody booked that the dressing rule names a dressing, which is the scrub nurse's (Pong, 27 Nov 2026). In the
    * dressing room whether a case was booked does not matter (Pong, 15 Nov 2026), so the row shows who does it instead
    * of where it came from. Left out in every other room.
    */
@@ -261,11 +262,15 @@ function showCases<T extends WorkbookCase>(cases: readonly T[], today: readonly 
 
 /**
  * Who does a row's dressing, in a dressing room only: the scrub nurse when the doctor booked the case in the dressing
- * room and said so, else the doctor.
+ * room and said so, else the doctor. A HOSxP case nobody booked whose name the dressing rule reads as a dressing
+ * (`dressingName`; lib/placement.ts isDressingCase) is the scrub nurse's too (Pong, 27 Nov 2026: "For hosxp cases that
+ * are classified as dressing, app will automatically assign พยาบาลทำ"). Worked out on every load, so the lists already
+ * uploaded follow it with no change to what is stored.
  */
-function doneByIn(roomId: string, dressingRooms: readonly string[], booking?: AddedCase): { doneBy?: DoneBy } {
+function doneByIn(roomId: string, dressingRooms: readonly string[], booking?: AddedCase, dressingName = false): { doneBy?: DoneBy } {
   if (!dressingRooms.includes(roomId)) return {};
-  return { doneBy: booking?.dressing && booking.scrubDoes === true ? "scrub" : "surgeon" };
+  if (!booking) return { doneBy: dressingName ? "scrub" : "surgeon" };
+  return { doneBy: booking.dressing && booking.scrubDoes === true ? "scrub" : "surgeon" };
 }
 
 function departmentName(dept: DeptCode | null): string | null {
@@ -460,7 +465,7 @@ function mergeRows(
       flag: dressingRoom ? null : "unbooked",
       ...(viewer.allHn ? { hn: normalizeHn(item.hn) } : {}),
       ...(viewer.allHn && item.patientName ? { patientName: item.patientName } : {}),
-      ...doneByIn(roomId, dressingRooms),
+      ...doneByIn(roomId, dressingRooms, undefined, isDressingCase(item.operation)),
       ...hospital,
     };
     deptOf.set(row, item.dept);

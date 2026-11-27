@@ -878,7 +878,7 @@ function buildSteps({
       id: "auto-dressing",
       chapter: 4,
       title: "ระบบจัดลงห้องทำแผลให้เอง",
-      body: "เคสนี้ไม่มีใครจอง ชื่อการผ่าตัดมี I&D ระบบจึงจัดลงห้องทำแผล ไม่ใช่ห้องของแผนก",
+      body: "เคสนี้ไม่มีใครจอง ชื่อการผ่าตัดมี I&D ระบบจึงจัดลงห้องทำแผล ไม่ใช่ห้องของแผนก และให้ scrub ทำ (รูปพยาบาล)",
       target: autoDressingRow,
       skip: () => dressingRoom === null,
       setup: () => (dressingRoom ? openRoom(dressingRoom) : undefined),
@@ -1683,6 +1683,7 @@ function DressingRuleCard({ onNext }: { onNext: () => void }) {
         })}
       </ul>
       <p className="coach-card-note">คำที่ระบบดู เช่น dressing, D/S, VAC, debridement, I&amp;D, ทำแผล</p>
+      <p className="coach-card-note mt-1">เคสที่ระบบจัดให้ ขึ้นรูปพยาบาล = ฝาก scrub ทำ</p>
       <p className="coach-card-note mt-1">เคสที่จองไว้ ลงห้องตามที่แพทย์เลือกตอนจอง</p>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">

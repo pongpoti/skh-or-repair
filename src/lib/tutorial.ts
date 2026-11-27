@@ -195,7 +195,9 @@ export function tutorialCases({
     }),
     booking("tutorial-dressing", date, periods, SKIN, "PLASTIC", "D/S + VAC, sacral wound", dressingHn, eveAt(today, 10, 5), {
       dressing: true,
-      scrubDoes: true,
+      // The doctor's own: the case HOSxP lists that nobody booked is the scrub nurse's (Pong, 27 Nov 2026), so the
+      // room shows both portraits.
+      scrubDoes: false,
       time: [9 * 60 + 30, 10 * 60],
     }),
     // The morning of the doctor's own room: the practice booking takes a time after it.

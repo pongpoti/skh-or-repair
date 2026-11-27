@@ -118,7 +118,7 @@ test("the doctor's choice of room wins when matched: the dressing room stays, an
       [`mt-${mine.id}`, "or-10", "matched", null, "scrub"],
       [`mt-${kept.id}`, "or-13", "matched", null, undefined],
       [`hx-${plain.caseId}`, "or-13", "hosxp", "unbooked", undefined],
-      [`hx-${unbooked.caseId}`, "or-10", "hosxp", null, "surgeon"],
+      [`hx-${unbooked.caseId}`, "or-10", "hosxp", null, "scrub"],
     ],
   );
   assert.equal(result.mismatchCount, 1);
