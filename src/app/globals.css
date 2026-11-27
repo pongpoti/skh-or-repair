@@ -2175,6 +2175,17 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 .tcp-or.is-closed .tcp-or-shape { stroke: var(--fp-closed-wall); }
 .tcp-or.is-closed .tcp-or-ring { fill: var(--fp-closed-badge); stroke: var(--fp-closed-wall); stroke-width: 2; }
 .tcp-or.is-closed .tcp-or-num { fill: var(--fp-closed-ink); }
+/* The Scope room's tag, white as an OR's ring, with "Scope" where an OR has its number. */
+.tcp-scope-tag { fill: #fff; stroke: var(--fp-wall); stroke-width: 1.6; }
+.tcp-scope.is-closed .tcp-scope-tag { fill: var(--fp-closed-badge); stroke: var(--fp-closed-wall); }
+.tcp-scope-name {
+  fill: var(--ink);
+  font: 700 17px var(--font-inter), var(--font-thai), system-ui, sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.tcp-scope .tcp-or-dept,
+.tcp-scope .tcp-or-thai { font-size: 19px; }
 /* The department's short label (ORTHO, VAS): Latin capitals, so a little spacing is safe. */
 .tcp-or-dept {
   font: 700 25.4px var(--font-inter), var(--font-thai), system-ui, sans-serif;

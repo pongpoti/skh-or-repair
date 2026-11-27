@@ -4,7 +4,7 @@ import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha
 
 /**
  * รพ.ท่าฉลอม's OR suite as Pong drew it (26 Nov 2026, "Below is SVG layout of OR ท่าฉลอม"): four ORs round the corridor,
- * the scrub areas (gridded), the small rooms and the sterile supply. Given a day of the weekly schedule
+ * the Scope room (Pong, 27 Nov 2026), the scrub areas (gridded), the small rooms and the sterile supply. Given a day of the weekly schedule
  * (lib/tha-chalom-schedule.ts), each OR takes its department's colour and label, as on รพ.สมุทรสาคร's plan: split
  * between morning (above) and afternoon (below) when they differ, the board's closed-room stripes for OR 3 while it is
  * turned into an intervention room, and plain for a room no one has (ว่าง). Without a day the ORs keep Pong's brown and
@@ -68,8 +68,15 @@ const ROOMS: readonly { x: number; y: number; w: number; h: number; grid?: true;
   { x: 135, y: 404, w: 80, h: 56 },
   { x: 135, y: 465, w: 50, h: 45 },
   { x: 135, y: 513, w: 50, h: 50 },
-  { x: 190, y: 465, w: 80, h: 98 },
 ];
+
+/**
+ * The Scope room, the square by the corridor's foot (Pong, 27 Nov 2026: "The circle room is scope", circled on the
+ * plan): coloured by its department as the ORs, with "Scope" on a white tag where an OR has its number.
+ */
+const SCOPE = { x: 190, y: 465, w: 80, h: 98 };
+/** The tag's text and the department's label in the Scope room, smaller than an OR's: the room is half as wide. */
+const SCOPE_TAG = 17;
 
 /** A room no one has: the board's empty-room floor. */
 const FREE_FILL = "var(--fp-or)";
@@ -164,6 +171,44 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
   );
 }
 
+function ScopeRoom({ entry }: { entry: ThaChalomRoomDay | null }) {
+  const x = SCOPE.x + SCOPE.w / 2;
+  const tagY = SCOPE.y + SCOPE.h * 0.36;
+  const labelY = SCOPE.y + SCOPE.h * 0.72;
+  const tag = (
+    <>
+      <rect className="tcp-scope-tag" x={x - 34} y={tagY - 12.5} width={68} height={25} rx={12.5} />
+      <text className="tcp-scope-name" x={x} y={tagY} style={{ fontSize: SCOPE_TAG }}>
+        Scope
+      </text>
+    </>
+  );
+  if (!entry) {
+    return (
+      <g className="tcp-scope" data-room="scope">
+        <rect className="tcp-or-shape" x={SCOPE.x} y={SCOPE.y} width={SCOPE.w} height={SCOPE.h} />
+        {tag}
+      </g>
+    );
+  }
+  const use = entry.am;
+  const state = use.kind === "closed" ? "closed" : use.kind === "free" ? "free" : "open";
+  return (
+    <g
+      className={`tcp-scope is-${state}`}
+      data-room="scope"
+      data-state={state}
+      role="img"
+      aria-label={roomDayText(entry)}
+      style={{ "--tcp-fill": fillOf(use) } as CSSProperties}
+    >
+      <rect className="tcp-or-shape" x={SCOPE.x} y={SCOPE.y} width={SCOPE.w} height={SCOPE.h} />
+      {tag}
+      <Label use={use} x={x} y={labelY} />
+    </g>
+  );
+}
+
 /** The plan sits at the top of its box, as รพ.สมุทรสาคร's does (components/floor-plan.tsx), centred across it; .tc-plan sizes it. */
 export function ThaChalomPlan({ className, day = null }: { className?: string; day?: readonly ThaChalomRoomDay[] | null }) {
   const byId = new Map((day ?? []).map((entry) => [entry.room.id as string, entry]));
@@ -173,7 +218,7 @@ export function ThaChalomPlan({ className, day = null }: { className?: string; d
       preserveAspectRatio="xMidYMin meet"
       className={className}
       role={day ? "group" : "img"}
-      aria-label="แปลนห้องผ่าตัด รพ.ท่าฉลอม: ห้องผ่าตัด 1 ถึง 4"
+      aria-label="แปลนห้องผ่าตัด รพ.ท่าฉลอม: ห้องผ่าตัด 1 ถึง 4 และห้อง Scope"
       data-testid="tha-chalom-plan"
     >
       <defs>
@@ -203,6 +248,7 @@ export function ThaChalomPlan({ className, day = null }: { className?: string; d
       {ORS.map((or) => (
         <OrRoom key={or.id} or={or} entry={day ? (byId.get(or.id) ?? null) : null} />
       ))}
+      <ScopeRoom entry={day ? (byId.get("scope") ?? null) : null} />
     </svg>
   );
 }
