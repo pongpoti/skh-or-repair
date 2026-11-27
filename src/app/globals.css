@@ -1401,7 +1401,7 @@ dialog[open]::backdrop {
 /* The repair's closed zone: dark stripes under the rooms, the dashed edge and tag over them, as on the repair plan images. */
 .fp-zone-bg { fill: var(--fp-zone); }
 .fp-zone-stripe { stroke: var(--fp-zone-line); }
-.fp-zone-fill { fill: url(#fp-zone); }
+.fp-zone-fill { fill: url(#fp-zone); fill-rule: evenodd; }
 .fp-zone-edge { fill: none; stroke: var(--fp-zone-edge); stroke-width: 10; stroke-dasharray: 30 18; stroke-linejoin: round; }
 .fp-zone-tag { fill: var(--fp-zone-edge); stroke: #fff; stroke-width: 8; }
 /* No letter-spacing on Thai SVG text: iPhone (WebKit) spaces every code point, which pulls the vowels and tone marks

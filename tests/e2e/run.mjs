@@ -3125,7 +3125,9 @@ async function main() {
       assert((await board.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "first half again");
       assert((await board.getAttribute("#or-1 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 1 closed again");
       assert((await board.getAttribute("#or-12 .fp-floor", "role")) === "button", "OR 12 operates again");
-      assert((await board.getAttribute("#r-2", "class"))?.includes("is-closed"), "RR 2 is closed in the first half");
+      // Pong, 27 Nov 2026: the lower RR (RR 1) is the repair zone in both halves; RR 2 stays a mint RR, as in the second.
+      assert((await board.getAttribute("#r-1", "class"))?.includes("is-closed"), "RR 1 is closed in the first half");
+      assert((await board.getAttribute("#r-2", "class"))?.includes("is-rr"), "RR 2 is a recovery room in the first half");
       assert((await board.locator('[data-testid="repair-zone"]').count()) === 1, "the repair zone is drawn");
       await nurse.close();
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);

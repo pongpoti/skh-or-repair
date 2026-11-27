@@ -71,7 +71,7 @@ The air-ventilation system is repaired in two halves (Pong, 14 Nov 2026). Each r
 
 | | Operating | Recovery rooms (RR) | Instrument room | Closed | NEURO and CVT emergencies |
 | --- | --- | --- | --- | --- | --- |
-| 1st half, planned 8 Dec 2026 – 26 Jan 2027 (50 days) | OR 9 EMER, OR 10 dressing (D/S), OR 11 คละแผนก (OTHER), OR 12 GENSX, OR 13 ORTHO | OR 7, 8 | – | OR 1–6, RR 1 and 2 | OR 12 or 13 (fewer cases) |
+| 1st half, planned 8 Dec 2026 – 26 Jan 2027 (50 days) | OR 9 EMER, OR 10 dressing (D/S), OR 11 คละแผนก (OTHER), OR 12 GENSX, OR 13 ORTHO | OR 7, 8, RR 2 (as usual) | – | OR 1–6, RR 1 | OR 12 or 13 (fewer cases) |
 | 2nd half, planned 27 Jan – 17 Mar 2027 (50 days) | OR 1 dressing, OR 2 ORTHO, OR 3 EMER, OR 4 คละแผนก (OTHER), OR 5 GENSX | RR 2 (as usual) | OR 6 (เครื่องมือ) | OR 7–13, RR 1 | OR 2 |
 
 **The dates and the switch are the admin's.** The planned dates are only the seed: an admin moves either half on `/admin` (ตารางผ่าตัดและช่วงปิดซ่อม, see Admin page). The dates are kept in the `repair_periods` table (one row per half, with who saved it and when). The rules: both halves need a start and an end, and the second half must start after the first ends; a gap between them is allowed, and the first half's rooms stay until the second half starts. The seed's first day moved from 14 Nov 2026 to 1 Jan 2026 on 18 Nov 2026, and to 8 Dec 2026 on 21 Nov 2026; `db/schema.sql` moves it in a database whose first half nobody has edited.
@@ -83,7 +83,7 @@ In the same section, **ตารางที่ใช้** is the admin's switch
 **How it looks:**
 - Each operating room is drawn in its department's own colour with the department's code as its label, as outside the repair.
 - The recovery rooms are light mint (`RECOVERY_ROOM` in the colour list, `src/lib/allocation.ts`) with dark green text, labelled RR; the instrument room is light tan (`INSTRUMENT_ROOM`, in the same list) with near-black text, labelled เครื่องมือ, as on the repair plan images. Neither can be opened.
-- Closed rooms have muted taupe stripes, walls and number badges, with ปิด. A recovery-area room the repair closes says ปิด too; one it leaves open (RR 2 in the second half) is mint, labelled RR.
+- Closed rooms have muted taupe stripes, walls and number badges, with ปิด. A recovery-area room the repair closes says ปิด too; one it leaves open (RR 2, in both halves; Pong, 27 Nov 2026: the lower RR is always repair zone) is mint, labelled RR.
 - The closed area of the half is drawn as one dark zone with taupe stripes laid under the rooms (so its corridors and service rooms go dark), a dashed edge and a large "พื้นที่ปิดซ่อม" tag over them, as on the repair plan images (`repair-plan/` in the project files). It takes no clicks and never covers a room in use, the lifts or the lobby; stairs inside the closed wing are hidden under it, as on the images. There is no separate note above the plan.
 
 A booking already saved for a room that does not operate on its day is marked in the doctor's list and left off the board. In development, `/preview?date=2027-02-01` shows the board as on any date.
