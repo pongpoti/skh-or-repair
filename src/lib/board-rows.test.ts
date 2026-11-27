@@ -538,12 +538,13 @@ test("a department with two rooms lists all of its cases in both, in one order, 
   const first = booking({ date: MONDAY, roomId: "or-5", hn: "1111111", surgeonId: "8", surgeon: "หมอ แปด", operation: "Lap chole", start: 600, end: 660 });
   const second = booking({ date: MONDAY, roomId: "or-2", hn: "2222222", surgeonId: "7", surgeon: "หมอ เจ็ด", operation: "Hernia", start: 540, end: 600 });
   const list = (rows: BoardRows["rows"], roomId: string) =>
-    rows.filter((row) => row.roomId === roomId).sort((a, b) => a.order - b.order).map((row) => [row.order, row.procedure, row.shownFrom ?? null]);
+    rows.filter((row) => row.roomId === roomId).sort((a, b) => a.order - b.order).map((row) => [row.order, row.procedure, row.shownFrom ? [row.shownFrom.roomId, row.shownFrom.order] : null]);
 
-  // Before an upload: both bookings in both rooms, by their time, the copy saying the room the booking is in.
+  // Before an upload: both bookings in both rooms, by their time, the copy saying the room the booking is in and its
+  // place there.
   const before = on(null, [first, second]);
-  assert.deepEqual(list(before.rows, "or-2"), [[1, "Hernia", null], [2, "Lap chole", "or-5"]]);
-  assert.deepEqual(list(before.rows, "or-5"), [[1, "Hernia", "or-2"], [2, "Lap chole", null]]);
+  assert.deepEqual(list(before.rows, "or-2"), [[1, "Hernia", null], [2, "Lap chole", ["or-5", 2]]]);
+  assert.deepEqual(list(before.rows, "or-5"), [[1, "Hernia", ["or-2", 1]], [2, "Lap chole", null]]);
   assert.deepEqual([before.countByRoom["or-2"], before.countByRoom["or-5"]], [2, 2]);
 
   // After it: the booked cases by time, then HOSxP's others in file order, the same in both rooms. Not the endoscopy in
@@ -570,8 +571,11 @@ test("a department with two rooms lists all of its cases in both, in one order, 
   const homes = after.rows.filter((row) => !row.shownFrom && pooled.includes(row.procedure));
   assert.equal(homes.length, 4);
   for (const row of after.rows.filter((item) => item.shownFrom)) {
-    assert.notEqual(row.shownFrom, row.roomId);
-    assert.ok(homes.some((home) => home.id === row.id && home.roomId === row.shownFrom), `${row.procedure}: copied from its own room`);
+    assert.notEqual(row.shownFrom?.roomId, row.roomId);
+    assert.ok(
+      homes.some((home) => home.id === row.id && home.roomId === row.shownFrom?.roomId && home.order === row.shownFrom?.order),
+      `${row.procedure}: copied from its own room, with its place there`,
+    );
   }
   // Each case counted once in the totals.
   assert.equal(after.mismatchCount, after.rows.filter((row) => row.flag && !row.shownFrom).length);

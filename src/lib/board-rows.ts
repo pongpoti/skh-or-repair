@@ -71,10 +71,10 @@ export type BoardRow = Operation & {
   /**
    * A case of a department with two rooms or more that day is listed in each of them (Pong, 27 Nov 2026: "For day that
    * dept has 2 rooms : display both booking and hosxp cases on both rooms"): the copy in a room other than the one the
-   * case was put in (lib/placement.ts placeAll: one surgeon, one room) says that room here. Totals count a case once,
-   * by the rows without it.
+   * case was put in (lib/placement.ts placeAll: one surgeon, one room) says that room, and the case's place in that
+   * room's list, here. Totals and a room's own marks count a case once, by the rows without it.
    */
-  shownFrom?: string;
+  shownFrom?: { roomId: string; order: number };
 };
 
 /**
@@ -506,13 +506,17 @@ function mergeRows(
   let mismatchCount = 0;
   const numbered = rows.flatMap((row): BoardRow[] => {
     if (row.flag) mismatchCount += 1;
-    return listedIn(row.roomId, deptOf.get(row) ?? null).map((roomId): BoardRow => {
+    const listed = listedIn(row.roomId, deptOf.get(row) ?? null).map((roomId) => {
       const slot = (order.get(roomId) ?? 0) + 1;
       order.set(roomId, slot);
       countByRoom[roomId] = slot;
       if (row.flag) mismatchByRoom[roomId] = (mismatchByRoom[roomId] ?? 0) + 1;
-      return roomId === row.roomId ? { ...row, order: slot } : { ...row, roomId, order: slot, shownFrom: row.roomId };
+      return { roomId, slot };
     });
+    const home = { roomId: row.roomId, order: listed.find((entry) => entry.roomId === row.roomId)?.slot ?? 0 };
+    return listed.map(({ roomId, slot }): BoardRow =>
+      roomId === row.roomId ? { ...row, order: slot } : { ...row, roomId, order: slot, shownFrom: home },
+    );
   });
 
   const unmatched = unmatchedRows.map((row, index): BoardRow => ({ ...row, order: index + 1 }));

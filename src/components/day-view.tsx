@@ -77,16 +77,20 @@ export function DayView({
   const several = rooms.length > 1;
   const drag = useRef<Drag | null>(null);
   // The length a new start keeps: the time's length before a run of start picks, so stepping through the starts with the
-  // arrow keys past a booking does not leave it cut short. A tap, a drag or the ถึง list starts afresh.
-  const wanted = useRef<number | null>(null);
+  // arrow keys past a booking does not leave it cut short. Kept with the time the last pick gave, and used only while the
+  // time is still that one: a tap, a drag, the ถึง list or a time the form puts in (another booking) starts afresh.
+  const wanted = useRef<{ length: number; after: TimeRange } | null>(null);
   const give = (next: TimeRange | null) => {
     wanted.current = null;
     onChange(next);
   };
   function pickStart(start: number) {
-    const length = value ? (wanted.current ?? value.end - value.start) : DEFAULT_LENGTH;
-    wanted.current = length;
-    onChange(startAt(value, start, busy, length));
+    const run = wanted.current;
+    const same = run !== null && value !== null && run.after.start === value.start && run.after.end === value.end;
+    const length = value ? (same ? run.length : value.end - value.start) : DEFAULT_LENGTH;
+    const next = startAt(value, start, busy, length);
+    wanted.current = { length, after: next };
+    onChange(next);
   }
 
   function begin(edge: Drag["edge"], event: ReactPointerEvent<HTMLElement>) {

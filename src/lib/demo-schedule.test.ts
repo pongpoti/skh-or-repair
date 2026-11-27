@@ -76,6 +76,11 @@ test("on any weekday, before, between and after the halves too (the weekly sched
         const ids = built.rows.filter((row) => row.roomId === room.id).map((row) => row.id);
         assert.equal(new Set(ids).size, ids.length, `${date} ${room.id}: unique row ids in the room`);
       }
+      // A copy says its case's own room and place there.
+      for (const row of built.rows.filter((item) => item.shownFrom)) {
+        const home = homes.find((item) => item.id === row.id);
+        assert.ok(home && home.roomId === row.shownFrom?.roomId && home.order === row.shownFrom?.order, `${date} ${row.id}: its own room and place`);
+      }
       if (repairOn(date, periods)) {
         // In the repair the board's own rules alone give every room its cases: nothing is added straight in a room.
         assert.ok(!built.rows.some((row) => row.id.includes("-extra-")), `${date}: no added rows in the repair`);

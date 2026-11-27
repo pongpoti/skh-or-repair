@@ -228,16 +228,19 @@ export function BookingSheet({
   const underWay = row ? UNDER_WAY.has(row.status) : false;
   const room = booking ? getRoom(booking.roomId) : undefined;
   const where = booking ? bookedRoom(booking, own.periods) : null;
-  const placeRoom = getRoom(row?.roomId ?? where?.roomId ?? null) ?? room;
+  // The room the case is in, and its place there: a copy in a department's other room (BoardRow.shownFrom) says its own.
+  const rowRoom = row ? (row.shownFrom?.roomId ?? row.roomId) : null;
+  const rowOrder = row ? (row.shownFrom?.order ?? row.order) : null;
+  const placeRoom = getRoom(rowRoom ?? where?.roomId ?? null) ?? room;
   // รพ.ท่าฉลอม's rooms by its own names ("ห้อง Scope"): the row's, where MX's list puts a matched case, as at รพ.สมุทรสาคร.
   const roomName = booking
     ? atThaChalom(booking)
-      ? placeRoomName(row?.roomId ?? booking.roomId, booking.place)
+      ? placeRoomName(rowRoom ?? booking.roomId, booking.place)
       : placeRoom
         ? roomLabel(placeRoom)
         : booking.roomId
     : "";
-  const heading = booking ? [roomName, row ? `ลำดับ ${row.order}` : null, thaiDate(booking.date, "short")].filter(Boolean).join(" · ") : "";
+  const heading = booking ? [roomName, rowOrder ? `ลำดับ ${rowOrder}` : null, thaiDate(booking.date, "short")].filter(Boolean).join(" · ") : "";
 
   function act(run: () => void) {
     if (!settled() || pending) return;

@@ -417,7 +417,8 @@ export function SuiteBoard({
       if (next[item.roomId]) continue;
       const target = getRoom(item.roomId);
       if (!target || !isSelectableRoom(target, day, periods)) continue;
-      next[item.roomId] = roomMark(rowsOf(operations, item.roomId));
+      // The room's own cases: a copy of the other room's case (BoardRow.shownFrom) is not running here.
+      next[item.roomId] = roomMark(rowsOf(operations, item.roomId).filter((row) => !row.shownFrom));
     }
     return next;
   }, [operations, day, periods]);

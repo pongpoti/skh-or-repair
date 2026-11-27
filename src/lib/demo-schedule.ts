@@ -307,7 +307,8 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
         bookedAt,
         ...(dressingRooms.includes(room.id) ? { doneBy: "surgeon" as const } : {}),
       };
-      rows.push(extra, ...listed.filter((id) => id !== room.id).map((id): BoardRow => ({ ...extra, roomId: id, shownFrom: room.id })));
+      const home = { roomId: room.id, order: slot };
+      rows.push(extra, ...listed.filter((id) => id !== room.id).map((id): BoardRow => ({ ...extra, roomId: id, shownFrom: home })));
       matched += 1;
     }
   });
@@ -319,7 +320,14 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
     order.set(row.roomId, slot);
     return { ...row, order: slot };
   });
-  return { ...built, rows: sorted, matched, countByRoom };
+  // A copy says its case's new place in the case's own room.
+  const homeOrder = new Map(sorted.filter((row) => !row.shownFrom).map((row) => [`${row.id} ${row.roomId}`, row.order]));
+  const listed = sorted.map((row): BoardRow =>
+    row.shownFrom
+      ? { ...row, shownFrom: { ...row.shownFrom, order: homeOrder.get(`${row.id} ${row.shownFrom.roomId}`) ?? row.shownFrom.order } }
+      : row,
+  );
+  return { ...built, rows: listed, matched, countByRoom };
 }
 
 /**
