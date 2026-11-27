@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   addDays,
+  ADMIN_BOOK_AHEAD_DAYS,
+  bookAheadDays,
+  BOOK_AHEAD_DAYS,
   bookedAlready,
   bookedAtText,
   bookedChoice,
@@ -20,6 +23,7 @@ import {
   editClosesOn,
   editedMessage,
   editRequeues,
+  firstBookingDay,
   bookableFrom,
   BOOKING_CUTOFF_RULE,
   MAX_NOTE,
@@ -824,4 +828,26 @@ test("a รพ.ท่าฉลอม booking stays in the room it was saved in, 
     daySlots([tc], REPAIR, "7").map((slot) => slot.roomId),
     ["scope"],
   );
+});
+
+test("an admin books with no time limits: today at any hour, a year ahead (Pong, 27 Nov 2026: \"No restriction\")", () => {
+  // Monday 16 Nov 2026 at 15:30: a doctor's first day is Wednesday; an admin's is today itself.
+  assert.equal(firstBookingDay(false, "2026-11-16", at(15, 30)), "2026-11-18");
+  assert.equal(firstBookingDay(true, "2026-11-16", at(15, 30)), "2026-11-16");
+  assert.equal(bookAheadDays(false), BOOK_AHEAD_DAYS);
+  assert.equal(bookAheadDays(true), ADMIN_BOOK_AHEAD_DAYS);
+  // Today, and beyond the doctors' 60 days, with the admin's window; the doctors' window still refuses both.
+  const admin = { earliest: TODAY, ahead: ADMIN_BOOK_AHEAD_DAYS };
+  assert.ok(check({ ...ok, date: TODAY }, admin).ok, "today, for an admin");
+  const far = "2027-03-15";
+  assert.ok(addDays(TODAY, BOOK_AHEAD_DAYS) < far);
+  assert.ok(check({ ...ok, date: far }, admin).ok, "four months ahead, for an admin");
+  const refused = check({ ...ok, date: far });
+  assert.ok(!refused.ok && refused.error === `จองล่วงหน้าได้ไม่เกิน ${BOOK_AHEAD_DAYS} วัน`);
+  assert.ok(!check({ ...ok, date: TODAY }).ok, "today, for a doctor");
+  // Weekends and holidays stay closed: no board shows them.
+  assert.ok(!check({ ...ok, date: "2026-11-14" }, admin).ok, "a Saturday");
+  assert.ok(!check({ ...ok, date: "2026-12-10" }, { ...admin, holidays: DECEMBER }).ok, "a holiday");
+  // An admin's booking from today on is never closed to edits (bookingState with the admin's first day).
+  assert.equal(bookingState(TODAY, TODAY, firstBookingDay(true, TODAY, at(16))), "open");
 });

@@ -4,7 +4,7 @@ import { BoardRefresh } from "@/components/board-refresh";
 import type { BoardView, CaseAdding } from "@/components/suite-board";
 import { ThaChalomBoard } from "@/components/tha-chalom-board";
 import { TopBar } from "@/components/top-bar";
-import { addDays, BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
+import { addDays, bookAheadDays, firstBookingDay } from "@/lib/added-cases";
 import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requestPath, requireUser } from "@/lib/auth/server";
@@ -19,7 +19,8 @@ import { THA_CHALOM_PATH } from "@/lib/places";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import { thaChalomPickedDay, thaChalomPickRange } from "@/lib/tha-chalom-schedule";
-import { STAFF_TUTORIAL_COOKIE, STAFF_TUTORIAL_SEEN } from "@/lib/tutorial";
+import { TUTORIAL_COOKIE } from "@/lib/tutorial";
+import { tutorialSeen } from "@/lib/tutorial-store";
 import type { SessionUser } from "@/lib/tokens";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
@@ -52,7 +53,7 @@ async function loadBoard(
   date: string,
   day: BoardDay,
   picked: boolean,
-): Promise<{ board: Omit<BoardView, "date" | "mismatchCount">; adding: CaseAdding | null; upload: boolean } | null> {
+): Promise<{ board: Omit<BoardView, "date" | "mismatchCount">; adding: CaseAdding | null; upload: boolean; tutorialDue: boolean } | null> {
   try {
     const pool = await db();
     const [doctor, bookings, workbook, viewer] = await Promise.all([
@@ -64,16 +65,22 @@ async function loadBoard(
     const built = buildThaChalomRows({ date, workbook: workbook?.cases ?? null, bookings, viewer });
     const board = { rows: built.rows, uploaded: built.uploaded, mismatchByRoom: built.mismatchByRoom, offBoard: built.offBoard };
     let adding: CaseAdding | null = null;
+    // As on รพ.สมุทรสาคร's board, RN, PN, PCA and MX who have not seen the tutorial start there, once (Pong, 27 Nov 2026:
+    // "Disable always-on"); an admin is never sent, nor someone not on the users list. A doctor is sent from รพ.สมุทรสาคร's.
+    const seenBy = doctor || isAdmin(user.sub) ? null : viewer.userId;
+    const seen = seenBy ? tutorialSeen(pool, seenBy) : Promise.resolve(true);
     if (doctor) {
       const [mine, { holidays, unlisted }] = await Promise.all([
         // The doctor's own bookings here, HN included: theirs to see.
         listCasesBy(pool, doctor.id, day.today, "tha-chalom"),
-        holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS)),
+        holidaysBetween(day.today, addDays(day.today, bookAheadDays(isAdmin(user.sub)))),
       ]);
       adding = {
         doctor: { name: fullName(doctor), subtype: doctor.subtype },
         today: day.today,
-        earliest: earliestBookingDay(day.today, day.minutes, holidays),
+        // An admin books from today at any hour, a year ahead (Pong, 27 Nov 2026: "No restriction").
+        earliest: firstBookingDay(isAdmin(user.sub), day.today, day.minutes, holidays),
+        admin: isAdmin(user.sub),
         holidays,
         unlisted,
         mine,
@@ -84,8 +91,10 @@ async function loadBoard(
         onDay: thaChalomDayBookings,
       };
     }
+    // The cookie the tutorial sets on a start or skip counts too: the row may not be written yet, or could not be.
+    const tutorialDue = !(await seen) && (await cookies()).get(TUTORIAL_COOKIE)?.value !== seenBy;
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
-    return { board, adding, upload: viewer.allHn };
+    return { board, adding, upload: viewer.allHn, tutorialDue };
   } catch (error) {
     console.error("[tha-chalom] cases unavailable:", (error as Error).message);
     return null;
@@ -108,9 +117,8 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
   const loaded = await loadBoard(user, date, day, date !== day.boardDate);
   // Outside the try of loadBoard: redirect() works by throwing.
   if (!loaded) redirect(unavailablePath("server", await requestPath()));
-  // As on รพ.สมุทรสาคร's board: anyone but a doctor or an admin starts with the staff's tutorial each time they open the
-  // app (Pong, 27 Nov 2026: "Always on tutorial for non-DR"), and comes back here after it.
-  if (!loaded.adding && !admin && (await cookies()).get(STAFF_TUTORIAL_COOKIE)?.value !== STAFF_TUTORIAL_SEEN) redirect("/tutorial?first=1&back=tha-chalom");
+  // The staff's first visit: the tutorial, then back here.
+  if (loaded.tutorialDue) redirect("/tutorial?first=1&back=tha-chalom");
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">

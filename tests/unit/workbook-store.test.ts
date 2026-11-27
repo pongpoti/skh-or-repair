@@ -165,6 +165,20 @@ describe("workbook uploads (database)", () => {
     assert.equal(await deletePastLists(pool, "2026-11-19"), 0);
   });
 
+  test("an admin's upload for a later day, counted in a later cycle, keeps the days in between", async () => {
+    // Pong, 27 Nov 2026: "admin can upload file of any date on anytime". Monday's list, then on Monday an admin's for
+    // Thursday, which counts in Wednesday's cycle (lib/board-day.ts adminCycleDay): Monday's and Tuesday's stay.
+    const monday = await saveUpload(pool, upload({ cycleDay: "2026-11-13", targetDate: "2026-11-16", uploadedAt: new Date("2026-11-13T15:10:00+07:00") }));
+    const tuesday = await saveUpload(pool, upload());
+    const thursday = await saveUpload(
+      pool,
+      upload({ cycleDay: "2026-11-18", targetDate: "2026-11-19", uploadedAt: new Date("2026-11-16T20:00:00+07:00"), uploadedBy: "U-admin" }),
+    );
+    assert.equal((await casesOf(pool, monday.id)).length, 2, "today's list stays");
+    assert.equal((await casesOf(pool, tuesday.id)).length, 2);
+    assert.equal((await latestUpload(pool, "2026-11-18", "2026-11-19"))?.id, thursday.id, "the board shows it from Wednesday's cycle");
+  });
+
   test("an admin resets one day to its bookings: every HOSxP list of the day goes, at both hospitals", async () => {
     // Pong, 27 Nov 2026: "Add option for admin to reset OR schedule of specific date (reset only for hosxp case)"
     const tc = (position: number) => placed(position, { caseId: String(80000 + position), roomId: "or-1", place: "tha-chalom" });
