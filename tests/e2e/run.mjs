@@ -2996,7 +2996,7 @@ async function main() {
       assert(
         JSON.stringify(sections) ===
           JSON.stringify(
-            ["ตารางผ่าตัดและช่วงปิดซ่อม", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ตารางย้อนหลังจาก HOSxP", "การจองจำลอง", "โหมดทดสอบ"].map((title) => [
+            ["ตารางผ่าตัดและช่วงปิดซ่อม", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ล้างตาราง HOSxP", "การจองจำลอง", "โหมดทดสอบ"].map((title) => [
               title,
               "false",
               false,
@@ -4380,21 +4380,19 @@ async function main() {
       await ownerShot(page, "board-picked-second-half.png");
       await page.goto(`${APP}/skh?date=2026-11-17`, { waitUntil: "networkidle" });
 
-      // a past day (Pong, 18 Nov 2026: "allow view calendar backward"): the calendar goes back to January 2569 and no
-      // further; a day there has the first half's rooms (no weekly schedule) and says it is a past list
+      // no past day (Pong, 27 Nov 2026: "Disable past day view and clear pastday data for both places", in place of the
+      // calendar back to January 2569 of 18 Nov): the calendar starts today, and a past day in the address, at either
+      // hospital, shows the current board
       await openPicker();
-      for (let i = 0; i < 12 && (await page.locator('#board-date-calendar [data-nav="prev"]').isEnabled()); i += 1) {
-        await page.click('#board-date-calendar [data-nav="prev"]');
+      assert((await textOf(page, "#board-date-calendar-title")) === "พฤศจิกายน 2569", `this month: ${await textOf(page, "#board-date-calendar-title")}`);
+      assert(await page.locator('#board-date-calendar [data-nav="prev"]').isDisabled(), "no month before this one");
+      assert(await day("2026-11-16").isDisabled(), "yesterday cannot be picked");
+      assert(await day("2026-11-17").isEnabled(), "today still can, after 16:00");
+      for (const path of ["/skh", "/tha-chalom"]) {
+        await page.goto(`${APP}${path}?date=2026-11-16`, { waitUntil: "networkidle" });
+        assert((await page.getAttribute("header time", "datetime")) === "2026-11-18", `${path}: a past day in the address shows the current board`);
+        assert((await textOf(page, '[data-testid="board-eyebrow"]')) !== "ตารางผ่าตัดย้อนหลัง", `${path}: no past list`);
       }
-      assert((await textOf(page, "#board-date-calendar-title")) === "มกราคม 2569", `the first month: ${await textOf(page, "#board-date-calendar-title")}`);
-      assert(await page.locator('#board-date-calendar [data-nav="prev"]').isDisabled(), "no month before January 2569");
-      await day("2026-01-05").click();
-      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-01-05");
-      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดย้อนหลัง", "a past day's eyebrow");
-      assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "the first half's rooms in January 2569");
-      assert((await page.getAttribute("#or-12 .fp-floor", "role")) === "button", "OR 12 operates");
-      assert((await page.getAttribute("#or-2 .fp-floor", "aria-label"))?.endsWith("ปิด"), "OR 2 is closed, not the weekly schedule's");
-      await ownerShot(page, "board-picked-past-day.png");
       await page.goto(`${APP}/skh?date=2026-11-17`, { waitUntil: "networkidle" });
 
       // a day further ahead: no list yet; the way back to the current board
@@ -4950,7 +4948,9 @@ async function main() {
       assert((await page.locator('[data-testid="tutorial-notice"]').count()) === 1, "a badge says the cases are made up");
       assert((await textOf(page, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "a first visit may skip it");
       assert((await page.locator('[data-testid="coach-welcome-tip"]').count()) === 1, "the welcome card says booked cases go first");
-      assert((await page.locator(".coach-stages li").count()) === 6, "six chapters on the welcome card, ตัวอย่างจริง among them");
+      // No ตัวอย่างจริง chapter since the past days went (Pong, 27 Nov 2026: "Disable past day view").
+      assert((await page.locator(".coach-stages li").count()) === 5, "five chapters on the welcome card");
+      assert(!(await textOf(page, ".coach-stages")).includes("ตัวอย่างจริง"), "no chapter on the real days before");
       // Pong, 20 Nov 2026: "Create animated mascot surgeon display during tutorial": the surgeon waves hello
       assert((await page.getAttribute('[data-testid="coach-welcome"] [data-testid="mascot"]', "data-mood")) === "wave", "the mascot waves on the welcome card");
       await ownerShot(page, "tutorial-welcome.png");
@@ -5103,17 +5103,8 @@ async function main() {
           );
         },
         doers: async () => assert(JSON.stringify(await rowIcons(page)) === '["scrub","surgeon"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(page))}`),
-        // Pong, 20 Nov 2026: "note to user that user can view previous real example of in-hours elective case assignment
-        // (ตัวอย่างเคส elective ในเวลา) on month Jan to Oct 2026 by swiping layout or choose date from calendar, the OR
-        // layout will assume to be first half of repair phase"
-        examples: async () => {
-          assert((await textOf(page, "#coach-examples-title")) === "ดูตัวอย่างเคส elective ในเวลา", "Pong's words as the title");
-          assert((await textOf(page, '[data-testid="coach-examples"] .coach-card-text')).includes("ม.ค.–ต.ค. 2569"), "January to October 2026");
-          assert((await page.locator('[data-testid="coach-examples-ways"] li').count()) === 2, "swipe the plan, or the calendar");
-          assert((await textOf(page, '[data-testid="coach-examples-plan"]')).includes("ตารางผ่าตัดปกติ"), "a past day shows the normal schedule");
-        },
       });
-      assert(walked.indexOf("examples") > walked.indexOf("doers") && walked.indexOf("examples") < walked.indexOf("finish"), `the real days before, after the dressing room: ${walked.join(", ")}`);
+      assert(!walked.includes("examples"), `no card on the real days before: ${walked.join(", ")}`);
       assert(walked.indexOf("priority") >= 0 && walked.indexOf("priority") + 1 === walked.indexOf("book"), `the priority card just before the booking: ${walked.join(", ")}`);
       await page.waitForTimeout(700);
       await page.screenshot({ path: join(SCREENS, "tutorial-finish.png") });
@@ -5183,7 +5174,7 @@ async function main() {
       await nursePage.waitForSelector('[data-testid="coach-welcome"]');
       assert((await textOf(nursePage, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "the staff may skip it at once");
       assert((await textOf(nursePage, '[data-testid="coach-welcome-note"]')).includes("ทุกครั้งที่เข้าแอป"), "the welcome says it opens each time");
-      assert((await nursePage.locator(".coach-stages li").count()) === 5, "five chapters, no booking");
+      assert((await nursePage.locator(".coach-stages li").count()) === 4, "four chapters, no booking");
       assert((await nursePage.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button in the staff's tutorial");
       assert((await nursePage.locator('[data-testid="place-tabs"]').count()) === 1, "the hospital switch, as on the staff's board");
       await ownerShot(nursePage, "tutorial-staff-welcome.png");
@@ -5213,7 +5204,7 @@ async function main() {
       for (const id of ["book", "form-hn", "form-submit", "booked", "my-row", "my-manage", "upload-button"]) {
         assert(!staffWalked.includes(id), `no ${id} step for a nurse: ${staffWalked.join(", ")}`);
       }
-      for (const id of ["plan", "place", "priority", "booked-row", "row-icon", "upload", "matched", "unbooked", "note", "auto-dressing", "doers", "examples", "row-symbols"]) {
+      for (const id of ["plan", "place", "priority", "booked-row", "row-icon", "upload", "matched", "unbooked", "note", "auto-dressing", "doers", "row-symbols"]) {
         assert(staffWalked.includes(id), `a ${id} step for the staff: ${staffWalked.join(", ")}`);
       }
       await ownerShot(nursePage, "tutorial-staff-finish.png");
@@ -5391,99 +5382,93 @@ async function main() {
       }
     });
 
-    await t("admin: past days' HOSxP lists imported on /admin show on the board's calendar; importing again replaces them", async () => {
-      // Thu 19 Nov: the made-up sample's days (Mon 2 to Sat 7 Nov) are all past
-      setNow("2026-11-19T10:00:00+07:00");
-      const imported = async () =>
-        (await db.query("SELECT to_char(target_date, 'YYYY-MM-DD') AS day, placed FROM workbook_uploads WHERE past_import ORDER BY target_date")).rows;
-      assert((await imported()).length === 0, "no imported list to start with");
+    await t("admin: one day's HOSxP lists reset on /admin, both hospitals, bookings kept; the simulated bookings on the board's day", async () => {
+      // Pong, 27 Nov 2026: "Add option for admin to reset OR schedule of specific date (reset only for hosxp case)"
+      // Tue 17 Nov 10:00. Made-up lists: Tuesday's (two uploads, a รพ.ท่าฉลอม case among them) and Wednesday's.
+      setNow("2026-11-17T10:00:00+07:00");
+      const saved = (await db.query("SELECT id FROM workbook_uploads")).rows.map((row) => row.id);
+      const addList = async (target, cycle, at, cases) => {
+        const { rows } = await db.query(
+          `INSERT INTO workbook_uploads (target_date, cycle_day, uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary, tha_chalom)
+           VALUES ($1, $2, $3, $4, $5, 'reset-test.xlsx', $6, $6, $6, NULL, true) RETURNING id`,
+          [target, cycle, at, RP.mx.sub, RP.mx.name, cases.length],
+        );
+        for (const [position, [room, place]] of cases.entries()) {
+          await db.query(
+            `INSERT INTO workbook_cases (upload_id, case_id, hn, operation, surgeon, dept, team, room_id, shift, status, urgency, booked_time, position, patient_name, place)
+             VALUES ($1, $2, $3, 'Excision lipoma', 'นพ. ทดสอบ ล้างตาราง', 'GENSX', 'GENSX', $4, 'in', 'scheduled', 'Elective', NULL, $5, 'ผู้ป่วยสมมุติ', $6)`,
+            [rows[0].id, `R${target}-${position}`, `99${position}`, room, position + 1, place],
+          );
+        }
+        return rows[0].id;
+      };
+      await db.query("DELETE FROM workbook_uploads WHERE target_date IN ('2026-11-17', '2026-11-18')");
+      await addList("2026-11-17", "2026-11-16", "2026-11-16T15:10:00+07:00", [["or-12", "skh"]]);
+      await addList("2026-11-17", "2026-11-16", "2026-11-16T15:20:00+07:00", [["or-12", "skh"], ["or-2", "skh"], ["or-1", "tha-chalom"]]);
+      const wednesday = await addList("2026-11-18", "2026-11-17", "2026-11-17T09:00:00+07:00", [["or-2", "skh"]]);
+      const bookingsBefore = (await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n;
+
       const ctx = await contextAs(RP.admin);
       const page = await ctx.newPage();
       const errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
       await page.setViewportSize({ width: 390, height: 844 });
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
-      assert((await textOf(page, '[data-testid="past-span"]')) === "ยังไม่มีตารางย้อนหลัง", `nothing yet: ${await textOf(page, '[data-testid="past-span"]')}`);
-      await openSection(page, "past");
-      assert((await textOf(page, "#past-title")) === "ตารางย้อนหลังจาก HOSxP", "the section's title");
+      const listed = (await db.query("SELECT count(DISTINCT target_date)::int AS n FROM workbook_uploads WHERE target_date >= '2026-11-17'")).rows[0].n;
+      assert((await textOf(page, '[data-testid="reset-summary"]')) === `มีตาราง HOSxP ${listed} วัน`, `the line: ${await textOf(page, '[data-testid="reset-summary"]')}`);
+      await openSection(page, "reset");
+      assert((await textOf(page, "#reset-title")) === "ล้างตาราง HOSxP", "the section's title");
+      const tuesday = page.locator('[data-testid="reset-days"] li[data-date="2026-11-17"]');
+      assert((await tuesday.locator("p").first().textContent()) === "17 พ.ย. 2569", "the day");
+      const detail = await tuesday.locator("p").nth(1).textContent();
+      assert(detail === `2 เคส · ท่าฉลอม 1 · อัปโหลด 2 ครั้ง · ล่าสุด 16 พ.ย. 2569 15:20 น. โดย ${RP.mx.name}`, `the day's line: ${detail}`);
+      assert((await page.locator('[data-testid="reset-days"] li[data-date="2026-11-16"]').count()) === 0, "no past day");
+      // one tap asks, the second deletes
+      await tuesday.locator('[data-testid="reset-day"]').click();
+      assert((await tuesday.locator('[data-testid="reset-day"]').textContent()) === "ยืนยันล้าง", "asks once more");
+      assert((await db.query("SELECT count(*)::int AS n FROM workbook_uploads WHERE target_date = '2026-11-17'")).rows[0].n === 2, "nothing deleted yet");
+      await noSideScroll(page, "the reset section at 390px");
+      await page.locator('[data-testid="reset-section"]').screenshot({ path: join(SCREENS, "admin-reset.png") });
+      shots.push("admin-reset.png");
+      await tuesday.locator('[data-testid="reset-day"]').click();
+      await page.waitForSelector('[data-testid="reset-result"]');
+      assert((await textOf(page, '[data-testid="reset-result"]')) === "ล้างตาราง HOSxP วันที่ 17 พ.ย. 2569 แล้ว เหลือเฉพาะเคสที่จอง", `the answer: ${await textOf(page, '[data-testid="reset-result"]')}`);
+      assert((await page.locator('[data-testid="reset-days"] li[data-date="2026-11-17"]').count()) === 0, "the day leaves the list");
+      assert((await db.query("SELECT count(*)::int AS n FROM workbook_uploads WHERE target_date = '2026-11-17'")).rows[0].n === 0, "both of Tuesday's lists gone");
+      assert((await db.query("SELECT count(*)::int AS n FROM workbook_cases c JOIN workbook_uploads u ON u.id = c.upload_id WHERE u.target_date = '2026-11-17'")).rows[0].n === 0, "with their cases");
+      assert((await db.query("SELECT count(*)::int AS n FROM workbook_uploads WHERE id = $1", [wednesday])).rows[0].n === 1, "Wednesday's list stays");
+      assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === bookingsBefore, "every booking stays");
+      // the board now has no list for Tuesday at either hospital
+      for (const path of ["/skh", "/tha-chalom"]) {
+        await page.goto(`${APP}${path}`, { waitUntil: "networkidle" });
+        assert((await textOf(page, '[data-testid="no-upload-alert"]')).startsWith("ยังไม่มีตาราง HOSxP"), `${path}: no list now`);
+      }
 
-      const importFile = async () => {
-        await page.setInputFiles('[data-testid="past-file"]', SAMPLE_WORKBOOK);
-        await page.click('[data-testid="past-submit"]');
-        await page.waitForSelector('[data-testid="past-result"]', { timeout: 30_000 });
-        return textOf(page, '[data-testid="past-result"]');
-      };
-      // Mon 2 to Fri 6 Nov are workdays; Saturday's rows are left out
-      const message = await importFile();
-      const days = await imported();
-      assert(JSON.stringify(days.map((row) => row.day)) === JSON.stringify(["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"]), `the days: ${JSON.stringify(days)}`);
-      const placed = days.reduce((sum, row) => sum + row.placed, 0);
-      assert(message === `บันทึก 5 วัน 2–6 พ.ย. 2569 ลงห้อง ${placed} เคส`, `the answer: ${message}`);
-      assert((await textOf(page, '[data-testid="past-span"]')) === "มีแล้ว 5 วัน · 2–6 พ.ย. 2569", `the line: ${await textOf(page, '[data-testid="past-span"]')}`);
-      await noSideScroll(page, "the admin page with the past lists section at 390px");
-      await page.locator('[data-testid="past-section"]').screenshot({ path: join(SCREENS, "admin-past-lists.png") });
-      shots.push("admin-past-lists.png");
-
-      // importing the same file again replaces the lists: still one per day
-      assert((await importFile()) === message, "the same answer again");
-      const again = (await db.query("SELECT count(*)::int AS n FROM workbook_uploads WHERE past_import")).rows[0].n;
-      assert(again === 5, `one list per day: ${again}`);
-
-      // the board's calendar: Thu 5 Nov now has its list, its cases in their rooms
-      await page.goto(`${APP}/skh?date=2026-11-05`, { waitUntil: "networkidle" });
-      assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดย้อนหลัง", "a past day");
-      assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "a past day with a list has no no-list notice");
-      await page.goto(`${APP}/skh?date=2026-11-05&room=or-12`, { waitUntil: "networkidle" });
-      await page.waitForSelector(".case-row");
-      const rows = await page.$$eval(".case-row", (items) => items.length);
-      assert(rows >= 1, `OR 12 on 5 Nov: ${rows} cases`);
-
-      // the simulated bookings (Pong, 22 Nov 2026): /admin opens them on 1 Oct 2026; on Thu 5 Nov they are made up from
-      // its imported list, find their cases in the rooms, and nothing is saved
-      const bookingsBefore = (await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n;
+      // the simulated bookings (Pong, 22 Nov 2026) open on the board's own day, made up from Wednesday's list there
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
       await openSection(page, "sim");
       assert((await textOf(page, "#sim-title")) === "การจองจำลอง", "the simulation's section title");
-      assert((await page.getAttribute('[data-testid="sim-october"]', "href")) === "/skh?sim=1&date=2026-10-01", "it opens on 1 Oct 2026");
+      assert((await page.getAttribute('[data-testid="sim-october"]', "href")) === "/skh?sim=1", "it opens on the board's day");
       assert(((await page.locator('[data-testid="sim-october"]').boundingBox())?.height ?? 0) >= 44, "a 44px target");
-      await page.locator('[data-testid="sim-section"]').screenshot({ path: join(SCREENS, "admin-sim.png") });
-      shots.push("admin-sim.png");
-      await page.goto(`${APP}/skh?sim=1&date=2026-11-05`, { waitUntil: "networkidle" });
+      await page.goto(`${APP}/skh?sim=1&date=2026-11-18`, { waitUntil: "networkidle" });
       const simKinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
       assert(JSON.stringify(simKinds) === JSON.stringify(["sim"]), `the simulation's badge alone: ${JSON.stringify(simKinds)}`);
-      await ownerShot(page, "board-sim.png");
-      const simRows = [];
-      for (const room of ["or-2", "or-5", "or-11", "or-12", "or-13"]) {
-        await page.goto(`${APP}/skh?sim=1&date=2026-11-05&room=${room}`, { waitUntil: "networkidle" });
-        simRows.push(...(await sheetRows(page)));
-        if (room === "or-12") await ownerShot(page, "board-sim-room.png");
-      }
-      assert(simRows.some(([source]) => source === "matched"), `some cases booked: ${JSON.stringify(simRows.map(([s, f]) => [s, f]))}`);
-      assert(simRows.every(([source]) => source !== "booking"), "every simulated booking finds its case");
-      assert(simRows.every(([source, flag]) => source !== "hosxp" || flag === "unbooked"), "a case nobody booked is flagged");
-      // the date picker stays in the simulation, and the logo goes back to the real board
-      await page.click('[data-testid="board-date-button"]');
-      await page.locator('[data-testid="board-date-dialog"]').waitFor({ state: "visible" });
-      await page.click('#board-date-calendar [data-date="2026-11-06"]');
-      await page.waitForURL((url) => url.searchParams.get("date") === "2026-11-06" && url.searchParams.get("sim") === "1");
-      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-06");
-      assert((await page.locator('[data-notice-id="sim"]').count()) === 1, "another day of the simulation");
+      await page.goto(`${APP}/skh?sim=1&date=2026-11-18&room=or-2`, { waitUntil: "networkidle" });
+      const simRows = await sheetRows(page);
+      assert(simRows.length === 1 && simRows.every(([source]) => source !== "booking"), `the simulation's OR 2: ${JSON.stringify(simRows)}`);
       await page.click('header a[aria-label="ORSKH.APP หน้าแรก"]');
       await page.waitForURL((url) => url.pathname === "/skh" && url.search === "");
       await page.waitForFunction(() => !document.querySelector('[data-notice-id="sim"]'));
       assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === bookingsBefore, "no booking saved");
       assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
       await ctx.close();
-      // anyone but an admin gets the real board
-      const simNurse = await fetch(`${APP}/skh?sim=1&date=2026-11-05`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
-      const simHtml = await simNurse.text();
-      assert(simNurse.status === 200 && !simHtml.includes("การจองจำลอง"), `/?sim=1 for a nurse: ${simNurse.status}`);
-
-      // a nurse cannot import (the action checks the admin again) and has no such section
+      // anyone but an admin gets the real board, and no /admin
+      const simNurse = await fetch(`${APP}/skh?sim=1`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
+      assert(simNurse.status === 200 && !(await simNurse.text()).includes("การจองจำลอง"), `/?sim=1 for a nurse: ${simNurse.status}`);
       const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
       assert(r.status === 404, `/admin for a nurse: ${r.status}`);
 
-      await db.query("DELETE FROM workbook_uploads WHERE past_import");
+      await db.query("DELETE FROM workbook_uploads WHERE file_name = 'reset-test.xlsx' AND NOT (id = ANY($1::bigint[]))", [saved]);
       setNow("2026-11-16T10:00:00+07:00");
     });
 

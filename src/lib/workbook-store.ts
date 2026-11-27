@@ -18,12 +18,6 @@ type Q = Pool | PoolClient;
  * and nothing here is ever logged.
  */
 
-/**
- * An upload older than this is deleted with its cases when a new upload is saved, unless it is the latest list of its
- * day: every past day keeps its list, so the board's calendar can show it (Pong, 19 Nov 2026, the Jan-Oct lists).
- */
-export const KEEP_UPLOAD_DAYS = 30;
-
 /** One kept case of an upload, as the upload page hands it over (placed by lib/placement.ts). */
 export type PlacedCase = {
   /** The export's ID column (the case id), unique within an upload. */
@@ -83,20 +77,6 @@ export type UploadInput = {
   summary: unknown;
   cases: readonly PlacedCase[];
 };
-
-/** One past day's list of an import (lib/past-lists.ts): the day, the counts and the cases, as an upload has them. */
-export type PastList = Pick<UploadInput, "targetDate" | "totalRows" | "kept" | "placed" | "summary" | "cases">;
-
-/** An admin's import of past days' lists from one HOSxP export of many days (/admin). */
-export type PastListsInput = Pick<UploadInput, "cycleDay" | "uploadedAt" | "uploadedBy" | "uploaderName" | "fileName"> & {
-  lists: readonly PastList[];
-};
-
-/** What an import saved: the days given a list, and the days left alone because MX uploaded a list for them. */
-export type PastListsSaved = { saved: string[]; mxDays: string[] };
-
-/** The past days that hold an imported list (the admin page's line), or zero days. */
-export type PastListSpan = { days: number; first: string | null; last: string | null };
 
 export type Upload = {
   id: string;
@@ -238,10 +218,9 @@ async function insertCases(c: PoolClient, items: readonly { uploadId: string; it
 /**
  * Saves an upload and its cases (both hospitals', each case with its `place`) in one transaction, so the board never
  * sees half a file. The upload is marked as keeping รพ.ท่าฉลอม's cases (Upload.thaChalom). The same transaction deletes
- * the uploads made more than 30 days before this one (their cases go with them) that a later upload for the same day
- * has replaced, and รพ.ท่าฉลอม's cases of the days before this upload's cycle day, so patient numbers are not kept
- * longer than the boards need them: the latest list of each day stays for รพ.สมุทรสาคร's calendar, and รพ.ท่าฉลอม's
- * board shows no past day. Every HN is stored normalised; a case id seen twice keeps its first row.
+ * every list of the days before this upload's cycle day, at both hospitals (deletePastLists), so patient numbers are
+ * not kept longer than the boards need them: neither board shows a past day (Pong, 27 Nov 2026: "Disable past day view
+ * and clear pastday data for both places"). Every HN is stored normalised; a case id seen twice keeps its first row.
  */
 export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload> {
   const cases = firstOfEachId(input.cases);
@@ -267,80 +246,57 @@ export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload
       c,
       cases.map((item) => ({ uploadId: upload.id, item })),
     );
-    // After the insert, so an old list this upload replaces goes now.
-    await c.query(
-      `DELETE FROM workbook_uploads u WHERE u.uploaded_at < $1::timestamptz - make_interval(days => $2)
-       AND EXISTS (SELECT 1 FROM workbook_uploads n WHERE n.target_date = u.target_date AND (n.uploaded_at, n.id) > (u.uploaded_at, u.id))`,
-      [input.uploadedAt, KEEP_UPLOAD_DAYS],
-    );
-    await c.query(
-      `DELETE FROM workbook_cases c USING workbook_uploads u
-       WHERE c.upload_id = u.id AND c.place = 'tha-chalom' AND u.target_date < $1::date`,
-      [input.cycleDay],
-    );
+    await deletePastLists(c, input.cycleDay);
     return upload;
   });
 }
 
 /**
- * Saves an import's past days' lists in one transaction (Pong, 19 Nov 2026: the Jan-Oct lists on the board's calendar).
- * A day MX uploaded a list for is left alone: MX's list is the real one. A day an earlier import gave a list gets this
- * one instead, so importing a file again does not stack copies. Each list is an upload marked past_import, read by the
- * board like any other; a case id seen twice in a day keeps its first row. Only รพ.สมุทรสาคร's cases are kept: รพ.ท่าฉลอม's
- * board shows no past day (lib/past-lists.ts leaves them out), so a list says it holds none for it.
+ * Deletes the lists (uploads, MX's and admins', with their cases at both hospitals) of every day before `day`, and says
+ * how many uploads went. Each upload calls it with its cycle day, so today's list stays until the day is over.
  */
-export async function savePastLists(pool: Pool, input: PastListsInput): Promise<PastListsSaved> {
-  const byDay = new Map<string, PastList>();
-  for (const list of input.lists) if (!byDay.has(list.targetDate)) byDay.set(list.targetDate, list);
-  return withTx(pool, async (c) => {
-    // Two imports at once would each delete the other's lists before saving their own.
-    await c.query("SELECT pg_advisory_xact_lock(hashtext('orskh:past-lists'))");
-    const { rows: mx } = await c.query<{ day: string }>(
-      `SELECT DISTINCT to_char(target_date, 'YYYY-MM-DD') AS day FROM workbook_uploads
-       WHERE NOT past_import AND target_date = ANY($1::date[])`,
-      [[...byDay.keys()]],
-    );
-    const mxDays = mx.map((row) => row.day).sort();
-    for (const day of mxDays) byDay.delete(day);
-    const lists = [...byDay.values()].sort((a, b) => (a.targetDate < b.targetDate ? -1 : 1));
-    if (lists.length === 0) return { saved: [], mxDays };
-    await c.query("DELETE FROM workbook_uploads WHERE past_import AND target_date = ANY($1::date[])", [lists.map((list) => list.targetDate)]);
-    const { rows } = await c.query<{ id: string; day: string }>(
-      `INSERT INTO workbook_uploads (target_date, cycle_day, uploaded_at, uploaded_by, uploader_name, file_name, total_rows, kept, placed, summary, past_import, tha_chalom)
-       SELECT day, $2::date, $3::timestamptz, $4, $5, $6, total_rows, kept, placed, summary, true, false
-       FROM unnest($1::date[], $7::int[], $8::int[], $9::int[], $10::jsonb[]) AS list(day, total_rows, kept, placed, summary)
-       RETURNING id::text AS id, to_char(target_date, 'YYYY-MM-DD') AS day`,
-      [
-        lists.map((list) => list.targetDate),
-        input.cycleDay,
-        input.uploadedAt,
-        input.uploadedBy,
-        input.uploaderName,
-        input.fileName,
-        lists.map((list) => list.totalRows),
-        lists.map((list) => list.kept),
-        lists.map((list) => list.placed),
-        lists.map((list) => JSON.stringify(list.summary ?? null)),
-      ],
-    );
-    const idOf = new Map(rows.map((row) => [row.day, row.id]));
-    await insertCases(
-      c,
-      lists.flatMap((list) =>
-        firstOfEachId(list.cases.filter((item) => (item.place ?? "skh") === "skh")).map((item) => ({ uploadId: idOf.get(list.targetDate) as string, item })),
-      ),
-    );
-    return { saved: lists.map((list) => list.targetDate), mxDays };
-  });
+export async function deletePastLists(pool: Q, day: string): Promise<number> {
+  const { rowCount } = await pool.query("DELETE FROM workbook_uploads WHERE target_date < $1::date", [day]);
+  return rowCount ?? 0;
 }
 
-/** How many past days hold an imported list, and the first and last of them. */
-export async function pastListSpan(pool: Q): Promise<PastListSpan> {
-  const { rows } = await pool.query<{ days: number; first: string | null; last: string | null }>(
-    `SELECT count(DISTINCT target_date)::int AS days, to_char(min(target_date), 'YYYY-MM-DD') AS first,
-       to_char(max(target_date), 'YYYY-MM-DD') AS last FROM workbook_uploads WHERE past_import`,
+/** A day from `from` on that holds HOSxP lists, for the admin's reset (/admin): its uploads and the cases of its latest. */
+export type ListedDay = {
+  date: string;
+  uploads: number;
+  /** The latest upload's cases at รพ.สมุทรสาคร and at รพ.ท่าฉลอม. */
+  skh: number;
+  thaChalom: number;
+  latestAt: Date;
+  latestBy: string;
+};
+
+/** The days from `from` on that hold HOSxP lists, in date order. */
+export async function listedDays(pool: Q, from: string): Promise<ListedDay[]> {
+  const { rows } = await pool.query<{ date: string; uploads: number; skh: number; tc: number; at: Date; by: string }>(
+    `WITH latest AS (
+       SELECT DISTINCT ON (target_date) id, target_date, uploaded_at, uploader_name FROM workbook_uploads
+       WHERE target_date >= $1::date ORDER BY target_date, uploaded_at DESC, id DESC
+     )
+     SELECT to_char(l.target_date, 'YYYY-MM-DD') AS date,
+       (SELECT count(*)::int FROM workbook_uploads u WHERE u.target_date = l.target_date) AS uploads,
+       (SELECT count(*)::int FROM workbook_cases c WHERE c.upload_id = l.id AND c.place = 'skh') AS skh,
+       (SELECT count(*)::int FROM workbook_cases c WHERE c.upload_id = l.id AND c.place = 'tha-chalom') AS tc,
+       l.uploaded_at AS at, l.uploader_name AS by
+     FROM latest l ORDER BY l.target_date`,
+    [from],
   );
-  return rows[0] ?? { days: 0, first: null, last: null };
+  return rows.map((row) => ({ date: row.date, uploads: row.uploads, skh: row.skh, thaChalom: row.tc, latestAt: row.at, latestBy: row.by }));
+}
+
+/**
+ * Resets one day's OR schedule to the bookings alone: deletes every HOSxP list of `date` (every upload, at both
+ * hospitals, with its cases), never a booking (Pong, 27 Nov 2026: "Add option for admin to reset OR schedule of specific
+ * date (reset only for hosxp case)"). Says how many uploads went; MX may upload the day's list again.
+ */
+export async function resetDayLists(pool: Q, date: string): Promise<number> {
+  const { rowCount } = await pool.query("DELETE FROM workbook_uploads WHERE target_date = $1::date", [date]);
+  return rowCount ?? 0;
 }
 
 /** The latest upload made on `cycleDay` for `targetDate` (the one the board shows), or null. */

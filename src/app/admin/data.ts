@@ -2,14 +2,13 @@ import "server-only";
 import type { Pool } from "pg";
 import { today } from "@/lib/clock";
 import { db } from "@/lib/db";
-import { DEFAULT_REPAIR_PERIODS, type RepairPeriods } from "@/lib/repair";
+import { DEFAULT_REPAIR_PERIODS, shortThaiDate, type RepairPeriods } from "@/lib/repair";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { listActiveUsers, listMx, mxEligible, type MxMember, type PickableUser } from "@/lib/roles";
 import { thaiDateTime } from "@/lib/telegram";
 import { roleLabel, subtypeLabel, type UserType } from "@/lib/user-labels";
 import { HOLDS } from "@/lib/user-list";
-import { thaiDateSpan } from "@/lib/workbook";
-import { pastListSpan } from "@/lib/workbook-store";
+import { listedDays } from "@/lib/workbook-store";
 
 /**
  * What the admin page's sections show (components/repair-periods-form.tsx, mx-members.tsx and staff-list.tsx), shaped
@@ -165,20 +164,33 @@ export async function loadPeople(): Promise<PeopleData> {
   }
 }
 
-/** The past days that hold an imported list (app/admin/actions.ts importPastLists), for the section's line. */
-export type PastListView = { days: number; span: string | null };
+/** A day with HOSxP lists, for the reset section (components/hosxp-reset-section.tsx). */
+export type ListedDayView = {
+  date: string;
+  /** "30 พ.ย. 2569". */
+  label: string;
+  /** "45 เคส · ท่าฉลอม 3 · อัปโหลด 2 ครั้ง · ล่าสุด 27 พ.ย. 2569 15:16 น. โดย …". */
+  detail: string;
+};
 
-export async function pastListViewFrom(pool: Pool): Promise<PastListView> {
-  const { days, first, last } = await pastListSpan(pool);
-  return { days, span: first && last ? thaiDateSpan(first, last) : null };
+/** The days from today on that hold HOSxP lists (lib/workbook-store.ts listedDays), shaped for the page. */
+export async function listedDaysFrom(pool: Pool): Promise<ListedDayView[]> {
+  const days = await listedDays(pool, today());
+  return days.map((day) => {
+    const parts = [`${day.skh} เคส`];
+    if (day.thaChalom > 0) parts.push(`ท่าฉลอม ${day.thaChalom}`);
+    if (day.uploads > 1) parts.push(`อัปโหลด ${day.uploads} ครั้ง`);
+    parts.push(`ล่าสุด ${thaiDateTime(day.latestAt)} โดย ${day.latestBy}`);
+    return { date: day.date, label: shortThaiDate(day.date), detail: parts.join(" · ") };
+  });
 }
 
-/** The same for the page, or null when the table cannot be read (the section still offers the import). */
-export async function loadPastListView(): Promise<PastListView | null> {
+/** The same for the page, or null when the tables cannot be read. */
+export async function loadListedDays(): Promise<ListedDayView[] | null> {
   try {
-    return await pastListViewFrom(await db());
+    return await listedDaysFrom(await db());
   } catch (error) {
-    console.error(`[admin] past lists unavailable (${(error as Error).name})`);
+    console.error(`[admin] listed days unavailable (${(error as Error).name})`);
     return null;
   }
 }

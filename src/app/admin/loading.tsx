@@ -6,7 +6,7 @@ const SECTIONS = [
   { title: "ผู้จัดการตาราง (MX)", summary: "w-40", action: "w-[6.5rem]" },
   { title: "รายชื่อทั้งหมด", summary: "w-44", action: null },
   { title: "ตารางตัวอย่าง", summary: "w-64", action: null },
-  { title: "ตารางย้อนหลังจาก HOSxP", summary: "w-60", action: null },
+  { title: "ล้างตาราง HOSxP", summary: "w-40", action: null },
   { title: "การจองจำลอง", summary: "w-64", action: null },
   { title: "โหมดทดสอบ", summary: "w-60", action: "w-[9.5rem]" },
 ] as const;

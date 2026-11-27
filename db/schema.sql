@@ -417,7 +417,8 @@ CREATE INDEX IF NOT EXISTS workbook_cases_upload_idx ON workbook_cases (upload_i
 -- Applied to existing databases too.
 ALTER TABLE workbook_cases ADD COLUMN IF NOT EXISTS patient_name text;
 -- Past days' lists an admin imported from a HOSxP export of many days (/admin, lib/past-lists.ts; Pong, 19 Nov 2026).
--- past_import marks them, so an import replaces only its own lists, never a list MX uploaded.
+-- past_import marks them, so an import replaces only its own lists, never a list MX uploaded. The import went with the
+-- past days on 27 Nov 2026 (each upload now deletes every list of the days before its cycle day); the column stays.
 ALTER TABLE workbook_uploads ADD COLUMN IF NOT EXISTS past_import boolean NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS workbook_uploads_target_idx ON workbook_uploads (target_date, uploaded_at DESC);
 -- The hospital of a kept case (Pong, 27 Nov 2026: "Excel file include both place on one sheet"; lib/places.ts): 'skh'
