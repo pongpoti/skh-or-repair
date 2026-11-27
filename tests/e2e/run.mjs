@@ -414,8 +414,17 @@ function sessionToken(phone, secret = SESSION_SECRET, sub = "Ux", uid = null) {
     .sign(new TextEncoder().encode(secret));
 }
 
-async function newContext(browser, width = 390) {
+/**
+ * The staff's tutorial opens each time RN, PN, PCA or MX open the app (Pong, 27 Nov 2026: "Always on tutorial for
+ * non-DR"), until its session cookie is set: every browser and request here has it, so the board opens as before; the
+ * staff tutorial's own test leaves it out.
+ */
+const STAFF_SEEN = "staff_tutorial=1";
+const STAFF_SEEN_COOKIE = { name: "staff_tutorial", value: "1", url: APP, sameSite: "Lax" };
+
+async function newContext(browser, width = 390, { staffTutorial = true } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: 2, locale: "th-TH" });
+  if (staffTutorial) await ctx.addCookies([STAFF_SEEN_COOKIE]);
   // LINE profile pictures are served locally: no network calls to LINE.
   await ctx.route("https://*.line-scdn.net/**", (route) =>
     route.fulfill({ status: 200, contentType: "image/png", body: PNG_1PX }),
@@ -546,7 +555,7 @@ async function boardName(page) {
  * is loaded as in production: scripts/sync-users.mjs, from a CSV in Pong's format outside the repository.
  */
 async function loadUsers(db) {
-  const probe = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken("0899999999")}` });
+  const probe = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken("0899999999")}; ${STAFF_SEEN}` });
   assert(probe.status === 307, `unlisted session -> ${probe.status}`);
   const tables = await db.query(
     "SELECT string_agg(table_name, ',' ORDER BY table_name) AS t FROM information_schema.tables WHERE table_schema = 'public'",
@@ -1245,7 +1254,7 @@ async function main() {
       for (const next of ["/.//evil.test", "/..//evil.test", "/%2e//evil.test", "/a/..//evil.test", "//evil.test", "https://evil.test", "/\\evil.test"]) {
         const r = await fetch(`${APP}/login?next=${encodeURIComponent(next)}`, {
           redirect: "manual",
-          headers: { cookie: `session=${session.value}` },
+          headers: { cookie: `session=${session.value}; ${STAFF_SEEN}` },
         });
         const loc = r.headers.get("location") ?? "";
         assert(r.status === 307 && new URL(loc, APP).origin === APP && !loc.startsWith("//"), `next=${next} -> ${r.status} ${loc}`);
@@ -1429,7 +1438,8 @@ async function main() {
         `ท่าฉลอม's notices: ${JSON.stringify(await page.$$eval("[data-notice-id]", (els) => els.map((el) => el.dataset.noticeId)))}`,
       );
       assert((await plainText(page, '[data-testid="no-upload-alert"]')).startsWith("ยังไม่มีตาราง HOSxP ของ "), "no HOSxP list for the day yet");
-      const tcMenu = await menuLinks();
+      // the same links, วิธีใช้งาน coming back to ท่าฉลอม (?back=tha-chalom)
+      const tcMenu = (await menuLinks()).map(([id, href]) => [id, id === "account-help-link" ? href.replace("?back=tha-chalom", "") : href]);
       assert(JSON.stringify(tcMenu) === JSON.stringify(skhMenu), `the same account menu: ${JSON.stringify(tcMenu)} / ${JSON.stringify(skhMenu)}`);
       // the logo goes to ท่าฉลอม's own day, as รพ.สมุทรสาคร's goes to its board
       assert((await page.getAttribute('header a[aria-label="ORSKH.APP หน้าแรก"]', "href")) === "/tha-chalom", "the logo goes to ท่าฉลอม's day");
@@ -1498,11 +1508,11 @@ async function main() {
       // / and the board's address from before (a link kept in a chat) go on to the board at /skh
       const session = await cookie(ctxA, "session");
       for (const [from, to] of [["/?room=or-7", "/skh?room=or-7"], ["/?date=2026-12-03&room=or-12", "/skh?date=2026-12-03&room=or-12"], ["/?demo=1&half=2", "/skh?demo=1&half=2"]]) {
-        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
+        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}; ${STAFF_SEEN}` });
         assert(r.status === 307 && r.location === to, `${from} -> ${r.status} ${r.location}`);
       }
       for (const from of ["/", "/?utm_source=line"]) {
-        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
+        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}; ${STAFF_SEEN}` });
         assert(r.status === 307 && r.location === "/skh", `${from} -> ${r.status} ${r.location}`);
       }
       // signed out, both pages ask for a sign-in that comes back to them
@@ -1808,7 +1818,7 @@ async function main() {
     });
 
     await t("deactivated user holding a claim: no session, the code leads to /login/claim; reactivated: the claim page offers the sign-in", async () => {
-      const gated = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(RETIRED)}` });
+      const gated = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(RETIRED)}; ${STAFF_SEEN}` });
       assert(gated.status === 307 && gated.location?.startsWith("/login"), `session of a deactivated number -> ${gated.status}`);
       await setIdentity({ sub: SUB_G, name: "หมอเกษียณ" });
       const ctx = await newContext(browser);
@@ -1876,7 +1886,7 @@ async function main() {
       const approved = await oldRequest(NURSE, SUB_D, "approved");
       const pendingId = await oldRequest(WALK_IN, SUB_E, "pending");
       await db.query("INSERT INTO line_bindings (line_sub, phone, display_name, verified_at, last_login_at) VALUES ($1, $2, 'มาลี', now(), now())", [SUB_D, NURSE]);
-      const session = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(NURSE)}` });
+      const session = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(NURSE)}; ${STAFF_SEEN}` });
       assert(session.status === 307 && session.location?.startsWith("/login"), `session of an approved number -> ${session.status} ${session.location}`);
       await setIdentity({ sub: SUB_D, name: "มาลี" });
       const ctx = await newContext(browser);
@@ -2130,7 +2140,7 @@ async function main() {
     await t("forged, unlisted or pre-SMS session tokens are rejected; the break-glass ALLOWED_PHONES still works", async () => {
       for (const phone of [DOC1, BREAK_GLASS]) {
         // (/ goes on to the board, not to the sign-in)
-        const ok = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(phone)}` });
+        const ok = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(phone)}; ${STAFF_SEEN}` });
         assert(ok.status === 307 && ok.location === "/skh", `valid token for ${fmt(phone)} -> ${ok.status} ${ok.location}`);
       }
       const legacy = await new SignJWT({ email: "someone@example.com", name: "x", picture: null })
@@ -2147,13 +2157,13 @@ async function main() {
         await sessionToken(DOC1, "wrong-secret-wrong-secret-wrong-secret"),
         legacy,
       ]) {
-        const r = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${token}` });
+        const r = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${token}; ${STAFF_SEEN}` });
         assert(r.status === 307 && r.location?.startsWith("/login"), `rejected -> ${r.status}`);
       }
     });
 
     await t("admin: the button and menu link only for a sub in AUTH_ADMIN_LINE_IDS; /admin is 404 for everyone else", async () => {
-      const headers = (token) => ({ host: `localhost:${APP_PORT}`, cookie: `session=${token}` });
+      const headers = (token) => ({ host: `localhost:${APP_PORT}`, cookie: `session=${token}; ${STAFF_SEEN}` });
       const anon = await rawRequest("/admin", { host: `localhost:${APP_PORT}` });
       assert(anon.status === 307 && anon.location === "/login?next=%2Fadmin", `signed out: ${anon.status} ${anon.location}`);
       // signed in with an authorized number but a sub that is not an admin: same page as a mistyped address
@@ -2161,9 +2171,9 @@ async function main() {
         const r = await rawRequest("/admin", headers(token));
         assert(r.status === 404, `non-admin /admin -> ${r.status}`);
         // not even the loading screen: nothing of the admin page reaches a non-admin
-        const body = await (await fetch(`${APP}/admin`, { headers: { cookie: `session=${token}` }, redirect: "manual" })).text();
+        const body = await (await fetch(`${APP}/admin`, { headers: { cookie: `session=${token}; ${STAFF_SEEN}` }, redirect: "manual" })).text();
         assert(!body.includes("จัดการระบบ") && !body.includes("รายชื่อทั้งหมด"), "no admin page or loading screen for a non-admin");
-        const html = await (await fetch(`${APP}/skh`, { headers: { cookie: `session=${token}` } })).text();
+        const html = await (await fetch(`${APP}/skh`, { headers: { cookie: `session=${token}; ${STAFF_SEEN}` } })).text();
         assert(!html.includes('href="/admin"'), "no admin link on a non-admin's board");
         // the test notices are for admins only: checked on a day with its upload, in the 16:00 test below
       }
@@ -2171,7 +2181,7 @@ async function main() {
       const unlisted = await rawRequest("/admin", headers(await sessionToken("0899999999", SESSION_SECRET, ADMIN_SUB)));
       assert(unlisted.status === 307 && unlisted.location?.startsWith("/login"), `admin sub, unlisted number -> ${unlisted.status}`);
       // an admin sub with an authorized number opens the page
-      const admin = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB)}` }, redirect: "manual" });
+      const admin = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB)}; ${STAFF_SEEN}` }, redirect: "manual" });
       const adminHtml = await admin.text();
       // the page is named for all it holds (the repair's dates, MX, everyone's names), not one list alone
       assert(admin.status === 200 && adminHtml.includes("จัดการระบบ") && adminHtml.includes("รายชื่อทั้งหมด"), `admin /admin -> ${admin.status}`);
@@ -2720,14 +2730,14 @@ async function main() {
     const setNow = (iso) => writeFileSync(NOW_FILE, iso);
     const sessionOf = (person) => sessionToken(person.phone, SESSION_SECRET, person.sub, person.userId ?? null);
     /** A browser signed in as `person`: a phone, 390 x 844 at 2x. */
-    async function contextAs(person) {
-      const ctx = await newContext(browser);
+    async function contextAs(person, options) {
+      const ctx = await newContext(browser, 390, options);
       await ctx.addCookies([{ name: "session", value: await sessionOf(person), url: APP, httpOnly: true, sameSite: "Lax" }]);
       return ctx;
     }
     /** The page's HTML for `person`, with React's payload: everything the browser is sent, every prop included. */
     async function htmlAs(person, path = "/skh") {
-      const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(person)}` }, redirect: "manual" });
+      const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(person)}; ${STAFF_SEEN}` }, redirect: "manual" });
       return { status: r.status, html: await r.text() };
     }
     /** An element's text with its spaces evened out. */
@@ -4915,7 +4925,7 @@ async function main() {
       await db.query("DELETE FROM cases WHERE hn = $1", [HN_TC]);
     });
 
-    await t("doctors' tutorial: a doctor's first visit opens it once; a practice booking on a made-up day, before and after the 16:00 upload, every symbol explained; nothing saved", async () => {
+    await t("tutorials: a doctor's first visit opens it once (a practice booking on a made-up day, before and after the 16:00 upload, every symbol explained; nothing saved); the staff's version, with no booking, on every open of the app", async () => {
       // Thursday 10:00: the first day a doctor could book is Friday 20 Nov, the made-up day (the repair's first half:
       // OR 10 the dressing room, OR 12 general surgery, OR 13 orthopaedics)
       setNow("2026-11-19T10:00:00+07:00");
@@ -5156,13 +5166,112 @@ async function main() {
       await db.query("INSERT INTO tutorial_seen (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [RP.drY.userId]);
       await skipper.close();
 
-      // for doctors only: a nurse is sent back to the board, and has no วิธีใช้งาน
-      const nurse = await contextAs(RP.nurse);
+      // Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking. Always on tutorial for
+      // non-DR": a nurse opening the app starts with the staff's tutorial, the same made-up day with no booking
+      const casesNow = (await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n;
+      const nurse = await contextAs(RP.nurse, { staffTutorial: false });
       const nursePage = await nurse.newPage();
-      await nursePage.goto(`${APP}/tutorial`, { waitUntil: "networkidle" });
-      assert(nursePage.url() === `${APP}/skh`, `a nurse goes back to the board: ${nursePage.url()}`);
-      assert((await nursePage.locator('[data-testid="account-help-link"]').count()) === 0, "no tutorial link for a nurse");
+      nursePage.on("pageerror", (e) => errors.push(e.message));
+      await nursePage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
+      assert(nursePage.url() === `${APP}/tutorial?first=1`, `a nurse opening the app starts with the tutorial: ${nursePage.url()}`);
+      await nursePage.waitForSelector('[data-testid="coach-welcome"]');
+      assert((await textOf(nursePage, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "the staff may skip it at once");
+      assert((await textOf(nursePage, '[data-testid="coach-welcome-note"]')).includes("ทุกครั้งที่เข้าแอป"), "the welcome says it opens each time");
+      assert((await nursePage.locator(".coach-stages li").count()) === 5, "five chapters, no booking");
+      assert((await nursePage.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button in the staff's tutorial");
+      assert((await nursePage.locator('[data-testid="place-tabs"]').count()) === 1, "the hospital switch, as on the staff's board");
+      await ownerShot(nursePage, "tutorial-staff-welcome.png");
+      await nursePage.click('[data-testid="coach-start"]');
+      // the staff's one tap of their own: the colleague's calendar icon (the doctors tap their own row's)
+      taps["row-icon"] = '.room-sheet .case-row:has([data-testid="row-note"]) [data-testid="row-icon"]';
+      const staffWalked = await walk(
+        nursePage,
+        {
+          place: "tutorial-staff-place.png",
+          "booked-row": "tutorial-staff-booked-row.png",
+          matched: "tutorial-staff-matched.png",
+          doers: "tutorial-staff-dressing.png",
+        },
+        {
+          "booked-row": async () => {
+            const rows = await sheetRows(nursePage);
+            assert(JSON.stringify(rows) === JSON.stringify([["booking", null, null]]), `before the upload: the colleague's booking, no HN for a nurse: ${JSON.stringify(rows)}`);
+          },
+          matched: async () => {
+            const rows = await sheetRows(nursePage);
+            assert(JSON.stringify(rows) === JSON.stringify([["matched", null, null], ["hosxp", "unbooked", null]]), `after the upload: ${JSON.stringify(rows)}`);
+          },
+          doers: async () => assert(JSON.stringify(await rowIcons(nursePage)) === '["scrub","surgeon"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(nursePage))}`),
+        },
+      );
+      for (const id of ["book", "form-hn", "form-submit", "booked", "my-row", "my-manage", "upload-button"]) {
+        assert(!staffWalked.includes(id), `no ${id} step for a nurse: ${staffWalked.join(", ")}`);
+      }
+      for (const id of ["plan", "place", "priority", "booked-row", "row-icon", "upload", "matched", "unbooked", "note", "auto-dressing", "doers", "examples", "row-symbols"]) {
+        assert(staffWalked.includes(id), `a ${id} step for the staff: ${staffWalked.join(", ")}`);
+      }
+      await ownerShot(nursePage, "tutorial-staff-finish.png");
+      assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === casesNow, "the staff's tutorial saved nothing");
+      await nursePage.click('[data-testid="coach-finish-board"]');
+      await nursePage.waitForURL(`${APP}/skh`);
+      await nursePage.waitForSelector('svg[aria-label="แปลนห้องผ่าตัด"]');
+      // in the same visit the board stays; วิธีใช้งาน in the account menu opens it again
+      await nursePage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
+      assert(nursePage.url() === `${APP}/skh`, `in the same visit the board stays: ${nursePage.url()}`);
+      await nursePage.click('[data-testid="user-menu"]');
+      await nursePage.waitForSelector('[data-testid="account-help-link"]');
+      await nursePage.click('[data-testid="account-help-link"]');
+      await nursePage.waitForURL(`${APP}/tutorial`);
+      await nursePage.waitForSelector('[data-testid="coach-welcome"]');
+      assert((await textOf(nursePage, '[data-testid="coach-skip"]')) === "กลับตาราง", "a replay goes back to the board");
       await nurse.close();
+
+      // the next open of the app (a new browser session) starts with it again; a skip opens the board
+      const again = await contextAs(RP.nurse, { staffTutorial: false });
+      const againPage = await again.newPage();
+      await againPage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
+      assert(againPage.url() === `${APP}/tutorial?first=1`, `every open of the app: ${againPage.url()}`);
+      await againPage.click('[data-testid="coach-skip"]');
+      await againPage.waitForURL(`${APP}/skh`);
+      await againPage.waitForSelector('svg[aria-label="แปลนห้องผ่าตัด"]');
+      await againPage.waitForTimeout(1000);
+      assert(againPage.url() === `${APP}/skh`, `a skip stays skipped in the visit: ${againPage.url()}`);
+      await again.close();
+
+      // from รพ.ท่าฉลอม's board: the tutorial, then back there
+      const tc = await contextAs(RP.nurse, { staffTutorial: false });
+      const tcPage = await tc.newPage();
+      await tcPage.goto(`${APP}/tha-chalom`, { waitUntil: "networkidle" });
+      assert(tcPage.url() === `${APP}/tutorial?first=1&back=tha-chalom`, `ท่าฉลอม's board opens the tutorial too: ${tcPage.url()}`);
+      await tcPage.click('[data-testid="coach-skip"]');
+      await tcPage.waitForURL(`${APP}/tha-chalom`);
+      await tc.close();
+
+      // MX: the upload button's step, and every HN as on MX's board
+      const mx = await contextAs(RP.mx, { staffTutorial: false });
+      const mxPage = await mx.newPage();
+      mxPage.on("pageerror", (e) => errors.push(e.message));
+      await mxPage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
+      assert(mxPage.url() === `${APP}/tutorial?first=1`, `MX starts with the tutorial too: ${mxPage.url()}`);
+      await mxPage.click('[data-testid="coach-start"]');
+      const mxWalked = await walk(mxPage, { "upload-button": "tutorial-staff-mx-upload.png" }, {
+        "booked-row": async () => {
+          const rows = await sheetRows(mxPage);
+          assert(rows.length === 1 && rows[0][2]?.startsWith("HN "), `MX sees the HN: ${JSON.stringify(rows)}`);
+        },
+      });
+      assert(mxWalked.includes("upload-button") && !mxWalked.includes("book"), `MX's steps: ${mxWalked.join(", ")}`);
+      await mx.close();
+
+      // an admin is never sent to it, and can look at it with ?as=staff
+      const admin = await contextAs(RP.admin);
+      const adminPage = await admin.newPage();
+      await adminPage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
+      assert(adminPage.url() === `${APP}/skh`, `an admin opens the board: ${adminPage.url()}`);
+      await adminPage.goto(`${APP}/tutorial?as=staff`, { waitUntil: "networkidle" });
+      assert((await adminPage.locator(".coach-stages li").count()) === 5, "an admin can see the staff's version");
+      await admin.close();
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       rmSync(NOW_FILE, { force: true });
     });
 
@@ -5270,7 +5379,7 @@ async function main() {
       // nothing was saved, and anyone but an admin gets the real board, with no redirect
       assert(JSON.stringify(await counts()) === JSON.stringify(before), `no booking or upload saved: ${JSON.stringify(await counts())}`);
       for (const path of ["/skh?demo=1", "/skh?demo=1&half=2"]) {
-        const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
+        const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
         const html = await r.text();
         assert(r.status === 200 && !html.includes("ตารางตัวอย่าง") && !html.includes("ตัวอย่าง หนึ่ง"), `${path} for a nurse: ${r.status}`);
       }
@@ -5360,12 +5469,12 @@ async function main() {
       assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
       await ctx.close();
       // anyone but an admin gets the real board
-      const simNurse = await fetch(`${APP}/skh?sim=1&date=2026-11-05`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
+      const simNurse = await fetch(`${APP}/skh?sim=1&date=2026-11-05`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
       const simHtml = await simNurse.text();
       assert(simNurse.status === 200 && !simHtml.includes("การจองจำลอง"), `/?sim=1 for a nurse: ${simNurse.status}`);
 
       // a nurse cannot import (the action checks the admin again) and has no such section
-      const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
+      const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
       assert(r.status === 404, `/admin for a nurse: ${r.status}`);
 
       await db.query("DELETE FROM workbook_uploads WHERE past_import");
@@ -5434,7 +5543,7 @@ async function main() {
       await waitFor(`${GATE_APP}/login`, gateApp);
       const get = async (path, ua, person) => {
         const r = await fetch(`${GATE_APP}${path}`, {
-          headers: { "user-agent": ua, ...(person ? { cookie: `session=${await sessionOf(person)}` } : {}) },
+          headers: { "user-agent": ua, ...(person ? { cookie: `session=${await sessionOf(person)}; ${STAFF_SEEN}` } : {}) },
           redirect: "manual",
         });
         return { status: r.status, location: r.headers.get("location"), cookie: r.headers.get("set-cookie") ?? "", body: await r.text() };
@@ -5469,6 +5578,7 @@ async function main() {
       // the page as a computer shows it
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, locale: "th-TH", userAgent: UA_DESKTOP });
       await ctx.addCookies([{ name: "session", value: await sessionOf(RP.nurse), url: GATE_APP, httpOnly: true, sameSite: "Lax" }]);
+      await ctx.addCookies([STAFF_SEEN_COOKIE]);
       const page = await ctx.newPage();
       await page.goto(`${GATE_APP}/`);
       await page.waitForSelector('[data-testid="desktop-only"]');

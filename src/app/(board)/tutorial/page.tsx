@@ -10,7 +10,8 @@ import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
 import { BOARD_PATH } from "@/lib/places";
 import { currentRepairPeriods } from "@/lib/repair-store";
-import { practiceSubtype } from "@/lib/tutorial";
+import { practiceSubtype, STAFF_TUTORIAL_SEEN, tutorialBack, type TutorialAudience } from "@/lib/tutorial";
+import { boardViewer } from "@/lib/roles";
 import { fullName } from "@/lib/user-list";
 
 export const dynamic = "force-dynamic";
@@ -21,31 +22,49 @@ export const dynamic = "force-dynamic";
  * walking through it (components/tutorial.tsx). A doctor's first visit to the board comes here once (?first=1); the
  * account menu's วิธีใช้งาน opens it again. Admins may look at it too, as a made-up general surgeon when they are not a
  * doctor. Nothing on this page reads or writes a real case.
+ *
+ * Everyone else (RN, PN, PCA and MX) gets the staff's version (Pong, 27 Nov 2026: "Create tutorial for non-DR users,
+ * similar to DR except booking. Always on tutorial for non-DR"): the same day with no booking, which the board opens
+ * each time they open the app (?first=1, with ?back=tha-chalom when sent from รพ.ท่าฉลอม's board). An admin sees it with
+ * ?as=staff.
  */
-export default async function TutorialPage({ searchParams }: { searchParams: Promise<{ first?: string }> }) {
+export default async function TutorialPage({ searchParams }: { searchParams: Promise<{ first?: string; back?: string; as?: string }> }) {
   const user = await requireUser();
   const params = await searchParams;
   const admin = isAdmin(user.sub);
   let doctor: { id: string; name: string; subtype: string | null } | null = null;
+  let mx = false;
+  let failed = false;
   try {
-    const found = await doctorFor(await db(), user);
+    const pool = await db();
+    const [found, viewer] = await Promise.all([doctorFor(pool, user), boardViewer(pool, user)]);
     if (found) doctor = { id: String(found.id), name: fullName(found), subtype: found.subtype };
+    // MX sees every HN on the board (lib/roles.ts); an admin does too, but looks at the staff's version as RN, PN or PCA.
+    mx = viewer.allHn && !admin;
   } catch (error) {
+    failed = true;
     console.error("[tutorial] doctor lookup failed:", (error as Error).message);
   }
-  if (!doctor && !admin) redirect(BOARD_PATH);
+  // A failed lookup is not taken for a member of staff: the board, which has its own outage page.
+  if (failed && !admin) redirect(BOARD_PATH);
+  const audience: TutorialAudience = doctor ? (admin && params.as === "staff" ? "staff" : "doctor") : admin && params.as !== "staff" ? "doctor" : "staff";
+  const back = tutorialBack(params.back);
   const profile = await profileFor(user, user.name);
   const [periods, { date: today, minutes }] = await Promise.all([currentRepairPeriods(), Promise.resolve(bangkokParts(now()))]);
   const { holidays, unlisted } = await holidaysBetween(today, addDays(today, BOOK_AHEAD_DAYS));
   // The made-up day is the first day the doctor could book, the day the booking form starts on.
   const day = earliestBookingDay(today, minutes, holidays);
   const name = doctor?.name ?? profile.name;
-  const subtype = practiceSubtype(doctor?.subtype ?? "GENSX", day, periods);
+  const subtype = audience === "staff" ? practiceSubtype("GENSX", day, periods) : practiceSubtype(doctor?.subtype ?? "GENSX", day, periods);
+  const staffFirst = audience === "staff" && !doctor && !admin && params.first === "1";
 
   return (
     <Tutorial
-      first={params.first === "1" && doctor !== null}
-      seenKey={doctor?.id ?? null}
+      audience={audience}
+      mx={mx}
+      back={back}
+      first={audience === "staff" ? staffFirst : params.first === "1" && doctor !== null}
+      seenKey={audience === "staff" ? (staffFirst ? STAFF_TUTORIAL_SEEN : null) : (doctor?.id ?? null)}
       doctor={{ name, subtype }}
       ownSubtype={doctor?.subtype ?? null}
       profile={{ name: profile.name, role: profile.role, image: user.picture ?? null }}

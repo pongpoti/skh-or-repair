@@ -67,6 +67,25 @@ export function practiceSubtype(subtype: string | null | undefined, date: string
  */
 export const TUTORIAL_COOKIE = "tutorial_seen";
 
+/**
+ * The staff's tutorial (Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking. Always on
+ * tutorial for non-DR"): RN, PN, PCA and MX get it each time they open the app, not once. The cookie that says it was
+ * started or skipped in this visit is a session cookie (no max-age): the browser drops it when the app is closed, so the
+ * next open starts with the tutorial again, while moving around the board in the same visit does not.
+ */
+export const STAFF_TUTORIAL_COOKIE = "staff_tutorial";
+
+/** The staff cookie's value. */
+export const STAFF_TUTORIAL_SEEN = "1";
+
+/** Who the tutorial is for: a doctor (with the practice booking) or the rest of the staff (looking only). */
+export type TutorialAudience = "doctor" | "staff";
+
+/** The board a tutorial goes back to: รพ.ท่าฉลอม's when the staff member was sent from there, else รพ.สมุทรสาคร's. */
+export function tutorialBack(back: string | undefined): "skh" | "tha-chalom" {
+  return back === "tha-chalom" ? "tha-chalom" : "skh";
+}
+
 /** The room the doctor's practice booking takes (their department's room that day), or null when none can. */
 export function practiceRoom(subtype: string, date: string, periods: RepairPeriods): string | null {
   const room = bookingRoom(subtype, "practice", date, periods, "dept");
@@ -218,6 +237,8 @@ export function tutorialBoard(input: {
   doctor: { name: string; subtype: string };
   mine: AddedCase | null;
   phase: TutorialPhase;
+  /** MX sees every HN on the real board, so on the made-up day too. */
+  allHn?: boolean;
 }): BoardRows {
   const { bookings, workbook } = tutorialCases(input);
   return buildBoardRows({
@@ -225,6 +246,6 @@ export function tutorialBoard(input: {
     periods: input.periods,
     workbook: input.phase === "after" ? workbook : null,
     bookings,
-    viewer: { allHn: false, userId: TUTORIAL_ME },
+    viewer: { allHn: input.allHn ?? false, userId: TUTORIAL_ME },
   });
 }

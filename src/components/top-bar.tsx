@@ -77,7 +77,7 @@ export function TopBar({
   adminHref?: string | null;
   /** The HOSxP upload page, shown only to MX and admins. */
   uploadHref?: string | null;
-  /** The doctors' tutorial (วิธีใช้งาน), in the account menu of doctors and admins. */
+  /** The tutorial (วิธีใช้งาน) in the account menu: the doctors' for doctors and admins, the staff's for everyone else. */
   helpHref?: string | null;
   /** When given, the date is a button that opens a calendar to show the board of another day (BoardDatePicker). */
   datePick?: DatePick | null;
