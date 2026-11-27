@@ -4284,11 +4284,10 @@ async function main() {
       assert((await day("2026-11-17").getAttribute("aria-current")) === "date", "today is marked");
       assert(await day("2026-11-22").isDisabled(), "a Sunday is closed");
       assert((await page.locator('[data-testid="board-date-current"]').count()) === 0, "no way back needed on the board's own day");
-      // back to 1 Jan 2026, the first half's first day (Pong, 18 Nov 2026: "allow view calendar backward"; until then
-      // "current and future day only"), up to the repair's last day ("Calendar confine Within time range"): January
-      // 2569 to March 2570
-      assert(await day("2026-11-16").isEnabled(), "yesterday can be picked");
-      assert(await page.locator('#board-date-calendar [data-nav="prev"]').isEnabled(), "the months before this one can be shown");
+      // today on (Pong, 27 Nov 2026: "Disable past day view and clear pastday data for both places"; from 18 Nov it went
+      // back to 1 Jan 2026), up to the repair's last day ("Calendar confine Within time range"): this month to March 2570
+      assert(await day("2026-11-16").isDisabled(), "yesterday cannot be picked");
+      assert(await page.locator('#board-date-calendar [data-nav="prev"]').isDisabled(), "no month before this one");
       assert(await page.locator('#board-date-calendar [data-nav="next"]').isEnabled(), "December can be shown");
       await ownerShot(page, "board-date-picker.png");
       // a swipe turns the month (Pong, 15 Nov 2026: "allow swipe back and forth"): to the left the next month, to the
@@ -4296,9 +4295,7 @@ async function main() {
       // the finger lifts from is not picked
       const title = () => textOf(page, "#board-date-calendar-title");
       await swipe(page, '#board-date-calendar [role="grid"]', 120);
-      assert((await title()) === "ตุลาคม 2569", `swiped back to October: ${await title()}`);
-      await swipe(page, '#board-date-calendar [role="grid"]', -120);
-      assert((await title()) === "พฤศจิกายน 2569", `swiped on to November: ${await title()}`);
+      assert((await title()) === "พฤศจิกายน 2569", `no month before November to swipe back to: ${await title()}`);
       await swipe(page, '#board-date-calendar [role="grid"]', -120);
       assert((await title()) === "ธันวาคม 2569", `swiped to December: ${await title()}`);
       await swipe(page, '#board-date-calendar [role="grid"]', -30, 100);
@@ -4524,24 +4521,25 @@ async function main() {
       await page.waitForURL((url) => !url.searchParams.has("room"));
 
       // Pong, 19 Nov 2026: "allow swipe on layout to select date". To the left: the next workday, here the board's own
-      // day, so the address drops its date
+      // day, so the address drops its date. To the right from today, nothing: no past day (Pong, 27 Nov 2026)
       const plan = '[data-testid="day-swipe"]';
       assert((await textOf(page, '[data-testid="swipe-hint-next"]')) === "พ. 18 พ.ย.", "the next day's hint");
-      assert((await textOf(page, '[data-testid="swipe-hint-prev"]')) === "จ. 16 พ.ย.", "the day before's hint");
+      assert((await page.locator('[data-testid="swipe-hint-prev"]').count()) === 0, "no day before today's hint");
+      await swipe(page, plan, 140);
+      await page.waitForTimeout(800);
+      assert((await shownDay()) === "2026-11-17", "still today: no past day");
       await swipe(page, plan, -140);
       await waitDay("2026-11-18");
       assert(!new URL(page.url()).searchParams.has("date"), "the board's own day has no date in the address");
-      // to the right: the day before, twice
+      // to the right: the day before, today
       await swipe(page, plan, 140);
       await waitDay("2026-11-17");
       assert(new URL(page.url()).searchParams.get("date") === "2026-11-17", "Tuesday in the address");
-      await swipe(page, plan, 140);
-      await waitDay("2026-11-16");
       // a short drag springs back, and a move up or down is not a swipe
       await swipe(page, plan, -30);
       await swipe(page, plan, -60, 160);
       await page.waitForTimeout(800);
-      assert((await shownDay()) === "2026-11-16", "still Monday");
+      assert((await shownDay()) === "2026-11-17", "still Tuesday");
       // over the weekend: Friday to Monday and back
       await page.goto(`${APP}/skh?date=2026-11-20`, { waitUntil: "networkidle" });
       await swipe(page, plan, -140);
@@ -4829,11 +4827,11 @@ async function main() {
       assert(kept.note === "แผลกดทับ ก้นกบ" && kept.dressing === null && kept.scrub_does === null, JSON.stringify(kept));
       await closeForm();
 
-      // once its day has gone, a booking has no actions
+      // once its day has gone, the booking cannot be seen on the board any more (Pong, 27 Nov 2026: "Disable past day
+      // view"): its day in the address shows the board's own day
       setNow("2026-12-04T10:00:00+07:00");
       await page.goto(`${APP}/skh?date=2026-12-03&room=or-12`, { waitUntil: "networkidle" });
-      await page.waitForSelector(".room-sheet .case-row");
-      assert((await page.locator('.room-sheet [data-testid="row-manage"]').count()) === 0, "no จัดการ on a day that has gone");
+      assert((await page.getAttribute("header time", "datetime")) === "2026-12-04", "a day that has gone shows the board's own day");
       assert(errors.length === 0, `page errors: ${errors.join("; ")}`);
       await ctx.close();
       await db.query("DELETE FROM cases WHERE surgeon_id = $1 AND op_date BETWEEN '2026-12-01' AND '2026-12-04'", [dr]);
@@ -5266,7 +5264,7 @@ async function main() {
       await adminPage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
       assert(adminPage.url() === `${APP}/skh`, `an admin opens the board: ${adminPage.url()}`);
       await adminPage.goto(`${APP}/tutorial?as=staff`, { waitUntil: "networkidle" });
-      assert((await adminPage.locator(".coach-stages li").count()) === 5, "an admin can see the staff's version");
+      assert((await adminPage.locator(".coach-stages li").count()) === 4, "an admin can see the staff's version");
       await admin.close();
       assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
       rmSync(NOW_FILE, { force: true });
@@ -5453,9 +5451,13 @@ async function main() {
       await page.goto(`${APP}/skh?sim=1&date=2026-11-18`, { waitUntil: "networkidle" });
       const simKinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
       assert(JSON.stringify(simKinds) === JSON.stringify(["sim"]), `the simulation's badge alone: ${JSON.stringify(simKinds)}`);
-      await page.goto(`${APP}/skh?sim=1&date=2026-11-18&room=or-2`, { waitUntil: "networkidle" });
-      const simRows = await sheetRows(page);
-      assert(simRows.length === 1 && simRows.every(([source]) => source !== "booking"), `the simulation's OR 2: ${JSON.stringify(simRows)}`);
+      // the tests' first half runs from 1 Jan 2026, so Wednesday's general surgery case is in the repair's GENSX room
+      const simRows = [];
+      for (const room of ["or-2", "or-5", "or-11", "or-12", "or-13"]) {
+        await page.goto(`${APP}/skh?sim=1&date=2026-11-18&room=${room}`, { waitUntil: "networkidle" });
+        simRows.push(...(await sheetRows(page)));
+      }
+      assert(simRows.length === 1 && simRows.every(([source]) => source !== "booking"), `the simulation's one case: ${JSON.stringify(simRows)}`);
       await page.click('header a[aria-label="ORSKH.APP หน้าแรก"]');
       await page.waitForURL((url) => url.pathname === "/skh" && url.search === "");
       await page.waitForFunction(() => !document.querySelector('[data-notice-id="sim"]'));
