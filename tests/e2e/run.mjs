@@ -1303,7 +1303,7 @@ async function main() {
       const eyebrow = await plainText(page, '[data-testid="board-eyebrow"]');
       assert(/^ตารางผ่าตัด(วันนี้|ถัดไป)$/.test(eyebrow), `the day as on รพ.สมุทรสาคร's board: ${eyebrow}`);
       assert(
-        JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "รพ.สมุทรสาคร", "/skh", null], ["tha-chalom", "รพ.ท่าฉลอม", null, "page"]]),
+        JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "สมุทรสาคร", "/skh", null], ["tha-chalom", "ท่าฉลอม", null, "page"]]),
         `the switch names the hospital: ${JSON.stringify(await tabsOf())}`,
       );
       assert((await page.locator('[data-testid="board-date-chevron"]').count()) === 1, "the date picks another day");
