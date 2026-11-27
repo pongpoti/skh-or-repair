@@ -55,7 +55,7 @@ type Box = { x: number; y: number; w: number; h: number };
 
 type Mode = "info" | "tap" | "do";
 
-type CardKind = "welcome" | "plan-symbols" | "priority" | "row-symbols" | "upload" | "dressing-rule" | "examples" | "finish";
+type CardKind = "welcome" | "plan-symbols" | "priority" | "row-symbols" | "upload" | "dressing-rule" | "finish";
 
 type Step = {
   id: string;
@@ -87,10 +87,10 @@ type Step = {
   confetti?: boolean;
 };
 
-const CHAPTERS = ["แปลนห้อง", "จองห้อง", "ดูการจอง", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "ตัวอย่างจริง", "จบบทเรียน"] as const;
+const CHAPTERS = ["แปลนห้อง", "จองห้อง", "ดูการจอง", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "จบบทเรียน"] as const;
 
 /** The staff's chapters: no booking, so the room's list takes the booking's place. */
-const STAFF_CHAPTERS = ["แปลนห้อง", "ดูรายการเคส", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "ตัวอย่างจริง", "จบบทเรียน"] as const;
+const STAFF_CHAPTERS = ["แปลนห้อง", "ดูรายการเคส", "หลังอัปโหลด HOSxP", "ห้องทำแผล", "จบบทเรียน"] as const;
 
 const EXAMPLE_HN = "1234567";
 /** The short name surgeons type (Pong, 20 Nov 2026: "For พิมพ์ชื่อผ่าตัด change from lap chole to LC"). */
@@ -458,8 +458,6 @@ export function Tutorial({
             <UploadCard day={day} onNext={uploaded} />
           ) : step.card === "dressing-rule" ? (
             <DressingRuleCard onNext={() => go(index + 1)} />
-          ) : step.card === "examples" ? (
-            <ExamplesCard onNext={() => go(index + 1)} />
           ) : step.card === "finish" ? (
             <FinishCard staff={staff} onBoard={exit} onAgain={again} />
           ) : null
@@ -903,23 +901,19 @@ function buildSteps({
       setup: () => (dressingRoom ? openRoom(dressingRoom) : undefined),
     },
 
-    // 6. The real days before (Pong, 20 Nov 2026: "note to user that user can view previous real example of in-hours
-    // elective case assignment (ตัวอย่างเคส elective ในเวลา) on month Jan to Oct 2026 by swiping layout or choose date
-    // from calendar, the OR layout will assume to be first half of repair phase").
-    { id: "examples", chapter: 5, card: "examples", setup: closeRoom },
-
-    // 7. The end.
-    { id: "row-symbols", chapter: 6, card: "row-symbols" },
+    // 6. The end. (The card on the real days before, Pong's of 20 Nov 2026, went with the past days on 27 Nov 2026:
+    // "Disable past day view and clear pastday data for both places".)
+    { id: "row-symbols", chapter: 5, card: "row-symbols", setup: closeRoom },
     {
       id: "help",
-      chapter: 6,
+      chapter: 5,
       title: "ดูบทเรียนอีกครั้ง",
       body: "แตะรูปโปรไฟล์ แล้วเลือก วิธีใช้งาน",
       target: () => find("[data-testid=user-menu]"),
       round: true,
       setup: closeRoom,
     },
-    { id: "finish", chapter: 6, card: "finish", confetti: true },
+    { id: "finish", chapter: 5, card: "finish", confetti: true },
   ];
 }
 
@@ -1019,13 +1013,10 @@ function buildStaffSteps(input: Parameters<typeof buildSteps>[0], mx: boolean): 
     take("dressing-rule", 3),
     take("doers", 3, { body: "ห้องทำแผลแสดงรูปคนทำแทนไอคอน รูปพยาบาล = แพทย์ฝาก scrub ทำแผล รูปหมอ = แพทย์ทำเอง" }),
 
-    // 5. The real days before.
-    take("examples", 4),
-
-    // 6. The end.
-    take("row-symbols", 5),
-    take("help", 5),
-    take("finish", 5),
+    // 5. The end.
+    take("row-symbols", 4),
+    take("help", 4),
+    take("finish", 4),
   ];
   return steps;
 }
@@ -1699,72 +1690,6 @@ function DressingRuleCard({ onNext }: { onNext: () => void }) {
       </ul>
       <p className="coach-card-note">คำที่ระบบดู เช่น dressing, D/S, VAC, debridement, I&amp;D, ทำแผล</p>
       <p className="coach-card-note mt-1">เคสที่จองไว้ ลงห้องตามที่แพทย์เลือกตอนจอง</p>
-      <div className="coach-card-actions">
-        <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
-          เข้าใจแล้ว
-        </button>
-      </div>
-    </Card>
-  );
-}
-
-/**
- * The real days before (Pong, 20 Nov 2026: "note to user that user can view previous real example of in-hours elective
- * case assignment (ตัวอย่างเคส elective ในเวลา) on month Jan to Oct 2026 by swiping layout or choose date from
- * calendar, the OR layout will assume to be first half of repair phase"). HOSxP's lists of January to October 2026 are
- * on the board's past days (admin import, lib/past-lists.ts: cases booked ahead, in hours). Since the repair starts on
- * 8 Dec 2026 (Pong, 21 Nov 2026), those days have the normal weekly OR schedule (lib/repair.ts repairOn).
- */
-function ExamplesCard({ onNext }: { onNext: () => void }) {
-  return (
-    <Card testId="coach-examples">
-      <span className="coach-history" aria-hidden="true">
-        <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          {/* Lucide "history" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
-          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-          <path d="M3 3v5h5" />
-          <path d="M12 7v5l4 2" />
-        </svg>
-      </span>
-      <p className="coach-card-eyebrow">ตารางจริงย้อนหลัง</p>
-      <h2 id="coach-examples-title" className="coach-card-title">
-        ดูตัวอย่างเคส elective ในเวลา
-      </h2>
-      <p className="coach-card-text">เปิดดูวันใดก็ได้ใน ม.ค.–ต.ค. 2569 ว่าเคส elective ในเวลาของวันนั้น ลงห้องไหน</p>
-      <ol className="coach-stages" data-testid="coach-examples-ways">
-        <li>
-          <span className="coach-stage-no" aria-hidden="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {/* Lucide "move-horizontal" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
-              <path d="m18 8 4 4-4 4" />
-              <path d="M2 12h20" />
-              <path d="m6 8-4 4 4 4" />
-            </svg>
-          </span>
-          ปัดแปลนไปทางขวา ย้อนทีละวัน
-        </li>
-        <li>
-          <span className="coach-stage-no" aria-hidden="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {/* Lucide "calendar-days" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */}
-              <path d="M8 2v4" />
-              <path d="M16 2v4" />
-              <rect width="18" height="18" x="3" y="4" rx="2" />
-              <path d="M3 10h18" />
-              <path d="M8 14h.01" />
-              <path d="M12 14h.01" />
-              <path d="M16 14h.01" />
-              <path d="M8 18h.01" />
-              <path d="M12 18h.01" />
-              <path d="M16 18h.01" />
-            </svg>
-          </span>
-          แตะวันที่ด้านบน เลือกจากปฏิทิน
-        </li>
-      </ol>
-      <p className="coach-card-note" data-testid="coach-examples-plan">
-        วันย้อนหลังแสดงห้องตามตารางผ่าตัดปกติ
-      </p>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">
           เข้าใจแล้ว

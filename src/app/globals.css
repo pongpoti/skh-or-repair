@@ -2065,17 +2065,6 @@ dialog[open]::backdrop {
 }
 .coach-route .coach-chip { min-width: 44px; }
 .coach-chip.is-dept { background: var(--line-strong); color: var(--ink); }
-.coach-history {
-  display: inline-flex;
-  width: 72px;
-  height: 72px;
-  margin-bottom: 8px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: var(--brand-tint);
-  color: var(--brand);
-}
 @media (prefers-reduced-motion: reduce) {
   .coach-trophy { animation: none; }
 }

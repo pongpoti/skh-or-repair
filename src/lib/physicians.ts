@@ -385,6 +385,9 @@ export type SurgicalTeam = keyof typeof SURGICAL_TEAMS;
 
 /** Sub-specialty teams within internal medicine, as supplied by the hospital. */
 export const MEDICINE_TEAMS = {
+  // Chest medicine, whose cases go to OR 4 on Mondays (lib/allocation.ts GUESTS). Pong, 27 Nov 2026: "นัยน์ชนก
+  // chestmed should stay on OR4 always, it is rule" (her HOSxP rows are keyed แผนก ศัลยกรรม, which put them in GENSX's room).
+  CHEST: ["นัยน์ชนก แขดอน"],
   NEPHRO: [
     "พัตราภรณ์ ปรัชญารัตนานนท์",
     "ศุภศรัณย์ ศุภพัฒนพงศ์",

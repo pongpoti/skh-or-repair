@@ -170,6 +170,8 @@ test("a stored case's department by its surgeon, for lists stored before the sur
   assert.equal(surgeonDeptOf("นพ. สมชาย กลับกลาย"), "URO");
   assert.equal(surgeonDeptOf("สมชาย กลับกลาย"), "URO", "no title");
   assert.equal(surgeonDeptOf("นพ. ไม่มี ในรายชื่อ"), null);
+  // Keyed แผนก ศัลยกรรม in HOSxP, but chest medicine: OR 4 on Mondays (Pong, 27 Nov 2026).
+  assert.equal(surgeonDeptOf("พญ. นัยน์ชนก แขดอน"), "CHEST");
   assert.equal(surgeonDeptOf(""), null);
 });
 

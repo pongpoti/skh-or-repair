@@ -53,6 +53,9 @@ test("knows the internal-medicine nephrology team", () => {
   assert.equal(teamOf("อรพรรณ เลิศสาครประเสริฐ"), "NEPHRO");
   assert.equal(teamOf("วิชิต กาจเงิน"), null);
   const internal = new Set(PHYSICIAN_GROUPS.find((group) => group.id === "internal")?.names);
+  // Chest medicine (Pong, 27 Nov 2026: "นัยน์ชนก chestmed should stay on OR4 always").
+  assert.equal(teamOf("นัยน์ชนก แขดอน"), "CHEST");
+  for (const name of MEDICINE_TEAMS.CHEST) assert.ok(internal.has(name), name);
   for (const name of MEDICINE_TEAMS.NEPHRO) assert.ok(internal.has(name), name);
   assert.equal(MEDICINE_TEAMS.NEPHRO.length, 4);
 });

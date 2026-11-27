@@ -4,15 +4,14 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import { createPool, ensureSchema } from "@/lib/db";
 import {
   casesOf,
-  KEEP_UPLOAD_DAYS,
+  deletePastLists,
   latestUpload,
   latestUploadForTarget,
-  pastListSpan,
-  savePastLists,
+  listedDays,
+  resetDayLists,
   saveUpload,
   workbookFor,
   workbookForDay,
-  type PastList,
   type PlacedCase,
   type UploadInput,
 } from "@/lib/workbook-store";
@@ -138,91 +137,55 @@ describe("workbook uploads (database)", () => {
     assert.equal((await latestUpload(pool, "2026-11-16", "2026-11-17"))?.id, last.id);
   });
 
-  test(`a new upload deletes the uploads made more than ${KEEP_UPLOAD_DAYS} days before it that a later list of their day replaced`, async () => {
-    const day = 86_400_000;
-    const now = new Date("2026-12-20T15:10:00+07:00");
-    const old = (ms: number) => new Date(now.getTime() - 30 * day - ms);
-    // 20 Nov: two lists more than 30 days old; the first was replaced by the second.
-    const replaced = await saveUpload(pool, upload({ cycleDay: "2026-11-19", targetDate: "2026-11-20", uploadedAt: old(60_000) }));
-    const latest = await saveUpload(pool, upload({ cycleDay: "2026-11-19", targetDate: "2026-11-20", uploadedAt: old(1000) }));
-    // 23 Nov: replaced, but less than 30 days ago.
-    const young = await saveUpload(pool, upload({ cycleDay: "2026-11-20", targetDate: "2026-11-23", uploadedAt: new Date(now.getTime() - 30 * day + 1000) }));
-    await saveUpload(pool, upload({ cycleDay: "2026-11-20", targetDate: "2026-11-23", uploadedAt: new Date(now.getTime() - 30 * day + 2000) }));
-    assert.equal((await casesOf(pool, replaced.id)).length, 2);
-
-    await saveUpload(pool, upload({ cycleDay: "2026-12-20", targetDate: "2026-12-21", uploadedAt: now }));
-    assert.deepEqual(await casesOf(pool, replaced.id), [], "older than 30 days and replaced: gone, with its cases");
-    assert.equal((await latestUploadForTarget(pool, "2026-11-20"))?.id, latest.id, "the day's latest list stays for the calendar");
-    assert.equal((await casesOf(pool, latest.id)).length, 2);
-    assert.equal((await casesOf(pool, young.id)).length, 2, "replaced but younger than 30 days: kept");
-    const { rows } = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM workbook_uploads");
-    assert.equal(rows[0].n, 4);
-  });
-
-  test("an old list a new upload of the same day replaces goes at once", async () => {
-    const first = await saveUpload(pool, upload({ uploadedAt: new Date("2026-11-16T15:10:00+07:00") }));
-    // An admin uploads the same day's list again, more than 30 days later.
-    const again = await saveUpload(pool, upload({ cycleDay: "2026-12-20", uploadedAt: new Date("2026-12-20T15:10:00+07:00") }));
-    assert.deepEqual(await casesOf(pool, first.id), []);
+  test("a new upload deletes every list of the days before its cycle day, at both hospitals", async () => {
+    // Pong, 27 Nov 2026: "Disable past day view and clear pastday data for both places"
+    const tc = (position: number) => placed(position, { caseId: String(80000 + position), roomId: "or-1", place: "tha-chalom" });
+    const imported = await saveUpload(pool, upload({ cycleDay: "2026-01-04", targetDate: "2026-01-05", uploadedAt: new Date("2026-01-04T15:10:00+07:00") }));
+    await pool.query("UPDATE workbook_uploads SET past_import = true WHERE id = $1", [imported.id]);
+    const tuesday = await saveUpload(pool, upload({ cases: [placed(1), tc(1)] }));
+    const again = await saveUpload(pool, upload({ uploadedAt: new Date("2026-11-16T15:20:00+07:00"), cases: [placed(1), tc(1)] }));
+    // The next cycle's upload, for Wednesday, made on Tuesday: Tuesday's lists are still today's, so they stay.
+    const wednesday = await saveUpload(
+      pool,
+      upload({ cycleDay: "2026-11-17", targetDate: "2026-11-18", uploadedAt: new Date("2026-11-17T15:10:00+07:00"), cases: [placed(1), tc(1)] }),
+    );
+    assert.deepEqual(await casesOf(pool, imported.id), [], "January's list is gone");
+    assert.equal((await casesOf(pool, tuesday.id)).length, 1);
     assert.equal((await latestUploadForTarget(pool, "2026-11-17"))?.id, again.id);
+    // Thursday's, made on Wednesday: Tuesday has passed, both of its lists go at both hospitals.
+    await saveUpload(pool, upload({ cycleDay: "2026-11-18", targetDate: "2026-11-19", uploadedAt: new Date("2026-11-18T15:10:00+07:00"), cases: [placed(1), tc(1)] }));
+    assert.deepEqual(await casesOf(pool, tuesday.id), []);
+    assert.deepEqual(await casesOf(pool, again.id, "tha-chalom"), []);
+    assert.equal(await workbookForDay(pool, "2026-11-17"), null);
+    assert.deepEqual((await casesOf(pool, wednesday.id, "tha-chalom")).map((item) => item.caseId), ["80001"], "Wednesday's is today's");
+    const { rows } = await pool.query<{ day: string }>("SELECT to_char(target_date, 'YYYY-MM-DD') AS day FROM workbook_uploads ORDER BY target_date");
+    assert.deepEqual(rows.map((row) => row.day), ["2026-11-18", "2026-11-19"]);
+    // On its own too, as the one-off clear-out uses it.
+    assert.equal(await deletePastLists(pool, "2026-11-19"), 1);
+    assert.equal(await deletePastLists(pool, "2026-11-19"), 0);
   });
 
-  describe("past days' lists an admin imports", () => {
-    const at = new Date("2026-11-19T06:00:00+07:00");
-    const list = (targetDate: string, cases: PlacedCase[] = [placed(1), placed(2)]): PastList => ({
-      targetDate,
-      totalRows: cases.length + 1,
-      kept: cases.length,
-      placed: cases.length,
-      summary: { rows: cases.length + 1 },
-      cases,
-    });
-    const importing = (lists: PastList[], uploadedAt = at) =>
-      savePastLists(pool, { cycleDay: "2026-11-19", uploadedAt, uploadedBy: "U-admin", uploaderName: "ผู้ดูแล ทดสอบ", fileName: "export.xlsx", lists });
+  test("an admin resets one day to its bookings: every HOSxP list of the day goes, at both hospitals", async () => {
+    // Pong, 27 Nov 2026: "Add option for admin to reset OR schedule of specific date (reset only for hosxp case)"
+    const tc = (position: number) => placed(position, { caseId: String(80000 + position), roomId: "or-1", place: "tha-chalom" });
+    await saveUpload(pool, upload({ cases: [placed(1)], uploaderName: "MX หนึ่ง" }));
+    const latest = await saveUpload(pool, upload({ uploadedAt: new Date("2026-11-16T15:20:00+07:00"), cases: [placed(1), placed(2), tc(1)], uploaderName: "MX สอง" }));
+    const other = await saveUpload(pool, upload({ cycleDay: "2026-11-17", targetDate: "2026-11-18", uploadedAt: new Date("2026-11-17T15:10:00+07:00") }));
+    assert.deepEqual(
+      (await listedDays(pool, "2026-11-17")).map((day) => [day.date, day.uploads, day.skh, day.thaChalom, day.latestBy, day.latestAt.toISOString()]),
+      [
+        ["2026-11-17", 2, 2, 1, "MX สอง", latest.uploadedAt.toISOString()],
+        ["2026-11-18", 1, 2, 0, other.uploaderName, other.uploadedAt.toISOString()],
+      ],
+    );
+    assert.deepEqual((await listedDays(pool, "2026-11-18")).map((day) => day.date), ["2026-11-18"], "from the given day on");
 
-    test("each day gets a list the board reads like any other, marked as imported", async () => {
-      assert.deepEqual(await pastListSpan(pool), { days: 0, first: null, last: null });
-      const saved = await importing([list("2026-01-05"), list("2026-01-02", [placed(3)]), list("2026-01-06", [])]);
-      assert.deepEqual(saved, { saved: ["2026-01-02", "2026-01-05", "2026-01-06"], mxDays: [] });
-
-      const day = await workbookForDay(pool, "2026-01-05");
-      assert.ok(day);
-      assert.equal(day.upload.pastImport, true);
-      assert.deepEqual([day.upload.cycleDay, day.upload.uploadedBy, day.upload.fileName, day.upload.totalRows], ["2026-11-19", "U-admin", "export.xlsx", 3]);
-      assert.deepEqual(day.cases.map((item) => [item.caseId, item.hn]), [["70001", "1"], ["70002", "2"]]);
-      assert.deepEqual((await workbookForDay(pool, "2026-01-02"))?.cases.map((item) => item.caseId), ["70003"]);
-      assert.deepEqual((await workbookForDay(pool, "2026-01-06"))?.cases, [], "a day with no case still has its list");
-      assert.deepEqual(await pastListSpan(pool), { days: 3, first: "2026-01-02", last: "2026-01-06" });
-    });
-
-    test("importing again replaces the earlier import's lists instead of stacking them", async () => {
-      await importing([list("2026-01-05"), list("2026-01-06")]);
-      await importing([list("2026-01-05", [placed(9)])], new Date(at.getTime() + 60_000));
-      assert.deepEqual((await workbookForDay(pool, "2026-01-05"))?.cases.map((item) => item.caseId), ["70009"]);
-      assert.equal((await workbookForDay(pool, "2026-01-06"))?.cases.length, 2, "a day the new file does not hold keeps its list");
-      const { rows } = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM workbook_uploads");
-      assert.equal(rows[0].n, 2);
-    });
-
-    test("a day MX uploaded a list for keeps MX's list", async () => {
-      const mx = await saveUpload(pool, upload({ targetDate: "2026-11-17" }));
-      const saved = await importing([list("2026-11-16"), list("2026-11-17", [placed(5)])]);
-      assert.deepEqual(saved, { saved: ["2026-11-16"], mxDays: ["2026-11-17"] });
-      assert.equal((await workbookForDay(pool, "2026-11-17"))?.upload.id, mx.id);
-      assert.equal((await casesOf(pool, mx.id)).length, 2);
-      assert.deepEqual(await pastListSpan(pool), { days: 1, first: "2026-11-16", last: "2026-11-16" });
-    });
-
-    test("imported lists stay when MX's uploads are cleared, being their day's latest", async () => {
-      await importing([list("2026-01-05")]);
-      await saveUpload(pool, upload({ cycleDay: "2027-01-20", targetDate: "2027-01-21", uploadedAt: new Date("2027-01-20T15:10:00+07:00") }));
-      assert.equal((await workbookForDay(pool, "2026-01-05"))?.cases.length, 2);
-    });
-
-    test("a case the table refuses rolls the whole import back", async () => {
-      await assert.rejects(importing([list("2026-01-05"), list("2026-01-06", [placed(1, { roomId: "or-99" })])]));
-      assert.deepEqual(await pastListSpan(pool), { days: 0, first: null, last: null });
-    });
+    assert.equal(await resetDayLists(pool, "2026-11-17"), 2);
+    assert.equal(await workbookForDay(pool, "2026-11-17"), null);
+    assert.equal(await workbookForDay(pool, "2026-11-17", "tha-chalom"), null);
+    assert.equal((await pool.query("SELECT count(*)::int AS n FROM workbook_cases WHERE upload_id = $1", [latest.id])).rows[0].n, 0, "the cases went too");
+    assert.equal((await workbookForDay(pool, "2026-11-18"))?.upload.id, other.id, "another day stays");
+    assert.equal(await resetDayLists(pool, "2026-11-17"), 0);
   });
 
   test("a case the table refuses rolls the whole upload back", async () => {
@@ -287,33 +250,5 @@ describe("workbook uploads (database)", () => {
     assert.equal(await workbookFor(pool, "2026-11-16", "2026-11-17", "tha-chalom"), null);
     assert.equal(await workbookForDay(pool, "2026-11-17", "tha-chalom"), null);
     assert.equal((await workbookFor(pool, "2026-11-16", "2026-11-17"))?.cases.length, 2);
-    // A past import keeps รพ.สมุทรสาคร's list only: รพ.ท่าฉลอม's board shows no past day.
-    await savePastLists(pool, {
-      cycleDay: "2026-11-27",
-      uploadedAt: new Date("2026-11-27T10:00:00+07:00"),
-      uploadedBy: "U-admin",
-      uploaderName: null,
-      fileName: "past.xlsx",
-      lists: [{ targetDate: "2026-11-05", totalRows: 2, kept: 2, placed: 1, summary: null, cases: [placed(1), tc(1)] }],
-    });
-    assert.equal(await workbookForDay(pool, "2026-11-05", "tha-chalom"), null);
-    assert.deepEqual((await workbookForDay(pool, "2026-11-05"))?.cases.map((item) => item.caseId), ["70001"]);
-    assert.equal((await pool.query("SELECT count(*)::int AS n FROM workbook_cases WHERE place = 'tha-chalom' AND upload_id <> $1", [saved.id])).rows[0].n, 0);
-  });
-
-  test("an upload deletes รพ.ท่าฉลอม's cases of the days before its cycle day; รพ.สมุทรสาคร's stay for the calendar", async () => {
-    const tc = (position: number) => placed(position, { caseId: String(80000 + position), roomId: "or-1", place: "tha-chalom" });
-    const tuesday = await saveUpload(pool, upload({ cases: [placed(1), tc(1)] }));
-    // The next cycle's upload, for Wednesday: Tuesday's list there is still today's, so it stays.
-    const wednesday = await saveUpload(
-      pool,
-      upload({ cycleDay: "2026-11-17", targetDate: "2026-11-18", uploadedAt: new Date("2026-11-17T15:10:00+07:00"), cases: [placed(1), tc(1)] }),
-    );
-    assert.deepEqual((await casesOf(pool, tuesday.id, "tha-chalom")).map((item) => item.caseId), ["80001"]);
-    // Thursday's, made on Wednesday: Tuesday has passed.
-    await saveUpload(pool, upload({ cycleDay: "2026-11-18", targetDate: "2026-11-19", uploadedAt: new Date("2026-11-18T15:10:00+07:00"), cases: [placed(1), tc(1)] }));
-    assert.deepEqual(await casesOf(pool, tuesday.id, "tha-chalom"), []);
-    assert.deepEqual((await casesOf(pool, tuesday.id)).map((item) => item.caseId), ["70001"], "รพ.สมุทรสาคร's Tuesday stays");
-    assert.deepEqual((await casesOf(pool, wednesday.id, "tha-chalom")).map((item) => item.caseId), ["80001"], "Wednesday's is today's");
   });
 });
