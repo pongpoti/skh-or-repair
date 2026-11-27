@@ -69,7 +69,13 @@ test("on any weekday, before, between and after the halves too (the weekly sched
         const dressing = allocationFor(room.id, date, periods)?.am?.code === "INFECT";
         assert.ok(rows.every((row) => isDressingOperation(row.procedure) === dressing), `${date} ${room.id}: dressing names`);
       }
-      assert.equal(new Set(built.rows.map((row) => row.id)).size, built.rows.length, `${date}: unique row ids`);
+      // Unique ids, a department's copies in its other rooms aside (BoardRow.shownFrom).
+      const homes = built.rows.filter((row) => !row.shownFrom);
+      assert.equal(new Set(homes.map((row) => row.id)).size, homes.length, `${date}: unique row ids`);
+      for (const room of rooms) {
+        const ids = built.rows.filter((row) => row.roomId === room.id).map((row) => row.id);
+        assert.equal(new Set(ids).size, ids.length, `${date} ${room.id}: unique row ids in the room`);
+      }
       if (repairOn(date, periods)) {
         // In the repair the board's own rules alone give every room its cases: nothing is added straight in a room.
         assert.ok(!built.rows.some((row) => row.id.includes("-extra-")), `${date}: no added rows in the repair`);

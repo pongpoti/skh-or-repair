@@ -136,6 +136,7 @@ function RoomOverview({
   counts,
   mismatches,
   onOpen,
+  total,
 }: {
   rooms: readonly Room[];
   date: string;
@@ -143,8 +144,9 @@ function RoomOverview({
   counts: Record<string, number>;
   mismatches: Record<string, number>;
   onOpen: (id: string) => void;
+  /** The day's cases in these rooms, each once (a department's case is listed in each of its rooms; BoardRow.shownFrom). */
+  total: number;
 }) {
-  const total = rooms.reduce((sum, room) => sum + (counts[room.id] ?? 0), 0);
   return (
     <div className="hidden min-h-0 flex-1 flex-col lg:flex" data-testid="room-overview">
       <div className="shrink-0 border-b border-line px-5 pt-4 pb-3.5">
@@ -625,6 +627,7 @@ export function SuiteBoard({
               counts={counts}
               mismatches={board?.mismatchByRoom ?? NO_MISMATCH}
               onOpen={choose}
+              total={operations.filter((item) => !item.shownFrom && overviewRooms.some((entry) => entry.id === item.roomId)).length}
             />
           ) : (
             <div className="hidden flex-1 flex-col items-center justify-center gap-3 px-8 text-center lg:flex">

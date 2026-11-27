@@ -359,7 +359,8 @@ export function matchBookings(input: {
   // The board's own mismatches, and the bookings it leaves off because HOSxP does not list them (Pong, 15 Nov 2026).
   const listed = (flag: "unbooked" | "not-in-hosxp"): MatchRow[] =>
     (flag === "unbooked" ? board.rows : board.unmatched)
-      .filter((row) => row.flag === flag)
+      // A department's case is listed in each of its rooms on the board: here once, in the room it was put in.
+      .filter((row) => row.flag === flag && !row.shownFrom)
       .map((row) => {
         return {
           key: row.id,

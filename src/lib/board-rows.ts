@@ -1,4 +1,4 @@
-import { NO_OPERATION_LABEL, UNDER_WAY, bookedAtText, bookedRoom, timeOf, type AddedCase } from "./added-cases.ts";
+import { NO_OPERATION_LABEL, UNDER_WAY, bookedAtText, bookedRoom, bookingDept, timeOf, type AddedCase } from "./added-cases.ts";
 import { rangeText } from "./booking-time.ts";
 import { DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { normalizeHn } from "./hn.ts";
@@ -68,6 +68,13 @@ export type BoardRow = Operation & {
   doneBy?: DoneBy;
   /** รพ.ท่าฉลอม's rows say so (buildThaChalomRows), for their rooms' names; รพ.สมุทรสาคร's leave it out. */
   place?: PlaceId;
+  /**
+   * A case of a department with two rooms or more that day is listed in each of them (Pong, 27 Nov 2026: "For day that
+   * dept has 2 rooms : display both booking and hosxp cases on both rooms"): the copy in a room other than the one the
+   * case was put in (lib/placement.ts placeAll: one surgeon, one room) says that room here. Totals count a case once,
+   * by the rows without it.
+   */
+  shownFrom?: string;
 };
 
 /**
@@ -142,11 +149,11 @@ export type BoardRows = {
   uploaded: boolean;
   /** Workbook cases paired with a booking (shown or not). */
   matched: number;
-  /** Rows on the board with a flag: the HOSxP cases nobody booked, outside the dressing room. */
+  /** Cases on the board with a flag: the HOSxP cases nobody booked, outside the dressing room (each case once). */
   mismatchCount: number;
-  /** Flagged rows per room. */
+  /** Flagged rows per room, a department's rooms each counting the department's (BoardRow.shownFrom). */
   mismatchByRoom: Record<string, number>;
-  /** Rows per room. */
+  /** Rows per room, a department's rooms each counting the department's. */
   countByRoom: Record<string, number>;
   /** The HOSxP cases no room takes that day, the department with the most first. */
   offBoard: OffBoardCount[];
@@ -288,7 +295,10 @@ function departmentName(dept: DeptCode | null): string | null {
  *
  * In each room the booked cases come first, by their time (Pong, 27 Nov 2026: booked on the form's day view), then those
  * without one in booking order, then the cases nobody booked in the workbook's order (Pong, 15 Nov 2026: "first priority
- * is booking case: sort by prior set; second priority is HOSxP sequence from workbook"). `bookings` come in queue order
+ * is booking case: sort by prior set; second priority is HOSxP sequence from workbook"). A department with two rooms or
+ * more that day has all of its cases listed in each of them, in that order (Pong, 27 Nov 2026: "For day that dept has 2
+ * rooms : display both booking and hosxp cases on both rooms"; Layout.listedIn, BoardRow.shownFrom), though each case is
+ * still put in one of them (one surgeon, one room) and counted once. `bookings` come in queue order
  * (lib/cases.ts: the queue time, when a booking was made or last moved to its day, room or patient), so their order is
  * the booking order.
  */
@@ -307,7 +317,23 @@ function skhLayout(today: readonly AddedCase[], date: string, periods: RepairPer
     placeCases: (cases) => placeAll(cases, date, periods),
     dressingRooms: roomsHeldBy("INFECT", date, periods),
     open: (roomId): roomId is string => roomId !== null && roomUse(roomId, date, periods) === "open",
+    listedIn: (roomId, dept) => listedRooms(roomId, dept, date, periods),
   };
+}
+
+/**
+ * The rooms of รพ.สมุทรสาคร's board on `date` that list a case of department `dept` put in `roomId` (Layout.listedIn):
+ * all of the department's rooms that day when it holds two or more, morning or afternoon, and `roomId` is one of them
+ * (Pong, 27 Nov 2026: "For day that dept has 2 rooms : display both booking and hosxp cases on both rooms"); else
+ * `roomId` alone, as for the dressing, emergency and SCOPE rooms and a guest's room. SCOPE-coded cases are a general
+ * surgeon's (lib/placement.ts candidateRooms).
+ */
+export function listedRooms(roomId: string, dept: DeptCode | null, date: string, periods: RepairPeriods): string[] {
+  const code = dept === "SCOPE" ? "GENSX" : dept;
+  if (!code) return [roomId];
+  const dressing = roomsHeldBy("INFECT", date, periods);
+  const rooms = roomsHeldBy(code, date, periods).filter((room) => !dressing.includes(room));
+  return rooms.length > 1 && rooms.includes(roomId) ? rooms : [roomId];
 }
 
 /**
@@ -330,6 +356,8 @@ function thaChalomLayout(today: readonly AddedCase[], date: string): Layout {
     placeCases: (cases) => placeThaChalom(cases, date),
     dressingRooms: [],
     open: (roomId): roomId is string => roomId !== null && open.has(roomId),
+    // Its table gives a department one room a day (thaChalomBookingRoom).
+    listedIn: (roomId) => [roomId],
     place: "tha-chalom",
   };
 }
@@ -344,6 +372,12 @@ type Layout = {
   dressingRooms: readonly string[];
   /** Whether a room operates that day. */
   open: (roomId: string | null) => roomId is string;
+  /**
+   * The rooms a row in `roomId` of department `dept` is listed in: all of the department's rooms that day when it has
+   * two or more and `roomId` is one of them (Pong, 27 Nov 2026: "For day that dept has 2 rooms : display both booking
+   * and hosxp cases on both rooms"), else `roomId` alone (the dressing, emergency and SCOPE rooms, a guest's room).
+   */
+  listedIn: (roomId: string, dept: DeptCode | null) => readonly string[];
   /** The hospital its rows say, when not รพ.สมุทรสาคร. */
   place?: PlaceId;
 };
@@ -353,7 +387,7 @@ function mergeRows(
   { workbook, today, viewer }: { workbook: readonly WorkbookCase[] | null; today: readonly AddedCase[]; viewer: BoardViewer },
   layout: Layout,
 ): BoardRows {
-  const { bookingRooms, dressingRooms, open, place } = layout;
+  const { bookingRooms, dressingRooms, open, place, listedIn } = layout;
   const uploaded = workbook !== null;
   const cases = [...(workbook ?? [])].sort((a, b) => a.position - b.position);
 
@@ -377,6 +411,8 @@ function mergeRows(
   const unbooked: Omit<BoardRow, "order">[] = [];
   const unmatchedRows: Omit<BoardRow, "order">[] = [];
   const bookingIndex = new Map(today.map((booking, index) => [booking, index]));
+  // Each row's department, for the rooms it is listed in (Layout.listedIn).
+  const deptOf = new Map<Omit<BoardRow, "order">, DeptCode | null>();
 
   for (const item of cases) {
     const { booking, placement, roomId } = shown.get(item) as Shown;
@@ -386,35 +422,33 @@ function mergeRows(
     }
     if (booking) {
       const hn = booking.hn ?? normalizeHn(item.hn);
-      booked.push({
-        start: startOf(booking),
-        at: bookingIndex.get(booking) ?? 0,
-        row: {
-          id: `mt-${booking.id}`,
-          roomId,
-          procedure: item.operation || booking.operation || NO_OPERATION_LABEL,
-          surgeon: withoutTitle(item.surgeon),
-          specialty: departmentName(item.dept) ?? subtypeLabel("DR", booking.subtype),
-          status: item.status,
-          shift: item.shift ?? booking.shift,
-          source: "matched",
-          flag: null,
-          ...(seesHn(booking) && hn ? { hn } : {}),
-          ...(seesHn(booking) && item.patientName ? { patientName: item.patientName } : {}),
-          bookedBy: booking.surgeon,
-          ...ownId(booking),
-          ...when(booking),
-          ...timeText(booking),
-          ...noteOf(booking),
-          ...doneByIn(roomId, dressingRooms, booking),
-          ...hospital,
-        },
-      });
+      const row: Omit<BoardRow, "order"> = {
+        id: `mt-${booking.id}`,
+        roomId,
+        procedure: item.operation || booking.operation || NO_OPERATION_LABEL,
+        surgeon: withoutTitle(item.surgeon),
+        specialty: departmentName(item.dept) ?? subtypeLabel("DR", booking.subtype),
+        status: item.status,
+        shift: item.shift ?? booking.shift,
+        source: "matched",
+        flag: null,
+        ...(seesHn(booking) && hn ? { hn } : {}),
+        ...(seesHn(booking) && item.patientName ? { patientName: item.patientName } : {}),
+        bookedBy: booking.surgeon,
+        ...ownId(booking),
+        ...when(booking),
+        ...timeText(booking),
+        ...noteOf(booking),
+        ...doneByIn(roomId, dressingRooms, booking),
+        ...hospital,
+      };
+      deptOf.set(row, item.dept ?? bookingDept(booking.subtype));
+      booked.push({ start: startOf(booking), at: bookingIndex.get(booking) ?? 0, row });
       continue;
     }
     // In the dressing room a case nobody booked is no mismatch: booking it does not matter there (Pong, 15 Nov 2026).
     const dressingRoom = dressingRooms.includes(roomId);
-    unbooked.push({
+    const row: Omit<BoardRow, "order"> = {
       id: `hx-${item.caseId}`,
       roomId,
       procedure: item.operation,
@@ -428,7 +462,9 @@ function mergeRows(
       ...(viewer.allHn && item.patientName ? { patientName: item.patientName } : {}),
       ...doneByIn(roomId, dressingRooms),
       ...hospital,
-    });
+    };
+    deptOf.set(row, item.dept);
+    unbooked.push(row);
   }
 
   today.forEach((booking, index) => {
@@ -454,6 +490,7 @@ function mergeRows(
       ...doneByIn(roomId, dressingRooms, booking),
       ...hospital,
     };
+    deptOf.set(row, bookingDept(booking.subtype));
     if (uploaded) unmatchedRows.push(row);
     else booked.push({ start: startOf(booking), at: index, row });
   });
@@ -461,19 +498,21 @@ function mergeRows(
   // By time, then the booking order (a pair keeps it, whatever the file order of its HOSxP case).
   const rows = [...booked.sort((a, b) => a.start - b.start || a.at - b.at).map((entry) => entry.row), ...unbooked];
 
+  // Numbered in each room it is listed in: a department's rooms that day each list all of its cases, in the same order
+  // (booked by time and booking order, then HOSxP's in file order), the copies saying the room the case was put in.
   const order = new Map<string, number>();
   const countByRoom: Record<string, number> = {};
   const mismatchByRoom: Record<string, number> = {};
   let mismatchCount = 0;
-  const numbered = rows.map((row): BoardRow => {
-    const slot = (order.get(row.roomId) ?? 0) + 1;
-    order.set(row.roomId, slot);
-    countByRoom[row.roomId] = slot;
-    if (row.flag) {
-      mismatchCount += 1;
-      mismatchByRoom[row.roomId] = (mismatchByRoom[row.roomId] ?? 0) + 1;
-    }
-    return { ...row, order: slot };
+  const numbered = rows.flatMap((row): BoardRow[] => {
+    if (row.flag) mismatchCount += 1;
+    return listedIn(row.roomId, deptOf.get(row) ?? null).map((roomId): BoardRow => {
+      const slot = (order.get(roomId) ?? 0) + 1;
+      order.set(roomId, slot);
+      countByRoom[roomId] = slot;
+      if (row.flag) mismatchByRoom[roomId] = (mismatchByRoom[roomId] ?? 0) + 1;
+      return roomId === row.roomId ? { ...row, order: slot } : { ...row, roomId, order: slot, shownFrom: row.roomId };
+    });
   });
 
   const unmatched = unmatchedRows.map((row, index): BoardRow => ({ ...row, order: index + 1 }));

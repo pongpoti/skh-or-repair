@@ -118,7 +118,8 @@ export function ThaChalomBoard({
     for (const item of rows) next[item.roomId] = (next[item.roomId] ?? 0) + 1;
     return next;
   }, [rows]);
-  const total = open.reduce((sum, item) => sum + (counts[item.room.id] ?? 0), 0);
+  // Each case once (a department's case would be listed in each of its rooms; BoardRow.shownFrom).
+  const total = rows.filter((item) => !item.shownFrom && open.some((entry) => entry.room.id === item.roomId)).length;
   const cases = entry ? rows.filter((item) => item.roomId === entry.room.id).sort((a, b) => a.order - b.order) : [];
   const allocation = entry ? thaChalomAllocation(entry.room.id, date) : null;
 

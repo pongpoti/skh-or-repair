@@ -77,13 +77,15 @@ test("simulated bookings go through the board's rules: one surgeon, one room, an
   assert.equal(built.matched, made.length, "every booking is matched");
   assert.equal(built.unmatched.length, 0);
   // A matched row is in its booking's room; HOSxP's cases nobody booked are flagged (not in the dressing room).
-  const rows = new Map(built.rows.map((row) => [row.id, row]));
+  // (A department's rows are listed in each of its rooms; the room a case is in is the row that is no copy.)
+  const homes = built.rows.filter((row) => !row.shownFrom);
+  const rows = new Map(homes.map((row) => [row.id, row]));
   for (const booking of made) assert.equal(rows.get(`mt-${booking.id}`)?.roomId, booking.roomId, booking.id);
   const unbooked = built.rows.filter((row) => row.source === "hosxp");
   assert.ok(unbooked.length > 0 && unbooked.every((row) => row.flag === (row.roomId === "or-1" ? null : "unbooked")));
   // No surgeon's list is split between a department's two rooms.
   const surgeonRooms = new Map<string, Set<string>>();
-  for (const row of built.rows.filter((item) => ["or-2", "or-5", "or-12", "or-13"].includes(item.roomId))) {
+  for (const row of homes.filter((item) => ["or-2", "or-5", "or-12", "or-13"].includes(item.roomId))) {
     const rooms = surgeonRooms.get(row.surgeon) ?? new Set<string>();
     rooms.add(row.roomId);
     surgeonRooms.set(row.surgeon, rooms);
