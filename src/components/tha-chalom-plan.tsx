@@ -3,8 +3,10 @@ import { readableTextOn } from "@/lib/allocation";
 import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha-chalom-schedule";
 
 /**
- * รพ.ท่าฉลอม's OR suite as Pong drew it (26 Nov 2026, "Below is SVG layout of OR ท่าฉลอม"): four ORs round the corridor,
- * the Scope room (Pong, 27 Nov 2026), the scrub areas (gridded), the small rooms and the sterile supply. Given a day of the weekly schedule
+ * รพ.ท่าฉลอม's OR suite as Pong drew it (26 Nov 2026, "Below is SVG layout of OR ท่าฉลอม"), turned a quarter clockwise
+ * (Pong, 27 Nov 2026: "Rotate ท่าฉลอม layout 90 degree clockwise"), so ORs 1 to 3 stand down the right and OR 4 at the
+ * foot on the left: four ORs round the corridor, the Scope room (Pong, 27 Nov 2026), the scrub areas (gridded), the small
+ * rooms and the sterile supply. A point (x, y) of Pong's drawing is at (641.25 − y, x) here; the text stays upright. Given a day of the weekly schedule
  * (lib/tha-chalom-schedule.ts), each OR takes its department's colour and label, as on รพ.สมุทรสาคร's plan: split
  * between morning (above) and afternoon (below) when they differ, the board's closed-room stripes for OR 3 while it is
  * turned into an intervention room, and plain for a room no one has (ว่าง). Without a day the ORs keep Pong's brown and
@@ -13,23 +15,23 @@ import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha
  */
 
 /**
- * One unit of this drawing in รพ.สมุทรสาคร's plan's units (components/floor-plan.tsx): Pong drew these ORs about 166
- * units across, รพ.สมุทรสาคร's are about 196.
+ * One unit of this drawing on a phone, in รพ.สมุทรสาคร's plan's units (components/floor-plan.tsx): both plans fill the
+ * screen's width there (Pong, 27 Nov 2026: "same screen margin like สมุทรสาคร"), this one 590.25 units wide, that one 1207,
+ * each with its frame the same way in from the edge.
  */
-const SKH_UNITS = 1.18;
+const SKH_UNITS = 1207 / 590.25;
 /**
- * How much bigger than รพ.สมุทรสาคร's an OR here is on the screen (Pong, 27 Nov 2026: filling the screen was "too large",
- * the same size as รพ.สมุทรสาคร's "Too small"). The board draws the plan at รพ.สมุทรสาคร's scale times SCALE (globals.css
- * .tc-plan), and the ring, number and label below are รพ.สมุทรสาคร's sizes divided by it, so they read the same as there.
+ * The ring, number and labels a third bigger than รพ.สมุทรสาคร's on the screen, as Pong saw them when the ORs here were a
+ * third bigger than there (27 Nov 2026): รพ.สมุทรสาคร's sizes divided by SCALE.
  */
 const ZOOM = 4 / 3;
-const SCALE = SKH_UNITS * ZOOM;
+const SCALE = SKH_UNITS / ZOOM;
 /** รพ.สมุทรสาคร's ring 47 and number 56, or 36 and 44 in a short or split room; its department label 40 (globals.css). */
 const RING = 47 / SCALE;
 const RING_SMALL = 36 / SCALE;
 const NUMBER = 56 / SCALE;
 const NUMBER_SMALL = 44 / SCALE;
-/** A room shorter than this on the screen, in รพ.สมุทรสาคร's units, takes the small ring, as its short OR 7 does. */
+/** A room shorter than this on a phone, in รพ.สมุทรสาคร's units, takes the small ring, as its short OR 7 does. */
 const SHORT = 170;
 
 type Or = {
@@ -46,35 +48,36 @@ type Or = {
 
 /** Each OR: its chamfered outline, and where its number sits (the white ring, the number, its label under it). */
 const ORS: readonly Or[] = [
-  { id: "or-1", number: "1", d: "M153,62 H262 L280,80 V219 L262,237 H153 L135,219 V80 Z", x: 207.5, ringY: 131.5, top: 62, bottom: 237 },
-  { id: "or-2", number: "2", d: "M401,62 H504 L522,80 V227 L504,245 H401 L383,227 V80 Z", x: 452.5, ringY: 135.5, top: 62, bottom: 245 },
-  { id: "or-3", number: "3", d: "M544,62 H666 L684,80 V227 L666,245 H544 L526,227 V80 Z", x: 605, ringY: 135.5, top: 62, bottom: 245 },
-  { id: "or-4", number: "4", d: "M514,358 H670 L688,376 V492 L670,510 H514 L496,492 V376 Z", x: 592, ringY: 416, top: 358, bottom: 510 },
+  { id: "or-1", number: "1", d: "M422.25,135 H561.25 L579.25,153 V262 L561.25,280 H422.25 L404.25,262 V153 Z", x: 491.75, ringY: 189.5, top: 135, bottom: 280 },
+  { id: "or-2", number: "2", d: "M414.25,383 H561.25 L579.25,401 V504 L561.25,522 H414.25 L396.25,504 V401 Z", x: 487.75, ringY: 434.5, top: 383, bottom: 522 },
+  { id: "or-3", number: "3", d: "M414.25,526 H561.25 L579.25,544 V666 L561.25,684 H414.25 L396.25,666 V544 Z", x: 487.75, ringY: 587, top: 526, bottom: 684 },
+  { id: "or-4", number: "4", d: "M149.25,496 H265.25 L283.25,514 V670 L265.25,688 H149.25 L131.25,670 V514 Z", x: 207.25, ringY: 574, top: 496, bottom: 688 },
 ];
 
 /** The other rooms, as drawn: `grid` is a scrub area (the gridded floor). */
 const ROOMS: readonly { x: number; y: number; w: number; h: number; grid?: true; id?: string }[] = [
-  { x: 285, y: 62, w: 95, h: 46, grid: true },
-  { x: 285, y: 110, w: 46, h: 64 },
-  { x: 333, y: 110, w: 47, h: 64 },
-  { x: 285, y: 176, w: 95, h: 78, grid: true, id: "scrub-1-2" },
-  { x: 590, y: 256, w: 46, h: 98, grid: true, id: "scrub-3-4" },
-  { x: 640, y: 256, w: 48, h: 74 },
-  { x: 400, y: 358, w: 93, h: 76 },
-  { x: 400, y: 437, w: 93, h: 73 },
-  { x: 612, y: 514, w: 76, h: 66, id: "sterile-supply" },
-  { x: 135, y: 290, w: 80, h: 58 },
-  { x: 135, y: 352, w: 80, h: 48 },
-  { x: 135, y: 404, w: 80, h: 56 },
-  { x: 135, y: 465, w: 50, h: 45 },
-  { x: 135, y: 513, w: 50, h: 50 },
+  { x: 533.25, y: 285, w: 46, h: 95, grid: true },
+  { x: 467.25, y: 285, w: 64, h: 46 },
+  { x: 467.25, y: 333, w: 64, h: 47 },
+  { x: 387.25, y: 285, w: 78, h: 95, grid: true, id: "scrub-1-2" },
+  { x: 287.25, y: 590, w: 98, h: 46, grid: true, id: "scrub-3-4" },
+  { x: 311.25, y: 640, w: 74, h: 48 },
+  { x: 207.25, y: 400, w: 76, h: 93 },
+  { x: 131.25, y: 400, w: 73, h: 93 },
+  { x: 61.25, y: 612, w: 66, h: 76, id: "sterile-supply" },
+  { x: 293.25, y: 135, w: 58, h: 80 },
+  { x: 241.25, y: 135, w: 48, h: 80 },
+  { x: 181.25, y: 135, w: 56, h: 80 },
+  { x: 131.25, y: 135, w: 45, h: 50 },
+  { x: 78.25, y: 135, w: 50, h: 50 },
 ];
 
 /**
- * The Scope room, the square by the corridor's foot (Pong, 27 Nov 2026: "The circle room is scope", circled on the
- * plan): coloured by its department as the ORs, with "Scope" on a white tag where an OR has its number.
+ * The Scope room, the square by the corridor's foot in Pong's drawing, at the top left once turned (Pong, 27 Nov 2026:
+ * "The circle room is scope", circled on the plan): coloured by its department as the ORs, with "Scope" on a white tag
+ * where an OR has its number.
  */
-const SCOPE = { x: 190, y: 465, w: 80, h: 98 };
+const SCOPE = { x: 78.25, y: 190, w: 98, h: 80 };
 /** The tag's text and the department's label in the Scope room, smaller than an OR's: the room is half as wide. */
 const SCOPE_TAG = 17;
 
@@ -137,7 +140,7 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
   // As on รพ.สมุทรสาคร's plan: a split room's small ring on the seam, half way down, with the morning's label above it
   // and the afternoon's below; otherwise the ring a little above the middle and the label under it (closer together in
   // a short room).
-  const short = (or.bottom - or.top) * SCALE < SHORT;
+  const short = (or.bottom - or.top) * SKH_UNITS < SHORT;
   const ringY = entry.split ? middle : middle - (short ? 30 : 36) / SCALE;
   const labelY = middle + (short ? 44 : 54) / SCALE;
   return (
@@ -209,12 +212,15 @@ function ScopeRoom({ entry }: { entry: ThaChalomRoomDay | null }) {
   );
 }
 
-/** The plan sits at the top of its box, as รพ.สมุทรสาคร's does (components/floor-plan.tsx), centred across it; .tc-plan sizes it. */
+/**
+ * The plan fills its box as far as it can, at the top and centred across it, as รพ.สมุทรสาคร's does (components/floor-plan.tsx):
+ * the whole width on a phone, the whole height beside the room list.
+ */
 export function ThaChalomPlan({ className, day = null }: { className?: string; day?: readonly ThaChalomRoomDay[] | null }) {
   const byId = new Map((day ?? []).map((entry) => [entry.room.id as string, entry]));
   return (
     <svg
-      viewBox="104.5 31.5 614 578.25"
+      viewBox="25.5 98.5 590.25 626"
       preserveAspectRatio="xMidYMin meet"
       className={className}
       role={day ? "group" : "img"}
@@ -232,8 +238,8 @@ export function ThaChalomPlan({ className, day = null }: { className?: string; d
           <line x1="0" y1="0" x2="0" y2="12" stroke="var(--fp-closed-line)" strokeWidth="3" />
         </pattern>
       </defs>
-      <rect className="tcp-frame" x="108" y="35" width="607" height="571.25" rx="4" />
-      <path className="tcp-corridor" d="M280,256 H688 V356 H398 V580 H280 Z" />
+      <rect className="tcp-frame" x="35" y="108" width="571.25" height="607" rx="4" />
+      <path className="tcp-corridor" d="M385.25,280 V688 H285.25 V398 H61.25 V280 Z" />
       {ROOMS.map((room) => (
         <rect
           key={`${room.x}-${room.y}`}

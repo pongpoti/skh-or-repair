@@ -2188,7 +2188,7 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 .tcp-scope .tcp-or-thai { font-size: 19px; }
 /* The department's short label (ORTHO, VAS): Latin capitals, so a little spacing is safe. */
 .tcp-or-dept {
-  font: 700 25.4px var(--font-inter), var(--font-thai), system-ui, sans-serif;
+  font: 700 26px var(--font-inter), var(--font-thai), system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: central;
   letter-spacing: 0.5px;
@@ -2196,7 +2196,7 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 /* ว่าง and ปรับปรุง: Thai, so no letter-spacing. */
 .tcp-or-thai {
   fill: var(--fp-muted);
-  font: 700 25.4px var(--font-thai), var(--font-inter), system-ui, sans-serif;
+  font: 700 26px var(--font-thai), var(--font-inter), system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: central;
 }
@@ -2215,21 +2215,13 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 }
 
 /*
- * รพ.ท่าฉลอม's plan on its board, sized from รพ.สมุทรสาคร's (Pong, 27 Nov 2026: filling the screen was "too large", the
- * same scale "Too small"): รพ.สมุทรสาคร's plan (1207 × 1706) fills the same box as far as it can, and this one is drawn
- * 1.18 × 4/3 times that (tha-chalom-plan.tsx SCALE), so its ORs come out a third bigger than รพ.สมุทรสาคร's: 614 × SCALE
- * / 1207 of the box's width, or 614 × SCALE / 1706 of its height, whichever is less, and its height in proportion. The
- * box is the swipe area (.tc-plan-box).
+ * รพ.ท่าฉลอม's plan on its board fills the swipe area as รพ.สมุทรสาคร's does, with the same margins (Pong, 27 Nov 2026:
+ * "same screen margin like สมุทรสาคร"); the drawing keeps its shape inside (tha-chalom-plan.tsx).
  */
-.tc-plan-box {
-  container-type: size;
-}
 .tc-plan {
-  align-self: flex-start;
-  flex: none;
-  width: 80%;
-  height: auto;
-  width: min(80.04cqw, 56.63cqh);
-  height: min(75.38cqw, 53.33cqh);
+  flex: 1 1 0%;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
 }
 

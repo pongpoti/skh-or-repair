@@ -1314,6 +1314,10 @@ async function main() {
       assert(JSON.stringify(ors[1].slice(2)) === JSON.stringify(["open", "OR 2 · ศัลยกรรมหลอดเลือด", ["VAS"]]), `OR 2: ${JSON.stringify(ors[1])}`);
       assert(JSON.stringify(ors[2].slice(2)) === JSON.stringify(["closed", "OR 3 · ปรับปรุงเป็นห้อง Intervention", ["ปรับปรุง"]]), `OR 3: ${JSON.stringify(ors[2])}`);
       assert((await page.locator(".tcp-room, .tcp-grid-box").count()) === 14, "the other rooms as drawn");
+      // turned a quarter clockwise (Pong, 27 Nov 2026): ORs 1 to 3 down the right, OR 4 at the foot on the left
+      const orBox = async (id) => page.locator(`.tcp-or[data-room="${id}"] .tcp-or-shape`).boundingBox();
+      const [or1, or2, or3, or4] = await Promise.all(["or-1", "or-2", "or-3", "or-4"].map(orBox));
+      assert(or1.y < or2.y && or2.y < or3.y && Math.abs(or2.x - or3.x) <= 1 && or4.x + or4.width < or1.x && or4.y > or2.y, `ORs 1 to 3 down the right, OR 4 at the foot on the left: ${JSON.stringify([or1, or2, or3, or4])}`);
       // the Scope room, the square by the corridor's foot (Pong, 27 Nov 2026: "The circle room is scope")
       assert((await page.locator('.tcp-scope[data-room="scope"] .tcp-scope-name').textContent()) === "Scope", "the Scope room on the plan");
       const roomsOf = () =>
@@ -1397,6 +1401,12 @@ async function main() {
         if (width < 1024) {
           assert(list === null, `no list on a phone at ${width}px: ${JSON.stringify(list)}`);
           assert(plan.y - (bar.y + bar.height) <= 8, `the plan right under the bar at ${width}px: ${JSON.stringify([bar, plan])}`);
+          // as wide as the screen with รพ.สมุทรสาคร's margins (Pong, 27 Nov 2026: "same screen margin like สมุทรสาคร"):
+          // the plan 4px in from each side, its frame a few px further (6px at 390px, as รพ.สมุทรสาคร's)
+          const frame = await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox();
+          assert(Math.abs(plan.x - 4) <= 0.5 && Math.abs(plan.x + plan.width - (width - 4)) <= 0.5, `the plan as wide as the screen at ${width}px: ${JSON.stringify(plan)}`);
+          const inset = [frame.x - plan.x, plan.x + plan.width - (frame.x + frame.width)];
+          assert(inset.every((gap) => gap >= 3 && gap <= 7), `the frame a few px in at ${width}px: ${JSON.stringify([plan, frame])}`);
         } else {
           assert(list && list.y + list.height <= height + 0.5 && list.x + list.width <= width + 0.5, `the list in view at ${width}px: ${JSON.stringify(list)}`);
           assert(list.x >= plan.x + plan.width - 0.5, `the list beside the plan at ${width}px`);
