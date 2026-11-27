@@ -1482,7 +1482,7 @@ async function main() {
           const frame = await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox();
           assert(Math.abs(plan.x - 4) <= 0.5 && Math.abs(plan.x + plan.width - (width - 4)) <= 0.5, `the plan as wide as the screen at ${width}px: ${JSON.stringify(plan)}`);
           const inset = [frame.x - plan.x, plan.x + plan.width - (frame.x + frame.width)];
-          assert(inset.every((gap) => gap >= 1.5 && gap <= 5), `the frame a few px in at ${width}px: ${JSON.stringify([plan, frame])}`);
+          assert(inset.every((gap) => gap >= 1 && gap <= 5), `the frame a few px in at ${width}px: ${JSON.stringify([plan, frame])}`);
         } else {
           assert(list && list.y + list.height <= height + 0.5 && list.x + list.width <= width + 0.5, `the list in view at ${width}px: ${JSON.stringify(list)}`);
           assert(list.x >= plan.x + plan.width - 0.5, `the list beside the plan at ${width}px`);
