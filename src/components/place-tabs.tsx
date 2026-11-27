@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PlaceTabLabel } from "@/components/place-tab-label";
+import { PLACE_NOTICES_ID } from "@/lib/board-notices";
 import { PLACES, placeHref, type PlaceId } from "@/lib/places";
 
 /** Which hospital a board is (and, on the dev previews, where each hospital's board is). */
@@ -16,7 +17,9 @@ export function PlaceTabs({ current, hrefs, pickedDate, className = "" }: PlaceS
       {PLACES.map((place) =>
         place.id === current ? (
           <span key={place.id} className="place-tab" aria-current="page" data-place={place.id} data-testid="place-tab">
-            {place.name}
+            <span className="min-w-0 truncate">{place.name}</span>
+            {/* The board's notices, beside its own hospital's name (components/board-notices.tsx). */}
+            <span id={PLACE_NOTICES_ID} className="place-notices" />
           </span>
         ) : (
           <Link key={place.id} href={placeHref(hrefs?.[place.id] ?? place.href, pickedDate)} className="place-tab" data-place={place.id} data-testid="place-tab">

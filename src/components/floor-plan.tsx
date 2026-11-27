@@ -218,6 +218,13 @@ function RepairZone({ half, d }: { half: 1 | 2; d: string }) {
 }
 
 /**
+ * The part of the drawing (0 0 1207 1706, its frame 20 in from each edge) the board shows: the frame with 8 units around
+ * it, so the plan is a little bigger on the screen, and centred in the room it has (Pong, 27 Nov 2026: "align layout
+ * center and slight increase size", once the notice strip had moved into the hospital switch).
+ */
+const PLAN_VIEW_BOX = "12 12 1183 1682";
+
+/**
  * ปิด on a recovery-area room the repair closes, RR on one it leaves open, as on the repair plan images. Where the
  * zone's tag would cover the label (RR 2 in the first half), the label moves just below the tag, inside the room.
  */
@@ -294,7 +301,7 @@ export function FloorPlan({
   const repair = repairOn(day, periods);
 
   return (
-    <svg viewBox="0 0 1207 1706" preserveAspectRatio="xMidYMin meet" className="h-full w-auto max-w-none" role="group" aria-label="แปลนห้องผ่าตัด">
+    <svg viewBox={PLAN_VIEW_BOX} preserveAspectRatio="xMidYMid meet" className="h-full w-auto max-w-none" role="group" aria-label="แปลนห้องผ่าตัด">
       <FloorScenery />
       <defs>
         {/* Closed rooms: muted taupe stripes, as on the repair plan images. */}
