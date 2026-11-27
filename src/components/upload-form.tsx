@@ -142,7 +142,7 @@ export function UploadForm({
           <label className="block">
             <span className="text-sm font-semibold text-ink">ไฟล์ตารางผ่าตัดจาก HOSxP</span>
             <span id="upload-file-hint" className="block text-xs text-muted">
-              ไฟล์ .xlsx ไม่เกิน {megabytes(rules.maxBytes)}
+              ไฟล์ .xlsx หรือ .xls ไม่เกิน {megabytes(rules.maxBytes)}
             </span>
             {/* Pong, 17 Nov 2026: "translate upload input to Thai". The real input is hidden but still takes the focus
                 and the file; the label around it opens the picker wherever it is tapped. */}

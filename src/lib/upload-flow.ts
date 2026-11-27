@@ -22,7 +22,7 @@ import {
 import { readXlsx, type XlsxCell } from "./xlsx.ts";
 
 /**
- * MX's upload, from the file's bytes to the cases the board stores, with nothing but arguments: read the .xlsx
+ * MX's upload, from the file's bytes to the cases the board stores, with nothing but arguments: read the Excel file
  * (lib/xlsx.ts), parse, check every row is booked for the target day, filter and split by hospital (lib/workbook.ts),
  * place each case on the target day (lib/placement.ts under the repair periods; รพ.ท่าฉลอม's by its own table,
  * lib/tha-chalom-schedule.ts), count it all for the summary, and compare each hospital's cases with its doctors'
@@ -242,7 +242,7 @@ export function placedSummary(
   };
 }
 
-/** Why a file is refused as a whole: it is not a readable .xlsx, its headers are not the export's, or a row is booked for another day. */
+/** Why a file is refused as a whole: it is not a readable Excel file, its headers are not the export's, or a row is booked for another day. */
 export type FlowRefusal = { ok: false; error: "file" | "headers" | "dates"; message: string };
 
 export type ProcessedUpload = {
@@ -287,7 +287,7 @@ export function processSheet(
   };
 }
 
-/** The pipeline from the file's bytes. A file that is not a readable .xlsx is refused with lib/xlsx.ts's Thai message. */
+/** The pipeline from the file's bytes. A file that is not a readable Excel file is refused with lib/xlsx.ts's Thai message. */
 export function processWorkbook(
   data: Uint8Array | ArrayBuffer,
   target: string,

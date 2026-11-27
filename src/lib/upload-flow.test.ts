@@ -21,7 +21,7 @@ import {
   type FlowSummary,
   type ProcessedUpload,
 } from "./upload-flow.ts";
-import { readXlsx, XLS_MESSAGE, XLSX_LIMITS, type XlsxCell } from "./xlsx.ts";
+import { readXlsx, XLSX_LIMITS, type XlsxCell } from "./xlsx.ts";
 
 // The made-up export (tests/fixtures, every name and HN invented). Rows 1–17 are all booked for Thu 5 Nov 2026 and
 // stand in for MX's file for that day; the whole file holds several days, so the date guard refuses it.
@@ -397,9 +397,18 @@ test("ท่าฉลอม's rows: kept, placed by its own table, matched with 
   assert.deepEqual(placedSummary(result.summary, result.cases, THURSDAY, PLANNED, bookings, result.thaChalomCases), result.summary);
 });
 
-test("a file that is not an .xlsx is refused with the reader's Thai message", () => {
+test("an .xls of the same export gives the same upload", () => {
+  const xls = readFileSync(new URL("../../tests/fixtures/sample-or-export.xls", import.meta.url));
+  assert.deepEqual(processWorkbook(xls, THURSDAY, PLANNED), processWorkbook(FIXTURE, THURSDAY, PLANNED));
+});
+
+test("a file that is not an Excel file is refused with the reader's Thai message", () => {
   const ole = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, ...new Array(504).fill(0)]);
-  assert.deepEqual(processWorkbook(ole, THURSDAY, PLANNED), { ok: false, error: "file", message: XLS_MESSAGE });
+  assert.deepEqual(processWorkbook(ole, THURSDAY, PLANNED), {
+    ok: false,
+    error: "file",
+    message: "เปิดไฟล์ไม่ได้ ไฟล์อาจเสีย บันทึกเป็น .xlsx ใหม่แล้วลองอีกครั้ง",
+  });
   const text = processWorkbook(Buffer.from("ID,HN\n1,2\n"), THURSDAY, PLANNED);
   assert.equal(text.ok, false);
   assert.ok(!text.ok && text.error === "file");
@@ -576,13 +585,15 @@ test("the upload window by Bangkok time: before 15:00, from 15:00 up to 16:00, t
   assert.equal(nextWindowChange(bangkok("23:59:59")).toISOString(), bangkok("00:00:00", "2026-11-15").toISOString());
 });
 
-test("the file checks the form and the action share: .xlsx only, not empty, at most 4 MB", () => {
-  const rules = { maxBytes: XLSX_LIMITS.maxFileBytes, xlsMessage: XLS_MESSAGE };
+test("the file checks the form and the action share: .xlsx or .xls, not empty, at most 4 MB", () => {
+  const rules = { maxBytes: XLSX_LIMITS.maxFileBytes };
   assert.equal(megabytes(rules.maxBytes), "4 MB");
   assert.equal(fileProblem({ name: "or-5-nov.xlsx", size: 20_000 }, rules), null);
   assert.equal(fileProblem({ name: " OR.XLSX ", size: rules.maxBytes }, rules), null);
-  assert.equal(fileProblem({ name: "or.xls", size: 20_000 }, rules), XLS_MESSAGE);
-  assert.equal(fileProblem({ name: "or.csv", size: 20_000 }, rules), "ใช้ไฟล์ .xlsx จาก HOSxP เท่านั้น");
+  assert.equal(fileProblem({ name: "or.xls", size: 20_000 }, rules), null);
+  assert.equal(fileProblem({ name: "OR 30 พ.ย..XLS", size: rules.maxBytes }, rules), null);
+  assert.equal(fileProblem({ name: "or.csv", size: 20_000 }, rules), "ใช้ไฟล์ Excel (.xlsx หรือ .xls) จาก HOSxP เท่านั้น");
+  assert.equal(fileProblem({ name: "or.xls", size: 0 }, rules), "ไฟล์นี้ว่าง เลือกไฟล์ใหม่");
   assert.equal(fileProblem({ name: "or.xlsx", size: 0 }, rules), "ไฟล์นี้ว่าง เลือกไฟล์ใหม่");
   assert.equal(fileProblem({ name: "or.xlsx", size: rules.maxBytes + 1 }, rules), "ไฟล์ใหญ่เกิน 4 MB");
   assert.equal(fileProblem(null, rules), "เลือกไฟล์ก่อน");
