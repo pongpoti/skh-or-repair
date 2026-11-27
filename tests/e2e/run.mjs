@@ -1465,12 +1465,15 @@ async function main() {
         const plan = await page.locator('[data-testid="tha-chalom-plan"]').boundingBox();
         const list = await page.locator('[data-testid="tc-rooms"]').boundingBox();
         const bar = await page.locator("header").boundingBox();
+        // the notices in the bar's switch, beside ท่าฉลอม's own name (Pong, 27 Nov 2026: "move noti bar to subtlety
+        // within place selection button"), with no strip above the plan
         const strip = await page.locator('[data-testid="notice-strip"]').boundingBox();
-        assert(strip.y >= bar.y + bar.height - 0.5 && strip.y - (bar.y + bar.height) <= 12.5 && strip.height >= 56, `the strip under the bar at ${width}px: ${JSON.stringify([bar, strip])}`);
+        const tab = await page.locator('[data-testid="place-tab"][aria-current="page"]').boundingBox();
+        assert(strip.y >= tab.y && strip.y + strip.height <= tab.y + tab.height && strip.x >= tab.x && strip.x + strip.width <= tab.x + tab.width + 0.5, `the notices in the switch at ${width}px: ${JSON.stringify([tab, strip])}`);
         assert(plan.y >= bar.y + bar.height - 0.5 && plan.y + plan.height <= height + 0.5 && plan.x >= 0 && plan.x + plan.width <= width + 0.5, `the plan fits at ${width}px: ${JSON.stringify(plan)}`);
         if (width < 1024) {
           assert(list === null, `no list on a phone at ${width}px: ${JSON.stringify(list)}`);
-          assert(plan.y >= strip.y + strip.height - 0.5 && plan.y - (strip.y + strip.height) <= 8, `the plan right under the strip at ${width}px: ${JSON.stringify([strip, plan])}`);
+          assert(plan.y - (bar.y + bar.height) <= 8, `the plan right under the bar at ${width}px: ${JSON.stringify([bar, plan])}`);
           // as wide as the screen with รพ.สมุทรสาคร's margins (Pong, 27 Nov 2026: "same screen margin like สมุทรสาคร"):
           // the plan 4px in from each side, its frame a few px further (6px at 390px, as รพ.สมุทรสาคร's)
           const frame = await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox();
@@ -2223,7 +2226,10 @@ async function main() {
       // since 16 Nov 2026 ยังไม่มีตาราง HOSxP (Pong: no วันหยุด, โหลดไม่สำเร็จ or ไม่ตรง badges), since 27 Nov 2026 the
       // cases no room takes too ("Leave off board and display on noti bar for both places"), with made-up counts
       assert(JSON.stringify(kinds) === JSON.stringify(["no-upload", "no-room"]), `every notice: ${JSON.stringify(kinds)}`);
-      assert((await plainText(page, '[data-testid="no-room-alert"] .notice-badge-text')) === "ไม่มีห้อง 3 เคส", `the no-room badge, short beside the other: ${await plainText(page, '[data-testid="no-room-alert"]')}`);
+      // a chip each in the switch: the no-room one shows its count beside its icon, its whole message for screen readers
+      assert((await plainText(page, '[data-testid="no-room-alert"] .notice-badge-count')) === "3", `the no-room chip's count: ${await plainText(page, '[data-testid="no-room-alert"]')}`);
+      assert((await plainText(page, '[data-testid="no-room-alert"] .sr-only')) === "3 เคสไม่มีห้องผ่าตัด", "the no-room chip's spoken name");
+      assert((await page.locator('[data-testid="place-tab"][aria-current="page"] [data-testid="notice-strip"]').count()) === 1, "the chips in the board's own hospital");
       assert((await page.locator('[data-testid="no-room-alert"] svg[data-icon="no-room"]').count()) === 1, "the no-room badge's icon");
       await noSideScroll(page, "the test notices at 390px");
       for (const [file, open] of [["board-test-notices.png", null], ["board-test-notices-open.png", "no-upload"], ["board-test-notices-no-room.png", "no-room"]]) {
@@ -3769,18 +3775,13 @@ async function main() {
       assert((await board.locator('[data-notice-id]').count()) === 1, "the one badge (Pong, 16 Nov 2026)");
       // only doctors (DR) get the booking button (Pong, 16 Nov 2026): not a nurse
       assert((await board.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button for a nurse");
-      // in the middle of the strip, with the database-off icon (Pong, 16 Nov 2026)
-      const centred = await board.evaluate(() => {
-        const strip = document.querySelector('[data-testid="notice-strip"]').getBoundingClientRect();
-        const badge = document.querySelector('[data-testid="no-upload-alert"]').getBoundingClientRect();
-        return Math.abs(badge.left + badge.width / 2 - (strip.left + strip.width / 2));
-      });
-      assert(centred <= 1, `the badge is centred: ${centred}px off`);
+      // a chip beside รพ.สมุทรสาคร's name in the bar's switch (Pong, 27 Nov 2026: "move noti bar to subtlety within
+      // place selection button"), with the database-off icon (Pong, 16 Nov 2026)
+      assert((await board.locator('header [data-testid="place-tab"][aria-current="page"] [data-testid="no-upload-alert"]').count()) === 1, "the chip in the switch");
       assert((await board.locator('[data-testid="no-upload-alert"] svg[data-icon="no-table"]').count()) === 1, "the badge's icon");
       await ownerShot(board, "board-no-upload.png");
-      // The strip above the plan keeps one height (Pong, 15 Nov 2026); a tap on the badge opens its message as a chat
-      // bubble, and a tap outside, Escape (the badge gets the focus back) or the close button shuts it.
-      assert((await board.evaluate(() => document.querySelector('[data-testid="notice-strip"]').getBoundingClientRect().height)) === 60, "the strip's fixed height");
+      // A tap on the chip opens its message as a chat bubble under the switch, and a tap outside, Escape (the chip gets
+      // the focus back) or the close button shuts it.
       await board.click('[data-testid="no-upload-alert"]');
       await board.waitForSelector('[data-testid="notice-bubble"]');
       assert((await board.getAttribute('[data-testid="no-upload-alert"]', "aria-expanded")) === "true", "the badge says its bubble is open");

@@ -790,101 +790,62 @@ body {
   }
 
   /*
-   * The notice strip above the plan (components/board-notices.tsx): always the same height, so the plan never moves;
-   * one row of badges that scrolls sideways, fading at an end that has more past it.
+   * The board's notices (components/board-notices.tsx), tucked into its own hospital in the bar's switch (Pong, 27 Nov
+   * 2026: "move noti bar to subtlety within place selection button"): small chips after the name, an icon each and the
+   * count when there is one, in the red alert theme (Pong, 17 Nov 2026). Empty, the slot takes no room.
    */
-  .notice-strip-wrap {
-    position: relative;
-    flex: none;
-    height: 3.75rem;
-  }
   .notice-strip {
     display: flex;
-    height: 100%;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0 0.75rem;
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
-    scroll-padding-inline: 0.75rem;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  .notice-strip::-webkit-scrollbar { display: none; }
-  .notice-strip[data-fade-start] {
-    -webkit-mask-image: linear-gradient(to right, transparent, #000 1.5rem);
-    mask-image: linear-gradient(to right, transparent, #000 1.5rem);
-  }
-  .notice-strip[data-fade-end] {
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 1.5rem), transparent);
-  }
-  .notice-strip[data-fade-start][data-fade-end] {
-    -webkit-mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
-    mask-image: linear-gradient(to right, transparent, #000 1.5rem, #000 calc(100% - 1.5rem), transparent);
-  }
-  @media (min-width: 1024px) {
-    .notice-strip-wrap { height: 3.5rem; }
-    .notice-strip { padding: 0.25rem 0.25rem 0.375rem; scroll-padding-inline: 0.25rem; }
-  }
-  .notice-item {
     flex: none;
-    scroll-snap-align: start;
-  }
-  /* The badges sit in the middle of the strip (Pong, 16 Nov 2026); auto margins, unlike justify-content: center, keep
-     the first one reachable when the row is wider than the strip. */
-  .notice-item:first-child { margin-left: auto; }
-  .notice-item:last-child { margin-right: auto; }
-  /* Alone, a badge may take the strip's whole width and cuts a long message short; the bubble has it all. */
-  .notice-item-alone {
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-  .notice-badge {
-    display: inline-flex;
-    max-width: 100%;
-    min-height: 2.75rem;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0 0.625rem 0 0.875rem;
+    gap: 0.25rem;
+  }
+  .notice-item { flex: none; }
+  .notice-badge {
+    position: relative;
+    display: inline-flex;
+    height: 1.625rem;
+    min-width: 1.625rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.1875rem;
+    padding: 0 0.3125rem;
     border-radius: 999px;
-    background: rgb(255 255 255 / 0.78);
-    border: 1px solid var(--glass-edge);
-    box-shadow: 0 1px 2px rgb(41 29 20 / 0.06), 0 4px 12px -4px rgb(41 29 20 / 0.14), var(--highlight);
-    backdrop-filter: blur(16px) saturate(160%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    font-size: 0.875rem;
-    font-weight: 600;
+    background: var(--brand-tint);
+    border: 1px solid rgb(124 96 66 / 0.2);
+    font-size: 0.8125rem;
+    line-height: 1;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
     color: var(--ink-2);
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   }
+  /* A finger-sized target around the small chip, inside the bar's own height. */
+  .notice-badge::after {
+    content: "";
+    position: absolute;
+    inset: -0.5625rem -0.125rem;
+  }
   .notice-badge > svg { flex: none; }
-  .notice-badge:hover { background: rgb(255 255 255 / 0.95); }
-  /* The no-table notice in the red alert theme (Pong, 17 Nov 2026). */
-  .notice-badge[data-tone="alert"] { color: var(--stop); background: rgb(253 236 234 / 0.92); border-color: rgb(198 40 40 / 0.35); }
-  .notice-badge[data-tone="alert"]:hover { background: rgb(253 236 234); }
+  .notice-badge[data-tone="alert"] { color: var(--stop); background: rgb(253 236 234); border-color: rgb(198 40 40 / 0.3); }
+  @media (hover: hover) {
+    .notice-badge:hover { border-color: currentColor; }
+  }
   .notice-badge[aria-expanded="true"] {
-    background: #fff;
     border-color: currentColor;
-    box-shadow: 0 0 0 3px rgb(124 96 66 / 0.12), 0 4px 12px -4px rgb(41 29 20 / 0.18);
+    box-shadow: 0 0 0 3px rgb(198 40 40 / 0.14);
   }
-  .notice-badge-text {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .notice-badge-chevron {
-    display: inline-flex;
+  .notice-badge-count { padding-right: 0.0625rem; }
+  /* Without a switch in the bar: the chips in a row of their own above the plan. */
+  .notice-row {
+    position: relative;
+    display: flex;
     flex: none;
-    opacity: 0.7;
-    transition: transform 0.18s ease;
+    justify-content: center;
+    padding: 0.5rem 0.75rem;
   }
-  .notice-badge[aria-expanded="true"] .notice-badge-chevron { transform: rotate(180deg); }
 
   /* The no-HOSxP-table icon in a room card's header, beside the count (Pong, 16 Nov 2026). */
   .room-no-table {
@@ -1489,7 +1450,6 @@ dialog[open]::backdrop {
   .day-swipe-hint,
   .time-toggle .switch,
   .time-toggle .switch::after { transition: none; }
-  .notice-badge-chevron,
   .case-op-chev,
   .case-note,
   .booking-action { transition: none; }
@@ -2097,8 +2057,8 @@ dialog[open]::backdrop {
  * its board loads.
  */
 .place-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  position: relative;
+  display: flex;
   gap: 3px;
   padding: 3px;
   border-radius: 0.75rem;
@@ -2106,9 +2066,12 @@ dialog[open]::backdrop {
 }
 .place-tab {
   display: flex;
+  flex: 1 1 0;
   align-items: center;
   justify-content: center;
-  min-width: 0;
+  gap: 0.4375rem;
+  /* Never narrower than its name (and chips): halves when there is room, each its own width when there is not. */
+  min-width: max-content;
   min-height: 2.375rem;
   padding: 0 1rem;
   border-radius: 0.5625rem;
@@ -2120,6 +2083,14 @@ dialog[open]::backdrop {
   transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
   -webkit-tap-highlight-color: transparent;
 }
+/* With notices beside its name, the board's own hospital takes the room they need (the other keeps its name whole). */
+.place-tab:has(.notice-strip) {
+  padding: 0 0.625rem;
+}
+@media (max-width: 359.98px) {
+  .place-tab { padding: 0 0.5rem; }
+}
+.place-notices { display: contents; }
 .place-tab[aria-current="page"] {
   background: var(--surface);
   color: var(--ink);

@@ -11,6 +11,9 @@ import { shortThaiDate } from "./repair.ts";
  * (DEMO_NOTICE), for admins only.
  */
 
+/** Where the notices go: a slot beside the board's own hospital in the bar's switch (components/place-tabs.tsx). */
+export const PLACE_NOTICES_ID = "place-notices";
+
 /** "alert" is the red alert theme of the no-table notice (Pong, 17 Nov 2026). */
 export type NoticeTone = "neutral" | "alert";
 /**
@@ -27,6 +30,8 @@ export type BoardNotice = {
   text: string;
   /** The badge's text when several badges share the strip (only with the demo's). */
   short: string;
+  /** A number the chip shows beside its icon (the no-room cases), when the notice has one. */
+  count?: number;
   /** What it means and what happens next, under the title in the bubble. */
   detail: string;
   /** Kept from the one-line notes the badges replace, for the end-to-end tests. */
@@ -68,6 +73,7 @@ export function boardNotices({
       icon: "no-room",
       text: `${total} เคสไม่มีห้องผ่าตัด`,
       short: `ไม่มีห้อง ${total} เคส`,
+      count: total,
       detail: `ไม่ได้ลงกระดาน เพราะสาขาไม่มีห้องในวันนั้น: ${offBoard.map(offBoardText).join(" · ")}`,
       testId: "no-room-alert",
     });
