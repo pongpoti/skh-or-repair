@@ -12,6 +12,26 @@ import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha
  * so the drawing's names (room, frame) never meet the app's.
  */
 
+/**
+ * One unit of this drawing in รพ.สมุทรสาคร's plan's units (components/floor-plan.tsx): Pong drew these ORs about 166
+ * units across, รพ.สมุทรสาคร's are about 196.
+ */
+const SKH_UNITS = 1.18;
+/**
+ * How much bigger than รพ.สมุทรสาคร's an OR here is on the screen (Pong, 27 Nov 2026: filling the screen was "too large",
+ * the same size as รพ.สมุทรสาคร's "Too small"). The board draws the plan at รพ.สมุทรสาคร's scale times SCALE (globals.css
+ * .tc-plan), and the ring, number and label below are รพ.สมุทรสาคร's sizes divided by it, so they read the same as there.
+ */
+const ZOOM = 4 / 3;
+const SCALE = SKH_UNITS * ZOOM;
+/** รพ.สมุทรสาคร's ring 47 and number 56, or 36 and 44 in a short or split room; its department label 40 (globals.css). */
+const RING = 47 / SCALE;
+const RING_SMALL = 36 / SCALE;
+const NUMBER = 56 / SCALE;
+const NUMBER_SMALL = 44 / SCALE;
+/** A room shorter than this on the screen, in รพ.สมุทรสาคร's units, takes the small ring, as its short OR 7 does. */
+const SHORT = 170;
+
 type Or = {
   id: string;
   number: string;
@@ -76,6 +96,18 @@ function Label({ use, x, y }: { use: ThaChalomUse; x: number; y: number }) {
   );
 }
 
+/** The white ring with the room's number, as รพ.สมุทรสาคร's badge. */
+function Ring({ or, y, small }: { or: Or; y: number; small: boolean }) {
+  return (
+    <>
+      <circle className="tcp-or-ring" cx={or.x} cy={y} r={small ? RING_SMALL : RING} />
+      <text className="tcp-or-num" x={or.x} y={y} dy="0.35em" style={{ fontSize: small ? NUMBER_SMALL : NUMBER }}>
+        {or.number}
+      </text>
+    </>
+  );
+}
+
 function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
   if (!entry) {
     return (
@@ -94,9 +126,13 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
 
   const state = entry.am.kind === "closed" ? "closed" : entry.am.kind === "free" && entry.pm.kind === "free" ? "free" : "open";
   const fill = entry.split ? `url(#tcp-split-${or.id})` : fillOf(entry.am);
-  // A split room's ring sits on the seam, half way down, with the morning's label above it and the afternoon's below.
   const middle = (or.top + or.bottom) / 2;
-  const ringY = entry.split ? middle : or.ringY;
+  // As on รพ.สมุทรสาคร's plan: a split room's small ring on the seam, half way down, with the morning's label above it
+  // and the afternoon's below; otherwise the ring a little above the middle and the label under it (closer together in
+  // a short room).
+  const short = (or.bottom - or.top) * SCALE < SHORT;
+  const ringY = entry.split ? middle : middle - (short ? 30 : 36) / SCALE;
+  const labelY = middle + (short ? 44 : 54) / SCALE;
   return (
     <g
       className={`tcp-or is-${state}${entry.split ? " is-split" : ""}`}
@@ -115,23 +151,20 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
         </defs>
       ) : null}
       <path className="tcp-or-shape" d={or.d} />
-      <circle className="tcp-or-ring" cx={or.x} cy={ringY} r="30" />
-      <text className="tcp-or-num" x={or.x} y={ringY + 12.2}>
-        {or.number}
-      </text>
+      <Ring or={or} y={ringY} small={entry.split || short} />
       {entry.split ? (
         <>
-          <Label use={entry.am} x={or.x} y={(or.top + ringY - 30) / 2} />
-          <Label use={entry.pm} x={or.x} y={(ringY + 30 + or.bottom) / 2} />
+          <Label use={entry.am} x={or.x} y={(or.top + ringY - RING_SMALL) / 2} />
+          <Label use={entry.pm} x={or.x} y={(ringY + RING_SMALL + or.bottom) / 2} />
         </>
       ) : (
-        <Label use={entry.am} x={or.x} y={or.ringY + 58} />
+        <Label use={entry.am} x={or.x} y={labelY} />
       )}
     </g>
   );
 }
 
-/** The plan sits at the top of its box, as รพ.สมุทรสาคร's does (components/floor-plan.tsx), centred across it. */
+/** The plan sits at the top of its box, as รพ.สมุทรสาคร's does (components/floor-plan.tsx), centred across it; .tc-plan sizes it. */
 export function ThaChalomPlan({ className, day = null }: { className?: string; day?: readonly ThaChalomRoomDay[] | null }) {
   const byId = new Map((day ?? []).map((entry) => [entry.room.id as string, entry]));
   return (

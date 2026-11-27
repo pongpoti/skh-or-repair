@@ -2171,13 +2171,13 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 .tcp-or-shape { fill: var(--tcp-fill, var(--brand-top)); stroke: var(--fp-wall); stroke-width: 3; }
 .tcp-or-ring { fill: #fff; }
 .tcp-or.is-open .tcp-or-ring,
-.tcp-or.is-free .tcp-or-ring { stroke: var(--fp-wall); stroke-width: 2; }
+.tcp-or.is-free .tcp-or-ring { stroke: var(--fp-wall); stroke-width: 1.6; }
 .tcp-or.is-closed .tcp-or-shape { stroke: var(--fp-closed-wall); }
 .tcp-or.is-closed .tcp-or-ring { fill: var(--fp-closed-badge); stroke: var(--fp-closed-wall); stroke-width: 2; }
 .tcp-or.is-closed .tcp-or-num { fill: var(--fp-closed-ink); }
 /* The department's short label (ORTHO, VAS): Latin capitals, so a little spacing is safe. */
 .tcp-or-dept {
-  font: 700 24px var(--font-inter), var(--font-thai), system-ui, sans-serif;
+  font: 700 25.4px var(--font-inter), var(--font-thai), system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: central;
   letter-spacing: 0.5px;
@@ -2185,7 +2185,7 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 /* ว่าง and ปรับปรุง: Thai, so no letter-spacing. */
 .tcp-or-thai {
   fill: var(--fp-muted);
-  font: 700 23px var(--font-thai), var(--font-inter), system-ui, sans-serif;
+  font: 700 25.4px var(--font-thai), var(--font-inter), system-ui, sans-serif;
   text-anchor: middle;
   dominant-baseline: central;
 }
@@ -2201,5 +2201,24 @@ a.place-tab:has(.place-tab-label[data-pending]) {
   text-anchor: middle;
   dominant-baseline: central;
   letter-spacing: 1px;
+}
+
+/*
+ * รพ.ท่าฉลอม's plan on its board, sized from รพ.สมุทรสาคร's (Pong, 27 Nov 2026: filling the screen was "too large", the
+ * same scale "Too small"): รพ.สมุทรสาคร's plan (1207 × 1706) fills the same box as far as it can, and this one is drawn
+ * 1.18 × 4/3 times that (tha-chalom-plan.tsx SCALE), so its ORs come out a third bigger than รพ.สมุทรสาคร's: 614 × SCALE
+ * / 1207 of the box's width, or 614 × SCALE / 1706 of its height, whichever is less, and its height in proportion. The
+ * box is the swipe area (.tc-plan-box).
+ */
+.tc-plan-box {
+  container-type: size;
+}
+.tc-plan {
+  align-self: flex-start;
+  flex: none;
+  width: 80%;
+  height: auto;
+  width: min(80.04cqw, 56.63cqh);
+  height: min(75.38cqw, 53.33cqh);
 }
 
