@@ -128,6 +128,8 @@ const SUB_DOC = "U000000000000000000000000000000dc";
 const SUB_PRE = "U000000000000000000000000000000pr"; // a nurse trying the doctors-only pre-release
 // AUTH_ADMIN_LINE_IDS: admins are listed by LINE user id, the session's sub
 const ADMIN_SUB = "U00000000000000000000000000000ad1";
+// A doctor's LINE account that is an admin's too (Pong is both): only the test of the admin's open booking uses it.
+const ADMIN_DR_SUB = "U00000000000000000000000000000ad2";
 const TG_TOKEN = "123456789:AAe2eTOKENe2eTOKENe2eTOKEN_test";
 const TG_CHAT = "1228757000";
 const XSS_NAME = `<img src=x onerror="window.__xss=1">หมอ A`;
@@ -416,17 +418,8 @@ function sessionToken(phone, secret = SESSION_SECRET, sub = "Ux", uid = null) {
     .sign(new TextEncoder().encode(secret));
 }
 
-/**
- * The staff's tutorial opens each time RN, PN, PCA or MX open the app (Pong, 27 Nov 2026: "Always on tutorial for
- * non-DR"), until its session cookie is set: every browser and request here has it, so the board opens as before; the
- * staff tutorial's own test leaves it out.
- */
-const STAFF_SEEN = "staff_tutorial=1";
-const STAFF_SEEN_COOKIE = { name: "staff_tutorial", value: "1", url: APP, sameSite: "Lax" };
-
-async function newContext(browser, width = 390, { staffTutorial = true } = {}) {
+async function newContext(browser, width = 390) {
   const ctx = await browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: 2, locale: "th-TH" });
-  if (staffTutorial) await ctx.addCookies([STAFF_SEEN_COOKIE]);
   // LINE profile pictures are served locally: no network calls to LINE.
   await ctx.route("https://*.line-scdn.net/**", (route) =>
     route.fulfill({ status: 200, contentType: "image/png", body: PNG_1PX }),
@@ -557,7 +550,7 @@ async function boardName(page) {
  * is loaded as in production: scripts/sync-users.mjs, from a CSV in Pong's format outside the repository.
  */
 async function loadUsers(db) {
-  const probe = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken("0899999999")}; ${STAFF_SEEN}` });
+  const probe = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken("0899999999")}` });
   assert(probe.status === 307, `unlisted session -> ${probe.status}`);
   const tables = await db.query(
     "SELECT string_agg(table_name, ',' ORDER BY table_name) AS t FROM information_schema.tables WHERE table_schema = 'public'",
@@ -675,8 +668,9 @@ async function main() {
     BOT_API_TOKEN: BOT_TOKEN,
     BOT_HOLIDAYS_URL: `${LINE}/financial-institutions-holidays/`,
     APP_FAKE_NOW_FILE: NOW_FILE,
-    // one admin (spaces and an empty entry are ignored); SUB_A, the first-login account, is not one
-    AUTH_ADMIN_LINE_IDS: ` ${ADMIN_SUB} ,, `,
+    // two admins, the second a doctor's LINE account (spaces and an empty entry are ignored); SUB_A, the first-login
+    // account, is not one
+    AUTH_ADMIN_LINE_IDS: ` ${ADMIN_SUB} ,, ${ADMIN_DR_SUB}`,
   };
 
   if (process.env.E2E_SKIP_BUILD !== "1") {
@@ -714,8 +708,12 @@ async function main() {
     await sleep(500);
     for (const p of [line, sms, app]) if (p.exit) throw new Error(`${p.name} exited (${p.exit}); log: ${p.logFile}`);
     await loadUsers(db);
-    // Every doctor has seen the doctors' tutorial already, so the board opens as before; its own test takes one back.
+    // Everyone has seen the tutorial already (a doctor's or the staff's, each opened once on a first visit), so the board
+    // opens as before; the tutorials' own test takes some back. Someone added to the list later in the run has too.
     await db.query("INSERT INTO tutorial_seen (user_id) SELECT id FROM users ON CONFLICT DO NOTHING");
+    await db.query(`CREATE OR REPLACE FUNCTION e2e_tutorial_seen() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN INSERT INTO tutorial_seen (user_id) VALUES (NEW.id) ON CONFLICT DO NOTHING; RETURN NEW; END $$`);
+    await db.query("CREATE TRIGGER e2e_tutorial_seen AFTER INSERT ON users FOR EACH ROW EXECUTE FUNCTION e2e_tutorial_seen()");
   } catch (e) {
     await db.end();
     throw e;
@@ -1256,7 +1254,7 @@ async function main() {
       for (const next of ["/.//evil.test", "/..//evil.test", "/%2e//evil.test", "/a/..//evil.test", "//evil.test", "https://evil.test", "/\\evil.test"]) {
         const r = await fetch(`${APP}/login?next=${encodeURIComponent(next)}`, {
           redirect: "manual",
-          headers: { cookie: `session=${session.value}; ${STAFF_SEEN}` },
+          headers: { cookie: `session=${session.value}` },
         });
         const loc = r.headers.get("location") ?? "";
         assert(r.status === 307 && new URL(loc, APP).origin === APP && !loc.startsWith("//"), `next=${next} -> ${r.status} ${loc}`);
@@ -1523,11 +1521,11 @@ async function main() {
       // / and the board's address from before (a link kept in a chat) go on to the board at /skh
       const session = await cookie(ctxA, "session");
       for (const [from, to] of [["/?room=or-7", "/skh?room=or-7"], ["/?date=2026-12-03&room=or-12", "/skh?date=2026-12-03&room=or-12"], ["/?demo=1&half=2", "/skh?demo=1&half=2"]]) {
-        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}; ${STAFF_SEEN}` });
+        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
         assert(r.status === 307 && r.location === to, `${from} -> ${r.status} ${r.location}`);
       }
       for (const from of ["/", "/?utm_source=line"]) {
-        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}; ${STAFF_SEEN}` });
+        const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
         assert(r.status === 307 && r.location === "/skh", `${from} -> ${r.status} ${r.location}`);
       }
       // signed out, both pages ask for a sign-in that comes back to them
@@ -1833,7 +1831,7 @@ async function main() {
     });
 
     await t("deactivated user holding a claim: no session, the code leads to /login/claim; reactivated: the claim page offers the sign-in", async () => {
-      const gated = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(RETIRED)}; ${STAFF_SEEN}` });
+      const gated = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(RETIRED)}` });
       assert(gated.status === 307 && gated.location?.startsWith("/login"), `session of a deactivated number -> ${gated.status}`);
       await setIdentity({ sub: SUB_G, name: "หมอเกษียณ" });
       const ctx = await newContext(browser);
@@ -1901,7 +1899,7 @@ async function main() {
       const approved = await oldRequest(NURSE, SUB_D, "approved");
       const pendingId = await oldRequest(WALK_IN, SUB_E, "pending");
       await db.query("INSERT INTO line_bindings (line_sub, phone, display_name, verified_at, last_login_at) VALUES ($1, $2, 'มาลี', now(), now())", [SUB_D, NURSE]);
-      const session = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(NURSE)}; ${STAFF_SEEN}` });
+      const session = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(NURSE)}` });
       assert(session.status === 307 && session.location?.startsWith("/login"), `session of an approved number -> ${session.status} ${session.location}`);
       await setIdentity({ sub: SUB_D, name: "มาลี" });
       const ctx = await newContext(browser);
@@ -2155,7 +2153,7 @@ async function main() {
     await t("forged, unlisted or pre-SMS session tokens are rejected; the break-glass ALLOWED_PHONES still works", async () => {
       for (const phone of [DOC1, BREAK_GLASS]) {
         // (/ goes on to the board, not to the sign-in)
-        const ok = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(phone)}; ${STAFF_SEEN}` });
+        const ok = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${await sessionToken(phone)}` });
         assert(ok.status === 307 && ok.location === "/skh", `valid token for ${fmt(phone)} -> ${ok.status} ${ok.location}`);
       }
       const legacy = await new SignJWT({ email: "someone@example.com", name: "x", picture: null })
@@ -2172,13 +2170,13 @@ async function main() {
         await sessionToken(DOC1, "wrong-secret-wrong-secret-wrong-secret"),
         legacy,
       ]) {
-        const r = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${token}; ${STAFF_SEEN}` });
+        const r = await rawRequest("/", { host: `localhost:${APP_PORT}`, cookie: `session=${token}` });
         assert(r.status === 307 && r.location?.startsWith("/login"), `rejected -> ${r.status}`);
       }
     });
 
     await t("admin: the button and menu link only for a sub in AUTH_ADMIN_LINE_IDS; /admin is 404 for everyone else", async () => {
-      const headers = (token) => ({ host: `localhost:${APP_PORT}`, cookie: `session=${token}; ${STAFF_SEEN}` });
+      const headers = (token) => ({ host: `localhost:${APP_PORT}`, cookie: `session=${token}` });
       const anon = await rawRequest("/admin", { host: `localhost:${APP_PORT}` });
       assert(anon.status === 307 && anon.location === "/login?next=%2Fadmin", `signed out: ${anon.status} ${anon.location}`);
       // signed in with an authorized number but a sub that is not an admin: same page as a mistyped address
@@ -2186,9 +2184,9 @@ async function main() {
         const r = await rawRequest("/admin", headers(token));
         assert(r.status === 404, `non-admin /admin -> ${r.status}`);
         // not even the loading screen: nothing of the admin page reaches a non-admin
-        const body = await (await fetch(`${APP}/admin`, { headers: { cookie: `session=${token}; ${STAFF_SEEN}` }, redirect: "manual" })).text();
+        const body = await (await fetch(`${APP}/admin`, { headers: { cookie: `session=${token}` }, redirect: "manual" })).text();
         assert(!body.includes("จัดการระบบ") && !body.includes("รายชื่อทั้งหมด"), "no admin page or loading screen for a non-admin");
-        const html = await (await fetch(`${APP}/skh`, { headers: { cookie: `session=${token}; ${STAFF_SEEN}` } })).text();
+        const html = await (await fetch(`${APP}/skh`, { headers: { cookie: `session=${token}` } })).text();
         assert(!html.includes('href="/admin"'), "no admin link on a non-admin's board");
         // the test notices are for admins only: checked on a day with its upload, in the 16:00 test below
       }
@@ -2196,7 +2194,7 @@ async function main() {
       const unlisted = await rawRequest("/admin", headers(await sessionToken("0899999999", SESSION_SECRET, ADMIN_SUB)));
       assert(unlisted.status === 307 && unlisted.location?.startsWith("/login"), `admin sub, unlisted number -> ${unlisted.status}`);
       // an admin sub with an authorized number opens the page
-      const admin = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB)}; ${STAFF_SEEN}` }, redirect: "manual" });
+      const admin = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionToken(DOC2, SESSION_SECRET, ADMIN_SUB)}` }, redirect: "manual" });
       const adminHtml = await admin.text();
       // the page is named for all it holds (the repair's dates, MX, everyone's names), not one list alone
       assert(admin.status === 200 && adminHtml.includes("จัดการระบบ") && adminHtml.includes("รายชื่อทั้งหมด"), `admin /admin -> ${admin.status}`);
@@ -2755,7 +2753,7 @@ async function main() {
     }
     /** The page's HTML for `person`, with React's payload: everything the browser is sent, every prop included. */
     async function htmlAs(person, path = "/skh") {
-      const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(person)}; ${STAFF_SEEN}` }, redirect: "manual" });
+      const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(person)}` }, redirect: "manual" });
       return { status: r.status, html: await r.text() };
     }
     /** An element's text with its spaces evened out. */
@@ -2886,6 +2884,8 @@ async function main() {
               [person.name, person.sub, `e2e-${key}`],
             );
         assert(r.rowCount === 1, `a claim by hand for ${key}`);
+        // users.id, for the tutorial's seen row; a doctor's session carries it too (sessionOf)
+        person.id = r.rows[0].uid;
         if (!person.phone) person.userId = r.rows[0].uid;
       }
       const ctx = await contextAs(RP.nurse);
@@ -4042,6 +4042,92 @@ async function main() {
       await ctx.close();
     });
 
+    await t("admin: no time limits (Pong, 27 Nov 2026: \"No restriction\"): uploads a day they pick at any hour; a doctor who is an admin books today after 15:00 and a year ahead", async () => {
+      // Tuesday 17 Nov at 10:00: MX's day is Wednesday and the window is shut; the admin picks Tuesday, the board's day
+      setNow("2026-11-17T10:00:00+07:00");
+      const lastUpload = (await db.query("SELECT coalesce(max(id), 0)::int AS id FROM workbook_uploads")).rows[0].id;
+      const ctx = await contextAs(RP.admin);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      await page.goto(`${APP}/upload`, { waitUntil: "networkidle" });
+      assert((await textOf(page, "#upload-title")) === "ตารางของวันพุธที่ 18 พฤศจิกายน 2569", `the next workday to start with: ${await textOf(page, "#upload-title")}`);
+      assert((await dateValue(page, "upload-day")) === "2026-11-18", "the day picker on it");
+      assert(!(await page.isDisabled('[data-testid="upload-submit"]')), "the admin may send outside the window");
+      // a day before today in the address is not offered: the next workday again
+      await page.goto(`${APP}/upload?date=2026-11-16`, { waitUntil: "networkidle" });
+      assert((await textOf(page, "#upload-title")) === "ตารางของวันพุธที่ 18 พฤศจิกายน 2569", "no past day");
+      // picked on the calendar: the page opens on that day, with that day's latest upload (MX's, made yesterday)
+      await pickDate(page, "upload-day", "2026-11-17");
+      await page.waitForURL(`${APP}/upload?date=2026-11-17`);
+      await page.waitForFunction(() => document.querySelector("#upload-title")?.textContent?.includes("17 พฤศจิกายน"));
+      assert(!(await textOf(page, '[data-testid="upload-latest"]')).includes("ยังไม่มีการอัปโหลด"), "that day's latest upload, MX's");
+      await ownerShot(page, "upload-admin-day.png");
+      const sendFile = async (file) => {
+        await page.setInputFiles('[data-testid="upload-file"]', file);
+        await page.click('[data-testid="upload-submit"]');
+        await page.waitForSelector('[data-testid="upload-result"]');
+        return textOf(page, '[data-testid="upload-result"]');
+      };
+      const saved = await sendFile(E2E_WORKBOOK);
+      assert(saved.startsWith("บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว") && saved.endsWith("ขึ้นกระดานแล้ว"), `on the board at once: ${saved}`);
+      const stored = await db.query(
+        "SELECT to_char(cycle_day, 'YYYY-MM-DD') AS cycle, uploaded_by FROM workbook_uploads WHERE id > $1 ORDER BY id",
+        [lastUpload],
+      );
+      assert(JSON.stringify(stored.rows) === JSON.stringify([{ cycle: "2026-11-16", uploaded_by: ADMIN_SUB }]), `in the board's cycle: ${JSON.stringify(stored.rows)}`);
+      // a later day: its file must be that day's, as MX's must
+      await page.goto(`${APP}/upload?date=2026-11-19`, { waitUntil: "networkidle" });
+      const otherDay = await sendFile(E2E_WORKBOOK);
+      assert(otherDay.includes("ต้องเป็นตารางวันที่ 19 พ.ย. 2569 เท่านั้น"), `the file must be the picked day's: ${otherDay}`);
+      // the server takes no day before today, whatever the form sends
+      await page.evaluate(() => {
+        document.querySelector('[data-testid="upload-card"] input[name="target"]').value = "2026-11-16";
+      });
+      assert((await sendFile(E2E_WORKBOOK)).includes("เลือกวันของตาราง"), "no past day on the server");
+      // MX has no day picker and keeps the window
+      assert(!(await htmlAs(RP.mx, "/upload?date=2026-11-17")).html.includes('data-testid="upload-day"'), "no day picker for MX");
+      await db.query("DELETE FROM workbook_uploads WHERE id > $1", [lastUpload]);
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await ctx.close();
+
+      // Tuesday 17 Nov at 15:30: a doctor's first day is Thursday; a doctor who is an admin books today itself. Doctor Y
+      // (general surgery, OR 12) signs in with an admin's LINE account for this, and back with their own after.
+      setNow("2026-11-17T15:30:00+07:00");
+      const moved = await db.query("UPDATE user_claims SET line_sub = $1 WHERE user_id = $2 AND undone_at IS NULL", [ADMIN_DR_SUB, RP.drY.userId]);
+      assert(moved.rowCount === 1, "doctor Y's claim, held by the admin's LINE account");
+      const uid = RP.drY.userId;
+      const casesBefore = (await db.query("SELECT coalesce(max(id), 0)::bigint AS id FROM cases")).rows[0].id;
+      const drCtx = await newContext(browser);
+      await drCtx.addCookies([{ name: "session", value: await sessionToken(null, SESSION_SECRET, ADMIN_DR_SUB, uid), url: APP, httpOnly: true, sameSite: "Lax" }]);
+      const dr = await drCtx.newPage();
+      dr.on("pageerror", (e) => errors.push(e.message));
+      await dr.goto(`${APP}/skh`, { waitUntil: "networkidle" });
+      await dr.click('[data-testid="add-case-button"]');
+      await dr.waitForSelector(`${FORM}[open]`);
+      assert((await dateValue(dr, "case-date")) === "2026-11-17", `the form starts today: ${await dateValue(dr, "case-date")}`);
+      assert(
+        (await textOf(dr, '[data-testid="case-date-hint"]')) === "ผู้ดูแลระบบ จองได้ทุกเวลา จองได้ตั้งแต่ วันอังคารที่ 17 พ.ย. 2569",
+        `the admin's line in place of the 15:00 rule: ${await textOf(dr, '[data-testid="case-date-hint"]')}`,
+      );
+      // a year ahead in the calendar: 20 Jan 2027 is beyond the doctors' 60 days
+      await pickDate(dr, "case-date", "2027-01-20");
+      await pickDate(dr, "case-date", "2026-11-17");
+      await toDetails(dr);
+      await dr.fill(`${FORM} input[data-testid="case-hn"]`, "7900099");
+      await dr.fill('[data-testid="case-operation"]', "Admin test case");
+      await dr.click('[data-testid="case-submit"]');
+      await dr.waitForSelector(`${FORM} .inline-status-success`);
+      const booked = await db.query("SELECT to_char(op_date, 'YYYY-MM-DD') AS day FROM cases WHERE id > $1 AND surgeon_id = $2", [casesBefore, uid]);
+      assert(JSON.stringify(booked.rows) === JSON.stringify([{ day: "2026-11-17" }]), `booked for today after 15:00: ${JSON.stringify(booked.rows)}`);
+      await ownerShot(dr, "booking-admin-today.png");
+      // leave the bookings and the claims as the later tests expect them
+      await db.query("DELETE FROM cases WHERE id > $1 AND surgeon_id = $2", [casesBefore, uid]);
+      await db.query("UPDATE user_claims SET line_sub = $1 WHERE user_id = $2 AND undone_at IS NULL", [RP.drY.sub, RP.drY.userId]);
+      assert(errors.length === 0, `page errors: ${errors.join(" | ")}`);
+      await drCtx.close();
+    });
+
     await t("16:00: the board turns to Tuesday with the upload: booked rows first, a booking HOSxP lacks gone, icons, an empty notice strip; HN only for who may see it", async () => {
       // until 16:00 the board keeps Monday: the upload is the next cycle's
       setNow("2026-11-16T15:59:00+07:00");
@@ -4937,7 +5023,7 @@ async function main() {
       await db.query("DELETE FROM cases WHERE hn = $1", [HN_TC]);
     });
 
-    await t("tutorials: a doctor's first visit opens it once (a practice booking on a made-up day, before and after the 16:00 upload, every symbol explained; nothing saved); the staff's version, with no booking, on every open of the app", async () => {
+    await t("tutorials: a doctor's first visit opens it once (a practice booking on a made-up day, before and after the 16:00 upload, every symbol explained; nothing saved); the staff's version, with no booking, once too", async () => {
       // Thursday 10:00: the first day a doctor could book is Friday 20 Nov, the made-up day (the repair's first half:
       // OR 10 the dressing room, OR 12 general surgery, OR 13 orthopaedics)
       setNow("2026-11-19T10:00:00+07:00");
@@ -5171,22 +5257,25 @@ async function main() {
       await db.query("INSERT INTO tutorial_seen (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [RP.drY.userId]);
       await skipper.close();
 
-      // Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking. Always on tutorial for
-      // non-DR": a nurse opening the app starts with the staff's tutorial, the same made-up day with no booking
+      // Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking": a nurse's first visit starts
+      // with the staff's tutorial, the same made-up day with no booking, once ("Disable always-on", the same evening)
+      const seenRow = async (person) => (await db.query("SELECT 1 FROM tutorial_seen WHERE user_id = $1", [person.id])).rowCount === 1;
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = ANY($1::int[])", [[RP.nurse.id, RP.mx.id]]);
       const casesNow = (await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n;
-      const nurse = await contextAs(RP.nurse, { staffTutorial: false });
+      const nurse = await contextAs(RP.nurse);
       const nursePage = await nurse.newPage();
       nursePage.on("pageerror", (e) => errors.push(e.message));
       await nursePage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
       assert(nursePage.url() === `${APP}/tutorial?first=1`, `a nurse opening the app starts with the tutorial: ${nursePage.url()}`);
       await nursePage.waitForSelector('[data-testid="coach-welcome"]');
       assert((await textOf(nursePage, '[data-testid="coach-skip"]')) === "ข้ามไปก่อน", "the staff may skip it at once");
-      assert((await textOf(nursePage, '[data-testid="coach-welcome-note"]')).includes("ทุกครั้งที่เข้าแอป"), "the welcome says it opens each time");
+      assert((await textOf(nursePage, '[data-testid="coach-welcome-note"]')).includes("วิธีใช้งาน"), "the welcome says where to find it again");
       assert((await nursePage.locator(".coach-stages li").count()) === 4, "four chapters, no booking");
       assert((await nursePage.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button in the staff's tutorial");
       assert((await nursePage.locator('[data-testid="place-tabs"]').count()) === 1, "the hospital switch, as on the staff's board");
       await ownerShot(nursePage, "tutorial-staff-welcome.png");
       await nursePage.click('[data-testid="coach-start"]');
+      await waitUntil(() => seenRow(RP.nurse), "starting notes the nurse's tutorial seen");
       // the staff's one tap of their own: the colleague's calendar icon (the doctors tap their own row's)
       taps["row-icon"] = '.room-sheet .case-row:has([data-testid="row-note"]) [data-testid="row-icon"]';
       const staffWalked = await walk(
@@ -5220,9 +5309,9 @@ async function main() {
       await nursePage.click('[data-testid="coach-finish-board"]');
       await nursePage.waitForURL(`${APP}/skh`);
       await nursePage.waitForSelector('svg[aria-label="แปลนห้องผ่าตัด"]');
-      // in the same visit the board stays; วิธีใช้งาน in the account menu opens it again
+      // the board stays; วิธีใช้งาน in the account menu opens it again
       await nursePage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
-      assert(nursePage.url() === `${APP}/skh`, `in the same visit the board stays: ${nursePage.url()}`);
+      assert(nursePage.url() === `${APP}/skh`, `after the tutorial the board stays: ${nursePage.url()}`);
       await nursePage.click('[data-testid="user-menu"]');
       await nursePage.waitForSelector('[data-testid="account-help-link"]');
       await nursePage.click('[data-testid="account-help-link"]');
@@ -5231,29 +5320,35 @@ async function main() {
       assert((await textOf(nursePage, '[data-testid="coach-skip"]')) === "กลับตาราง", "a replay goes back to the board");
       await nurse.close();
 
-      // the next open of the app (a new browser session) starts with it again; a skip opens the board
-      const again = await contextAs(RP.nurse, { staffTutorial: false });
+      // the next open of the app (a new browser, no cookie) goes straight to the board, at both hospitals: once only
+      const again = await contextAs(RP.nurse);
       const againPage = await again.newPage();
-      await againPage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
-      assert(againPage.url() === `${APP}/tutorial?first=1`, `every open of the app: ${againPage.url()}`);
-      await againPage.click('[data-testid="coach-skip"]');
-      await againPage.waitForURL(`${APP}/skh`);
-      await againPage.waitForSelector('svg[aria-label="แปลนห้องผ่าตัด"]');
-      await againPage.waitForTimeout(1000);
-      assert(againPage.url() === `${APP}/skh`, `a skip stays skipped in the visit: ${againPage.url()}`);
+      for (const path of ["/skh", "/tha-chalom"]) {
+        await againPage.goto(`${APP}${path}`, { waitUntil: "networkidle" });
+        assert(againPage.url() === `${APP}${path}`, `the next open of ${path} skips the tutorial: ${againPage.url()}`);
+      }
       await again.close();
 
-      // from รพ.ท่าฉลอม's board: the tutorial, then back there
-      const tc = await contextAs(RP.nurse, { staffTutorial: false });
+      // from รพ.ท่าฉลอม's board, a first visit: the tutorial, then back there; a skip notes it seen
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = $1", [RP.nurse.id]);
+      const tc = await contextAs(RP.nurse);
       const tcPage = await tc.newPage();
       await tcPage.goto(`${APP}/tha-chalom`, { waitUntil: "networkidle" });
       assert(tcPage.url() === `${APP}/tutorial?first=1&back=tha-chalom`, `ท่าฉลอม's board opens the tutorial too: ${tcPage.url()}`);
       await tcPage.click('[data-testid="coach-skip"]');
       await tcPage.waitForURL(`${APP}/tha-chalom`);
+      await waitUntil(() => seenRow(RP.nurse), "skipping notes the nurse's tutorial seen");
+      // with the cookie alone (the row could not be written), both boards still open
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = $1", [RP.nurse.id]);
+      for (const path of ["/skh", "/tha-chalom"]) {
+        await tcPage.goto(`${APP}${path}`, { waitUntil: "networkidle" });
+        assert(tcPage.url() === `${APP}${path}`, `the cookie lets the nurse into ${path}: ${tcPage.url()}`);
+      }
+      await db.query("INSERT INTO tutorial_seen (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [RP.nurse.id]);
       await tc.close();
 
       // MX: the upload button's step, and every HN as on MX's board
-      const mx = await contextAs(RP.mx, { staffTutorial: false });
+      const mx = await contextAs(RP.mx);
       const mxPage = await mx.newPage();
       mxPage.on("pageerror", (e) => errors.push(e.message));
       await mxPage.goto(`${APP}/skh`, { waitUntil: "networkidle" });
@@ -5267,6 +5362,12 @@ async function main() {
       });
       assert(mxWalked.includes("upload-button") && !mxWalked.includes("book"), `MX's steps: ${mxWalked.join(", ")}`);
       await mx.close();
+      assert(await seenRow(RP.mx), "MX's start noted it seen");
+      // an admin who is not a doctor is never sent there, row or not
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = $1", [RP.admin.id]);
+      const adminBoard = await fetch(`${APP}/skh`, { headers: { cookie: `session=${await sessionOf(RP.admin)}` }, redirect: "manual" });
+      assert(adminBoard.status === 200, `an admin opens the board, no tutorial: ${adminBoard.status} ${adminBoard.headers.get("location")}`);
+      await db.query("INSERT INTO tutorial_seen (user_id) VALUES ($1) ON CONFLICT DO NOTHING", [RP.admin.id]);
 
       // an admin is never sent to it, and can look at it with ?as=staff
       const admin = await contextAs(RP.admin);
@@ -5384,7 +5485,7 @@ async function main() {
       // nothing was saved, and anyone but an admin gets the real board, with no redirect
       assert(JSON.stringify(await counts()) === JSON.stringify(before), `no booking or upload saved: ${JSON.stringify(await counts())}`);
       for (const path of ["/skh?demo=1", "/skh?demo=1&half=2"]) {
-        const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
+        const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
         const html = await r.text();
         assert(r.status === 200 && !html.includes("ตารางตัวอย่าง") && !html.includes("ตัวอย่าง หนึ่ง"), `${path} for a nurse: ${r.status}`);
       }
@@ -5475,9 +5576,9 @@ async function main() {
       assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
       await ctx.close();
       // anyone but an admin gets the real board, and no /admin
-      const simNurse = await fetch(`${APP}/skh?sim=1`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
+      const simNurse = await fetch(`${APP}/skh?sim=1`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
       assert(simNurse.status === 200 && !(await simNurse.text()).includes("การจองจำลอง"), `/?sim=1 for a nurse: ${simNurse.status}`);
-      const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}; ${STAFF_SEEN}` }, redirect: "manual" });
+      const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
       assert(r.status === 404, `/admin for a nurse: ${r.status}`);
 
       await db.query("DELETE FROM workbook_uploads WHERE file_name = 'reset-test.xlsx' AND NOT (id = ANY($1::bigint[]))", [saved]);
@@ -5546,7 +5647,7 @@ async function main() {
       await waitFor(`${GATE_APP}/login`, gateApp);
       const get = async (path, ua, person) => {
         const r = await fetch(`${GATE_APP}${path}`, {
-          headers: { "user-agent": ua, ...(person ? { cookie: `session=${await sessionOf(person)}; ${STAFF_SEEN}` } : {}) },
+          headers: { "user-agent": ua, ...(person ? { cookie: `session=${await sessionOf(person)}` } : {}) },
           redirect: "manual",
         });
         return { status: r.status, location: r.headers.get("location"), cookie: r.headers.get("set-cookie") ?? "", body: await r.text() };
@@ -5581,7 +5682,6 @@ async function main() {
       // the page as a computer shows it
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, locale: "th-TH", userAgent: UA_DESKTOP });
       await ctx.addCookies([{ name: "session", value: await sessionOf(RP.nurse), url: GATE_APP, httpOnly: true, sameSite: "Lax" }]);
-      await ctx.addCookies([STAFF_SEEN_COOKIE]);
       const page = await ctx.newPage();
       await page.goto(`${GATE_APP}/`);
       await page.waitForSelector('[data-testid="desktop-only"]');

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import {
   addDays,
-  BOOK_AHEAD_DAYS,
+  bookAheadDays,
   bookedChoice,
   bookedMessage,
   bookedRoom,
@@ -12,8 +12,8 @@ import {
   checkCase,
   daySlots,
   deptRooms,
-  earliestBookingDay,
   editedMessage,
+  firstBookingDay,
   roomAmong,
   STARTED_TEXT,
   timeClash,
@@ -22,6 +22,7 @@ import {
   type CaseField,
   type DaySlot,
 } from "@/lib/added-cases";
+import { isAdmin } from "@/lib/admin";
 import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { getUser } from "@/lib/auth/server";
 import { bookingUnderWay } from "@/lib/board-rows";
@@ -47,6 +48,7 @@ import { holidaysBetween } from "@/lib/holidays";
 import type { RepairPeriods } from "@/lib/repair";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { markTutorialSeen } from "@/lib/tutorial-store";
+import { userForSession } from "@/lib/user-list";
 import { workbookForDay } from "@/lib/workbook-store";
 import { BOARD_PATH, THA_CHALOM_PATH, type PlaceId } from "@/lib/places";
 
@@ -119,18 +121,22 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
     const signed = await signedInDoctor();
     if (!signed) return NOT_DOCTOR;
     const { user, doctor, pool } = signed;
+    // An admin books with no time limits (Pong, 27 Nov 2026: "admin ... can book cases at any date on any time. No
+    // restriction"): from today, whatever the hour, a year ahead, and no daily limit (lib/added-cases.ts firstBookingDay).
+    const admin = isAdmin(user.sub);
+    const ahead = bookAheadDays(admin);
     // The app's clock (lib/clock.ts), the same one the page gave the form, so the two agree on today and on 15:00.
     const { date: today, minutes } = bangkokParts(now());
-    const [periods, { holidays }] = await Promise.all([getRepairPeriods(pool), holidaysBetween(today, addDays(today, BOOK_AHEAD_DAYS))]);
+    const [periods, { holidays }] = await Promise.all([getRepairPeriods(pool), holidaysBetween(today, addDays(today, ahead))]);
     // Again on the server: the day, the HN (stored normalised), the operation, the room choice, the scrub answer and the
     // note (cleanNote, at most MAX_NOTE characters);
     // the room itself is worked out from the doctor's own department as the database has it (never from the form).
-    const earliest = earliestBookingDay(today, minutes, holidays);
-    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, place });
+    const earliest = firstBookingDay(admin, today, minutes, holidays);
+    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, place, ahead });
     if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
     const value = checked.value;
 
-    if ((await addedToday(pool, doctor.id)) >= DAILY_ADD_LIMIT) {
+    if (!admin && (await addedToday(pool, doctor.id)) >= DAILY_ADD_LIMIT) {
       return { ok: false, error: `จองได้ไม่เกิน ${DAILY_ADD_LIMIT} รายการต่อวัน` };
     }
 
@@ -195,22 +201,25 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
   try {
     const signed = await signedInDoctor();
     if (!signed) return NOT_DOCTOR;
-    const { doctor, pool } = signed;
+    const { user, doctor, pool } = signed;
+    // An admin's edit has no time limits either (bookAt).
+    const admin = isAdmin(user.sub);
+    const ahead = bookAheadDays(admin);
     const { date: today, minutes } = bangkokParts(now());
     const [periods, { holidays }, booking] = await Promise.all([
       getRepairPeriods(pool),
-      holidaysBetween(today, addDays(today, BOOK_AHEAD_DAYS)),
+      holidaysBetween(today, addDays(today, ahead)),
       ownCase(pool, id, doctor.id),
     ]);
     // The booking's own hospital (an edit never moves it to the other); the form's when it has gone.
     const place: PlaceId = booking ? (booking.place ?? "skh") : formPlace(input);
     const mine = () => listCasesBy(pool, doctor.id, today, place);
     if (!booking) return { ok: false, error: GONE, mine: await mine() };
-    const earliest = earliestBookingDay(today, minutes, holidays);
+    const earliest = firstBookingDay(admin, today, minutes, holidays);
     if (bookingState(booking.date, today, earliest) === "past") return { ok: false, error: PAST, mine: await mine() };
     if (await startedToday(pool, booking, today, doctor.id, periods)) return { ok: false, error: STARTED_TEXT, mine: await mine() };
     const editing = { ...booking, subtype: doctor.subtype };
-    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, editing });
+    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, editing, ahead });
     if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
     const value = checked.value;
 
@@ -326,7 +335,7 @@ async function restoreAt(boardPlace: PlaceId, id: unknown): Promise<CaseResult> 
 /**
  * The bookings of one day for the booking form's day view (Pong, 27 Nov 2026: "select time ... on day view of calendar
  * (just like in google calendar app)"): every room's, where each is now, with its time, operation and surgeon; never an
- * HN. Only for a signed-in doctor, and only for a day from today to BOOK_AHEAD_DAYS ahead.
+ * HN. Only for a signed-in doctor, and only for a day from today to BOOK_AHEAD_DAYS ahead (a year for an admin).
  */
 export async function dayBookings(date: unknown): Promise<DayResult> {
   return dayAt("skh", date);
@@ -342,9 +351,9 @@ async function dayAt(place: PlaceId, date: unknown): Promise<DayResult> {
     if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "วันที่ไม่ถูกต้อง" };
     const signed = await signedInDoctor();
     if (!signed) return { ok: false, error: NOT_DOCTOR_TEXT };
-    const { doctor, pool } = signed;
+    const { user, doctor, pool } = signed;
     const today = todayInBangkok();
-    if (date < today || date > addDays(today, BOOK_AHEAD_DAYS)) return { ok: false, error: "วันที่ไม่ถูกต้อง" };
+    if (date < today || date > addDays(today, bookAheadDays(isAdmin(user.sub)))) return { ok: false, error: "วันที่ไม่ถูกต้อง" };
     const [day, periods] = await Promise.all([listCasesOn(pool, date, place), getRepairPeriods(pool)]);
     return { ok: true, date, slots: daySlots(day, periods, doctor.id) };
   } catch (error) {
@@ -354,14 +363,18 @@ async function dayAt(place: PlaceId, date: unknown): Promise<DayResult> {
 }
 
 /**
- * Notes that the doctor started or skipped the tutorial (/tutorial), so the board stops opening it by itself. Anyone
- * else (an admin looking at it) is ignored. Never fails: the worst case is the tutorial offered once more.
+ * Notes that the signed-in user (a doctor, or RN, PN, PCA or MX) started or skipped the tutorial on their first visit
+ * (/tutorial), so the board stops opening it by itself. Someone not on the users list is ignored. Never fails: the worst
+ * case is the tutorial offered once more.
  */
 export async function seeTutorial(): Promise<void> {
   try {
-    const signed = await signedInDoctor();
-    if (!signed) return;
-    await markTutorialSeen(signed.pool, signed.doctor.id);
+    const user = await getUser();
+    if (!user) return;
+    const pool = await db();
+    const listed = await userForSession(pool, user);
+    if (!listed) return;
+    await markTutorialSeen(pool, listed.id);
   } catch (error) {
     logFailure("Noting the tutorial seen failed", error);
   }

@@ -187,7 +187,8 @@ export type CheckedCase =
   | { ok: true; value: CaseInput }
   | { ok: false; error: string; field?: CaseField; earliest?: string };
 
-function isIsoDate(v: unknown): v is string {
+/** A real day written YYYY-MM-DD. */
+export function isIsoDate(v: unknown): v is string {
   if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
   const [y, m, d] = v.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
@@ -233,6 +234,28 @@ function workdayAfter(iso: string, holidays: readonly Holiday[]): string {
 export function earliestBookingDay(today: string, minutes: number, holidays: readonly Holiday[] = []): string {
   const next = workdayAfter(today, holidays);
   return minutes >= BOOKING_CUTOFF_MINUTES ? workdayAfter(next, holidays) : next;
+}
+
+/**
+ * How far ahead an admin books (Pong, 27 Nov 2026: "admin ... can book cases at any date on any time. No restriction"):
+ * a year, from today itself, whatever the hour.
+ */
+export const ADMIN_BOOK_AHEAD_DAYS = 366;
+
+/** What an admin's booking form says in place of the 15:00 rule. */
+export const ADMIN_BOOKING_RULE = "ผู้ดูแลระบบ จองได้ทุกเวลา";
+
+/** How many days ahead the calendar and the server let someone book: a year for an admin, else BOOK_AHEAD_DAYS. */
+export function bookAheadDays(admin: boolean): number {
+  return admin ? ADMIN_BOOK_AHEAD_DAYS : BOOK_AHEAD_DAYS;
+}
+
+/**
+ * The first day someone can book: today for an admin, whatever the hour (no 15:00 cut-off, so no day from today on is
+ * closed to their edits either); for everyone else earliestBookingDay.
+ */
+export function firstBookingDay(admin: boolean, today: string, minutes: number, holidays: readonly Holiday[] = []): string {
+  return admin ? today : earliestBookingDay(today, minutes, holidays);
 }
 
 /**
@@ -611,6 +634,8 @@ export type BookingContext = {
   subtype: string | null;
   /** The Bank of Thailand's holidays, HOSPITAL_HOLIDAYS and EXTRA_HOLIDAYS, from today to 60 days ahead. */
   holidays: readonly Holiday[];
+  /** How many days ahead may be booked (bookAheadDays): BOOK_AHEAD_DAYS when left out. */
+  ahead?: number;
   /**
    * The doctor's own booking being edited, when the input is its new state (editCase): its own day needs none of a new
    * booking's day checks, and once that day is closed (bookingState) only the note may change.
@@ -642,7 +667,8 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   const closed = keepsDay && date < earliest;
   if (!keepsDay) {
     if (date < earliest) return refuse("date", earliestText(today, earliest, holidays), { earliest });
-    if (date > addDays(today, BOOK_AHEAD_DAYS)) return refuse("date", `จองล่วงหน้าได้ไม่เกิน ${BOOK_AHEAD_DAYS} วัน`);
+    const ahead = context.ahead ?? BOOK_AHEAD_DAYS;
+    if (date > addDays(today, ahead)) return refuse("date", `จองล่วงหน้าได้ไม่เกิน ${ahead} วัน`);
     if (workdayIndex(date) === null) return refuse("date", "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
     const holiday = holidayIn(holidays, date);
     if (holiday) return refuse("date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);

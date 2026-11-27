@@ -11,8 +11,9 @@ import { InlineStatus } from "@/components/inline-status";
 import { ThaiDateField, type DayState } from "@/components/thai-date-field";
 import {
   addDays,
+  ADMIN_BOOKING_RULE,
   atThaChalom,
-  BOOK_AHEAD_DAYS,
+  bookAheadDays,
   BOOKING_CUTOFF_PHRASES,
   bookableFrom,
   bookedAlready,
@@ -145,6 +146,7 @@ export function AddCase({
   doctor,
   today,
   earliest,
+  admin = false,
   holidays,
   unlisted,
   periods,
@@ -161,8 +163,10 @@ export function AddCase({
   doctor: Doctor;
   /** Today in Thailand, YYYY-MM-DD. */
   today: string;
-  /** The first day that can be booked, by the server's clock (lib/added-cases.ts earliestBookingDay). */
+  /** The first day that can be booked, by the server's clock (lib/added-cases.ts firstBookingDay). */
   earliest: string;
+  /** An admin: no 15:00 cut-off (earliest is today) and a year ahead (lib/added-cases.ts bookAheadDays). */
+  admin?: boolean;
   /** The holidays from today to 60 days ahead, closed in the calendar as on the server. */
   holidays: readonly Holiday[];
   /** The years in those 60 days the BOT gave no holidays for, named under the calendar. */
@@ -183,6 +187,7 @@ export function AddCase({
   place?: PlaceId;
 }) {
   const tc = place === "tha-chalom";
+  const ahead = bookAheadDays(admin);
   const router = useRouter();
   const ref = useRef<HTMLDialogElement>(null);
   const hnRef = useRef<HTMLInputElement>(null);
@@ -313,7 +318,7 @@ export function AddCase({
     setEditing(next.mode === "edit" ? next.booking : null);
     let start = first;
     if (next.mode === "again" && next.booking.date === first) {
-      const end = addDays(today, BOOK_AHEAD_DAYS);
+      const end = addDays(today, ahead);
       do start = addDays(start, 1);
       while (start < end && closedDayNote(start, holidays));
     }
@@ -607,7 +612,7 @@ export function AddCase({
   function dayStep(direction: 1 | -1): string | null {
     const from = editing && editing.date < first ? editing.date : first;
     let day = date;
-    for (let tries = 0; tries < BOOK_AHEAD_DAYS + 7; tries += 1) {
+    for (let tries = 0; tries < ahead + 7; tries += 1) {
       day = addDays(day, direction);
       if (day < from || day > last) return null;
       if (editing && day === editing.date) return day;
@@ -635,7 +640,7 @@ export function AddCase({
   }
 
   const specialty = subtypeLabel("DR", doctor.subtype);
-  const last = addDays(today, BOOK_AHEAD_DAYS);
+  const last = addDays(today, ahead);
   const dayState = (iso: string): DayState => {
     const note = closedDayNote(iso, holidays);
     return note ? { disabled: true, note } : { disabled: false };
@@ -841,15 +846,20 @@ export function AddCase({
               unlisted={unlisted}
               openSignal={calendarOpen}
             />
-            {/* The 15:00 rule always, in Pong's words, a little larger than a hint (Pong, 15 Nov 2026), then the first day. */}
+            {/*
+              The 15:00 rule always, in Pong's words, a little larger than a hint (Pong, 15 Nov 2026), then the first day. An
+              admin has no cut-off (Pong, 27 Nov 2026: "No restriction"), so the line says that instead.
+            */}
             <p id="case-date-hint" className="mt-1.5 text-[0.8125rem] leading-5 text-muted" data-testid="case-date-hint">
               <span className="block">
-                {BOOKING_CUTOFF_PHRASES.map((phrase, index) => (
-                  <Fragment key={phrase}>
-                    {index > 0 ? " " : null}
-                    <span className="whitespace-nowrap">{phrase}</span>
-                  </Fragment>
-                ))}
+                {admin
+                  ? ADMIN_BOOKING_RULE
+                  : BOOKING_CUTOFF_PHRASES.map((phrase, index) => (
+                      <Fragment key={phrase}>
+                        {index > 0 ? " " : null}
+                        <span className="whitespace-nowrap">{phrase}</span>
+                      </Fragment>
+                    ))}
               </span>{" "}
               <span className="block">{bookableFrom(first)}</span>
             </p>

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
-import { addDays, BOOK_AHEAD_DAYS, earliestBookingDay } from "@/lib/added-cases";
+import { addDays, bookAheadDays, firstBookingDay } from "@/lib/added-cases";
 import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requestPath, requireUser } from "@/lib/auth/server";
@@ -22,7 +22,7 @@ import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
 import { simulatedBookings } from "@/lib/sim-bookings";
 import type { SessionUser } from "@/lib/tokens";
-import { STAFF_TUTORIAL_COOKIE, STAFF_TUTORIAL_SEEN, TUTORIAL_COOKIE } from "@/lib/tutorial";
+import { TUTORIAL_COOKIE } from "@/lib/tutorial";
 import { tutorialSeen } from "@/lib/tutorial-store";
 import { unavailablePath } from "@/lib/unavailable";
 import { fullName } from "@/lib/user-list";
@@ -57,22 +57,24 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
       offBoard: built.offBoard,
     };
     let adding: CaseAdding | null = null;
-    let tutorialDue = false;
+    // A first visit goes to the tutorial, once: a doctor's (Pong, 19 Nov 2026), and RN's, PN's, PCA's and MX's (27 Nov
+    // 2026: "Disable always-on", where it had opened on every app open). An admin who is not a doctor is never sent.
+    // Someone not on the users list has nowhere to note it, so is not sent either; a failed read counts as seen.
+    const seenBy = doctor ? String(doctor.id) : isAdmin(user.sub) ? null : viewer.userId;
+    const seen = seenBy ? tutorialSeen(pool, seenBy) : Promise.resolve(true);
     if (doctor) {
-      // The holidays over the 60 days a doctor can book, for the calendar: the same list the server action checks.
-      const [mine, { holidays, unlisted }, seen] = await Promise.all([
+      // The holidays over the days a doctor can book (60, a year for an admin), for the calendar: the same list the server action checks.
+      const [mine, { holidays, unlisted }] = await Promise.all([
         // The doctor's own bookings, HN included: theirs to see.
         listCasesBy(pool, doctor.id, day.today),
-        holidaysBetween(day.today, addDays(day.today, BOOK_AHEAD_DAYS)),
-        // A doctor's first visit goes to the tutorial (Pong, 19 Nov 2026); a failed read counts as seen.
-        tutorialSeen(pool, doctor.id),
+        holidaysBetween(day.today, addDays(day.today, bookAheadDays(isAdmin(user.sub)))),
       ]);
-      // The cookie the tutorial sets on a start or skip counts too: the row may not be written yet, or could not be.
-      tutorialDue = !seen && (await cookies()).get(TUTORIAL_COOKIE)?.value !== String(doctor.id);
       adding = {
         doctor: { name: fullName(doctor), subtype: doctor.subtype },
         today: day.today,
-        earliest: earliestBookingDay(day.today, day.minutes, holidays),
+        // An admin books from today at any hour, a year ahead (Pong, 27 Nov 2026: "No restriction").
+        earliest: firstBookingDay(isAdmin(user.sub), day.today, day.minutes, holidays),
+        admin: isAdmin(user.sub),
         holidays,
         unlisted,
         mine,
@@ -83,9 +85,10 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
         onDay: dayBookings,
       };
     }
+    // The cookie the tutorial sets on a start or skip counts too: the row may not be written yet, or could not be.
+    const tutorialDue = !(await seen) && (await cookies()).get(TUTORIAL_COOKIE)?.value !== seenBy;
     // MX and admins see every HN (lib/roles.ts), and they are the ones who upload.
-    // Everyone who is not a doctor (RN, PN, PCA, MX) gets the staff's tutorial each time they open the app.
-    return { board, adding, canUpload: viewer.allHn, tutorialDue, staff: !doctor };
+    return { board, adding, canUpload: viewer.allHn, tutorialDue };
   } catch (error) {
     console.error("[board] cases unavailable:", (error as Error).message);
     return null;
@@ -187,15 +190,12 @@ export default async function BoardPage({
   const simOn = !demoOn && params.sim === "1" && admin;
   const demo = demoOn ? demoBoard(view, periods) : simOn ? await simBoard(view, periods) : null;
   const loaded =
-    demoOn || simOn ? demo && { board: demo.board, adding: null, canUpload: true, tutorialDue: false, staff: false } : await loadBoard(user, view, periods, view !== day);
+    demoOn || simOn ? demo && { board: demo.board, adding: null, canUpload: true, tutorialDue: false } : await loadBoard(user, view, periods, view !== day);
   // Outside the try of loadBoard: redirect() works by throwing.
   if (!loaded) redirect(unavailablePath("server", await requestPath()));
-  // A doctor who has not seen the tutorial yet starts there, once (components/tutorial.tsx): starting or skipping it
+  // Someone who has not seen the tutorial yet starts there, once (components/tutorial.tsx): starting or skipping it
   // notes it seen.
   if (loaded.tutorialDue) redirect("/tutorial?first=1");
-  // Anyone else but an admin starts with the staff's tutorial each time they open the app (Pong, 27 Nov 2026: "Always on
-  // tutorial for non-DR"): its session cookie, set on a start or skip, lasts until the app is closed.
-  if (loaded.staff && !admin && (await cookies()).get(STAFF_TUTORIAL_COOKIE)?.value !== STAFF_TUTORIAL_SEEN) redirect("/tutorial?first=1");
   const { board, adding, canUpload } = loaded;
   // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
   // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.

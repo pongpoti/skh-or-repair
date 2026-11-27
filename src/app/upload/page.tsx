@@ -8,9 +8,10 @@ import { isAdmin } from "@/lib/admin";
 import { displayNameFor } from "@/lib/auth/display-name";
 import { requireUser } from "@/lib/auth/server";
 import { avatarSrc } from "@/lib/avatar";
-import { loadUploadSlot } from "@/lib/board-day";
+import { addDays, isIsoDate } from "@/lib/added-cases";
+import { ADMIN_UPLOAD_AHEAD_DAYS, loadUploadSlot } from "@/lib/board-day";
 import { listCasesOn } from "@/lib/cases";
-import { now } from "@/lib/clock";
+import { bangkokParts, now } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { thaiDate, TIME_ZONE } from "@/lib/days";
 import { HOLIDAYS_UNAVAILABLE } from "@/lib/holidays";
@@ -26,7 +27,7 @@ import {
   type FlowSummary,
   type MatchReport,
 } from "@/lib/upload-flow";
-import { casesOf, latestUpload, type Upload } from "@/lib/workbook-store";
+import { casesOf, latestUpload, latestUploadForTarget, type Upload } from "@/lib/workbook-store";
 import { XLSX_LIMITS } from "@/lib/xlsx";
 import { uploadWorkbook } from "./actions";
 
@@ -67,10 +68,13 @@ async function latestOf(pool: Pool, upload: Upload, periods: RepairPeriods): Pro
 
 /**
  * MX's page for the HOSxP file of the next workday (MX and admins only): the window, the day, the upload, and the
- * latest upload made today for that day with its summary and its matching with the bookings.
+ * latest upload made today for that day with its summary and its matching with the bookings. An admin picks the day,
+ * any day from today to a year ahead (?date=; Pong, 27 Nov 2026: "admin can upload file of any date on anytime"), and
+ * sees that day's latest upload whenever it was made.
  */
-export default async function UploadPage() {
+export default async function UploadPage({ searchParams }: { searchParams: Promise<{ date?: string | string[] }> }) {
   const user = await requireUser();
+  const params = await searchParams;
   const pool = await db();
   const admin = isAdmin(user.sub);
   // MX is a database role (lib/roles.ts), so the proxy cannot gate this page as it does /admin: anyone else gets the
@@ -80,10 +84,15 @@ export default async function UploadPage() {
   // Every time decision goes through the app's clock (lib/clock.ts), so the tests can set it.
   const at = now();
   const [slot, name, periods] = await Promise.all([loadUploadSlot(at), displayNameFor(user, user.name), getRepairPeriods(pool)]);
-  const target = slot.target.ok ? slot.target.date : null;
-  const blocked = slot.target.ok ? null : slot.target.reason === "none" ? "ไม่มีวันทำการใน 14 วันข้างหน้า" : HOLIDAYS_UNAVAILABLE;
-  // The upload the board will show for that day: the latest made today (lib/board-day.ts).
-  const latest = target ? await latestUpload(pool, slot.cycleDay, target) : null;
+  const today = bangkokParts(at).date;
+  const last = addDays(today, ADMIN_UPLOAD_AHEAD_DAYS);
+  // An admin's pick, from today to a year ahead; MX's day, the admin's to start with, is the next workday.
+  const asked = admin && typeof params.date === "string" && isIsoDate(params.date) && params.date >= today && params.date <= last ? params.date : null;
+  const target = asked ?? (slot.target.ok ? slot.target.date : null);
+  // An admin picks a day of their own, so the holiday feed failing blocks only MX.
+  const blocked = slot.target.ok || admin ? null : slot.target.reason === "none" ? "ไม่มีวันทำการใน 14 วันข้างหน้า" : HOLIDAYS_UNAVAILABLE;
+  // The upload the board will show for that day: the latest made today (lib/board-day.ts); for an admin, the day's latest.
+  const latest = target ? await (admin ? latestUploadForTarget(pool, target) : latestUpload(pool, slot.cycleDay, target)) : null;
   const shown = latest ? await latestOf(pool, latest, periods) : null;
 
   return (
@@ -102,6 +111,7 @@ export default async function UploadPage() {
             blocked={blocked}
             windowState={windowStateAt(at)}
             admin={admin}
+            dayPick={admin ? { today, last } : null}
             // A new id for every render: a page brought back by Back keeps its own (components/board-refresh.tsx).
             refreshId={crypto.randomUUID()}
             refreshInMs={nextWindowChange(at).getTime() - at.getTime()}

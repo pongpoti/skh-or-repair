@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  adminCycleDay,
   boardDateOf,
   boardDayAt,
   boardEyebrow,
   cycleDayOf,
+  cycleShows,
   inUploadWindow,
   loadBoardDay,
   loadUploadSlot,
@@ -226,4 +228,25 @@ test("a swipe moves the board to the workday before or after, within the picker'
   // a range that starts on a weekend: the first workday in it
   assert.equal(stepDay("2026-11-20", 1, { min: "2026-11-21", max: "2026-11-30", holidays: [] }), "2026-11-23");
   assert.equal(stepDay("2026-11-23", -1, { min: "2026-11-21", max: "2026-11-30", holidays: [] }), null);
+});
+
+test("an admin's upload for any day counts in the cycle that shows it (Pong, 27 Nov 2026: \"admin can upload file of any date on anytime\")", () => {
+  // The board's day now (Wednesday 2 Dec before 16:00): the cycle now, shown at once.
+  assert.equal(adminCycleDay("2026-12-02", at("2026-12-02T10:00:00"), HOLIDAYS), "2026-12-01");
+  assert.ok(cycleShows("2026-12-01", "2026-12-02", HOLIDAYS));
+  // The next workday, before 16:00: today's cycle, shown from 16:00, as MX's upload is.
+  assert.equal(adminCycleDay("2026-12-03", at("2026-12-02T10:00:00"), HOLIDAYS), "2026-12-02");
+  // From 16:00 the next workday is the board's day: the cycle now.
+  assert.equal(adminCycleDay("2026-12-03", at("2026-12-02T17:00:00"), HOLIDAYS), "2026-12-02");
+  // A later day: from 16:00 of the workday before it. Tuesday 8 Dec comes after Friday 4 Dec, the weekend and the
+  // Monday holiday, so the first cycle that shows it is Friday's.
+  assert.equal(adminCycleDay("2026-12-08", at("2026-12-01T10:00:00"), HOLIDAYS), "2026-12-04");
+  assert.equal(adminCycleDay("2026-12-08", at("2026-12-05T10:00:00"), HOLIDAYS), "2026-12-04");
+  // Over the weekend the cycle now shows Tuesday too, so it counts there.
+  assert.equal(adminCycleDay("2026-12-08", at("2026-12-06T17:00:00"), HOLIDAYS), "2026-12-06");
+  // A day the board never shows as its own (a holiday, a Saturday, today after 16:00): the cycle now.
+  assert.equal(adminCycleDay("2026-12-07", at("2026-12-01T10:00:00"), HOLIDAYS), "2026-11-30");
+  assert.equal(adminCycleDay("2026-12-05", at("2026-12-01T17:00:00"), HOLIDAYS), "2026-12-01");
+  assert.equal(adminCycleDay("2026-12-02", at("2026-12-02T17:00:00"), HOLIDAYS), "2026-12-02");
+  assert.ok(!cycleShows("2026-12-02", "2026-12-02", HOLIDAYS));
 });

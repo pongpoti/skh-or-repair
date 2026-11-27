@@ -1,11 +1,13 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import type { UploadResult } from "@/app/upload/actions";
 import { fileProblem, megabytes, XLSX_ACCEPT, type FileRules } from "@/app/upload/file-check";
 import { Notice } from "@/components/auth-shell";
 import { useTimedRefresh } from "@/components/board-refresh";
 import { InlineStatus } from "@/components/inline-status";
+import { ThaiDateField } from "@/components/thai-date-field";
 import type { WindowState } from "@/lib/upload-flow";
 
 const UNSENT = "อัปโหลดไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
@@ -33,6 +35,7 @@ export function UploadForm({
   blocked,
   windowState,
   admin,
+  dayPick = null,
   refreshId,
   refreshInMs,
   rules,
@@ -45,6 +48,11 @@ export function UploadForm({
   windowState: WindowState;
   /** Admins may upload at any time. */
   admin: boolean;
+  /**
+   * An admin's choice of day, from `today` to `last` (Pong, 27 Nov 2026: "admin can upload file of any date on anytime"):
+   * picking one opens the page on it (/upload?date=). Null for MX, whose day is the next workday.
+   */
+  dayPick?: { today: string; last: string } | null;
   /** An id of the server's render, so the wait below survives a page brought back by Back (components/board-refresh.tsx). */
   refreshId: string;
   /** Milliseconds until the window opens, closes or the day turns, by the server's clock. */
@@ -58,6 +66,7 @@ export function UploadForm({
   const [fileName, setFileName] = useState("");
   const [result, setResult] = useState<UploadResult | null>(null);
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   // A second after the window opens or closes (or the day turns), and when the page comes back after more than five
   // minutes in the background, fetch the page again: the window or the day may have moved. The delay is at least five
@@ -128,7 +137,29 @@ export function UploadForm({
           {badge.text}
         </span>
       </p>
-      {admin ? <p className="mt-1 text-sm text-muted">ผู้ดูแลอัปโหลดได้ทุกเวลา</p> : null}
+      {admin ? <p className="mt-1 text-sm text-muted">ผู้ดูแลอัปโหลดได้ทุกเวลา ทุกวัน</p> : null}
+      {dayPick ? (
+        <div className="mt-3">
+          <label htmlFor="upload-day" className="block text-sm font-semibold text-ink">
+            วันของตาราง
+          </label>
+          <div className="mt-1.5 max-w-xs">
+            <ThaiDateField
+              id="upload-day"
+              value={target?.date ?? ""}
+              onChange={(iso) => {
+                setResult(null);
+                router.replace(`/upload?date=${iso}`);
+              }}
+              min={dayPick.today}
+              max={dayPick.last}
+              dayState={() => ({ disabled: false })}
+              today={dayPick.today}
+              testId="upload-day"
+            />
+          </div>
+        </div>
+      ) : null}
 
       {blocked ? (
         <Notice tone="warning" role="alert" className="mt-4">

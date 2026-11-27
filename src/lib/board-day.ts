@@ -171,6 +171,33 @@ export type UploadSlot = {
   windowOpen: boolean;
 };
 
+/** How far ahead an admin may upload a day's list (Pong, 27 Nov 2026: "admin can upload file of any date on anytime"). */
+export const ADMIN_UPLOAD_AHEAD_DAYS = 366;
+
+/**
+ * The cycle an admin's upload for `target`, made at `at`, counts in (Pong, 27 Nov 2026: "admin can upload file of any
+ * date on anytime"). The board shows its own day's list from the cycles whose next workday that day is (boardDateOf):
+ * from 16:00 of the workday before it until 16:00 on the day. So the upload counts in the first of those cycles, or in
+ * the cycle now once that one has begun: the board shows it at once when `target` is its day, and from 16:00 of the
+ * workday before otherwise. MX's uploads made later in a cycle that shows the day still take its place, as each day's
+ * do. A day the board never shows as its own (a weekend, a holiday, or today after 16:00) counts in the cycle now: the
+ * calendar shows it.
+ */
+export function adminCycleDay(target: string, at: Date, holidays: readonly Holiday[]): string {
+  const current = cycleDayOf(at);
+  let first: string | null = null;
+  for (let cycle = addDays(target, -1), steps = 0; steps < LOOKAHEAD_DAYS && boardDateOf(cycle, holidays) === target; steps += 1) {
+    first = cycle;
+    cycle = addDays(cycle, -1);
+  }
+  return first !== null && first > current ? first : current;
+}
+
+/** Whether the board shows `target`'s list as its own day in `cycle` (an admin's upload says when it shows). */
+export function cycleShows(cycle: string, target: string, holidays: readonly Holiday[]): boolean {
+  return boardDateOf(cycle, holidays) === target;
+}
+
 /** The upload slot at `at` (lib/clock.ts now()). */
 export async function loadUploadSlot(at: Date): Promise<UploadSlot> {
   const { date } = bangkokParts(at);
