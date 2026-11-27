@@ -59,6 +59,12 @@ export type StaffView = {
   subtype: string;
   /** "ออร์โธปิดิกส์", "ห้องผ่าตัด"; the code itself when the app has no Thai name for it. */
   subtypeName: string;
+  /**
+   * When this person registered, "15 พ.ย. 2569", or null while they have not (Pong, 27 Nov 2026: "display regis
+   * status"). Registered means a current claim of the name made the way the type signs in (user-list HOLDS: a doctor
+   * by email, anyone else by number), the claim that lets them in; a doctor's old claim by number does not count.
+   */
+  registeredOn: string | null;
 };
 
 /** The two sections that list people: the MX list with its picker, and the all-names list. Null when unreadable. */
@@ -130,14 +136,36 @@ export async function mxMembersFrom(pool: Pool): Promise<MxView[]> {
   return (await listMx(pool)).map(memberView);
 }
 
-function staffView(user: PickableUser): StaffView {
+/** Each registered user's id with the day their current claim was made (see StaffView.registeredOn). */
+async function registeredOn(pool: Pool): Promise<Map<string, string>> {
+  const { rows } = await pool.query<{ user_id: string; created_at: Date }>(
+    `SELECT u.id::text AS user_id, c.created_at
+     FROM user_claims c JOIN users u ON u.id = c.user_id
+     WHERE c.undone_at IS NULL AND u.active AND ${HOLDS}`,
+  );
+  return new Map(rows.map((row) => [row.user_id, addedOnFormat.format(row.created_at)]));
+}
+
+function staffView(user: PickableUser, registered: Map<string, string>): StaffView {
   const subtype = user.subtype?.trim() ?? "";
-  return { id: user.id, name: user.name, type: user.type, subtype, subtypeName: subtypeLabel(user.type, subtype) ?? subtype };
+  return {
+    id: user.id,
+    name: user.name,
+    type: user.type,
+    subtype,
+    subtypeName: subtypeLabel(user.type, subtype) ?? subtype,
+    registeredOn: registered.get(user.id) ?? null,
+  };
+}
+
+async function staffViews(pool: Pool, users: PickableUser[]): Promise<StaffView[]> {
+  const registered = await registeredOn(pool);
+  return users.map((user) => staffView(user, registered));
 }
 
 /** The all-names list as it now stands (after an admin added a name). */
 export async function staffFrom(pool: Pool): Promise<StaffView[]> {
-  return (await listActiveUsers(pool)).map(staffView);
+  return staffViews(pool, await listActiveUsers(pool));
 }
 
 /**
@@ -156,7 +184,7 @@ export async function loadPeople(): Promise<PeopleData> {
           .filter((user) => mxEligible(user.type, user.subtype))
           .map((user) => ({ id: user.id, name: user.name, role: roleLabel(user.type, user.subtype) })),
       },
-      staff: users.map(staffView),
+      staff: await staffViews(pool, users),
     };
   } catch (error) {
     console.error("[admin] reading the users failed:", (error as Error).message);

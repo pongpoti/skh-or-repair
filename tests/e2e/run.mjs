@@ -3220,7 +3220,20 @@ async function main() {
         (a, b) => order.indexOf(a.type) - order.indexOf(b.type) || a.name.localeCompare(b.name, "th"),
       );
       assert(active.length >= 10 && order.every((type) => active.some((u) => u.type === type)), `every type on the list: ${active.length}`);
-      assert((await textOf(page, '[data-testid="staff-summary"]')) === `ผู้ใช้ที่ใช้งานอยู่ ${active.length} คน`, "the count in the closed heading");
+      // Registered: a current claim made the way the type signs in (lib/user-list.ts HOLDS).
+      const registered = new Set(
+        (
+          await db.query(
+            `SELECT u.first_name || ' ' || u.last_name AS name FROM user_claims c JOIN users u ON u.id = c.user_id
+             WHERE c.undone_at IS NULL AND u.active AND ((u.type = 'DR') = (c.via = 'email'))`,
+          )
+        ).rows.map((r) => r.name),
+      );
+      assert(registered.size > 0 && registered.size < active.length, `some registered, some not: ${registered.size} of ${active.length}`);
+      assert(
+        (await textOf(page, '[data-testid="staff-summary"]')) === `ผู้ใช้ที่ใช้งานอยู่ ${active.length} คน · ลงทะเบียนแล้ว ${registered.size} คน`,
+        `the counts in the closed heading: ${await textOf(page, '[data-testid="staff-summary"]')}`,
+      );
       assert(!(await page.isVisible('[data-testid="staff-list"]')), "the list starts closed");
       await openSection(page, "staff");
       const rows = () => page.$$eval('[data-testid="staff-list"] li', (els) => els.map((el) => [el.querySelector("p")?.textContent?.trim(), el.dataset.type]));
@@ -3275,6 +3288,38 @@ async function main() {
       assert((await page.locator('[data-testid="staff-list"]').count()) === 0, "no rows");
       assert((await textOf(page, "#staff-body")).includes("ไม่พบชื่อนี้ ลองคำอื่นหรือตำแหน่งอื่น"), "nothing found");
       await page.fill('[data-testid="staff-search"]', "");
+
+      // sign-up status on every row, and a filter by it (Pong, 27 Nov 2026)
+      const marks = await page.$$eval('[data-testid="staff-list"] li', (els) => els.map((el) => [el.querySelector("p")?.textContent?.trim(), el.dataset.registered]));
+      assert(
+        JSON.stringify(marks) === JSON.stringify(active.map((u) => [u.name, registered.has(u.name) ? "yes" : "no"])),
+        `each row says whether they registered: ${JSON.stringify(marks)}`,
+      );
+      assert((await textOf(page, '[data-testid="staff-list"] li[data-registered="yes"]')).includes("ลงทะเบียนแล้ว"), "registered says so");
+      assert((await textOf(page, '[data-testid="staff-list"] li[data-registered="no"]')).includes("ยังไม่ลงทะเบียน"), "not yet says so");
+      const statusCounts = await page.$$eval('[data-testid="staff-status"] button', (els) => els.map((el) => el.textContent.replace(/\s+/g, " ").trim()));
+      assert(
+        JSON.stringify(statusCounts) ===
+          JSON.stringify([`ทุกคน${active.length} คน`, `ลงทะเบียนแล้ว${registered.size} คน`, `ยังไม่ลงทะเบียน${active.length - registered.size} คน`]),
+        `the status buttons: ${JSON.stringify(statusCounts)}`,
+      );
+      await page.click('[data-testid="staff-status-no"]');
+      assert(
+        JSON.stringify((await rows()).map(([name]) => name)) === JSON.stringify(active.filter((u) => !registered.has(u.name)).map((u) => u.name)),
+        "only those not registered",
+      );
+      assert((await count()) === `แสดง ${active.length - registered.size} จาก ${active.length} คน · ยังไม่ลงทะเบียน`, `count: ${await count()}`);
+      await page.click('[data-testid="staff-type-DR"]');
+      const doctorsNo = doctors.filter((u) => !registered.has(u.name)).length;
+      assert((await textOf(page, '[data-testid="staff-status-no"]')).includes(`${doctorsNo} คน`), "the status counts follow the type");
+      assert((await rows()).length === doctorsNo, "doctors not registered");
+      await page.click('[data-testid="staff-type-all"]');
+      await page.click('[data-testid="staff-status-yes"]');
+      assert(
+        JSON.stringify((await rows()).map(([name]) => name)) === JSON.stringify(active.filter((u) => registered.has(u.name)).map((u) => u.name)),
+        "only those registered",
+      );
+      await page.click('[data-testid="staff-status-all"]');
 
       // read only: no button on any row; fits a small phone; 44px targets
       assert((await page.locator('[data-testid="staff-list"] button').count()) === 0, "no buttons on the rows");
