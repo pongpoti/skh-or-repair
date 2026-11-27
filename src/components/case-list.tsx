@@ -465,7 +465,8 @@ function NoteDialog({ dialogRef, row, onClosed }: { dialogRef: React.RefObject<H
                 หมายเหตุ
               </h2>
               <p className="text-sm text-ink-2" data-testid="case-note-room">
-                {placeRoomName(row.roomId, row.place)} · ลำดับ {row.order}
+                {/* The room the case is in: a copy in a department's other room (BoardRow.shownFrom) says its own. */}
+                {placeRoomName(row.shownFrom?.roomId ?? row.roomId, row.place)} · ลำดับ {row.shownFrom?.order ?? row.order}
               </p>
             </div>
             <button type="button" className="btn btn-ghost size-11 min-h-0 shrink-0 rounded-full p-0" aria-label="ปิด" onClick={close}>

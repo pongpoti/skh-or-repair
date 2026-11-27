@@ -7,6 +7,7 @@ import {
   buildThaChalomRows,
   missingUploadDay,
   withoutTitle,
+  type BoardRows,
   type BoardViewer,
   type WorkbookCase,
 } from "./board-rows.ts";
@@ -501,8 +502,9 @@ test("a department with two rooms: bookings stay where the doctor saw them, and 
   const first = booking({ date: MONDAY, roomId: "or-2", hn: "1111111", surgeonId: "8", surgeon: "หมอ แปด", operation: "Lap chole" });
   const second = booking({ date: MONDAY, roomId: "or-5", hn: "2222222", surgeonId: "7", surgeon: "หมอ เจ็ด", operation: "Hernia" });
   const before = on(null, [first, second]);
+  const homes = (rows: BoardRows["rows"]) => rows.filter((row) => !row.shownFrom);
   assert.deepEqual(
-    before.rows.map((row) => [row.id, row.roomId]),
+    homes(before.rows).map((row) => [row.id, row.roomId]),
     [
       [`bk-${first.id}`, "or-2"],
       [`bk-${second.id}`, "or-5"],
@@ -522,9 +524,66 @@ test("a department with two rooms: bookings stay where the doctor saw them, and 
     ],
     [first, second],
   );
-  const where = Object.fromEntries(after.rows.map((row) => [row.procedure, row.roomId]));
+  const where = Object.fromEntries(homes(after.rows).map((row) => [row.procedure, row.roomId]));
   assert.deepEqual(where, { "Lap appendectomy": "or-5", Herniorrhaphy: "or-5", "Lap chole": "or-2", Excision: "or-2", Thyroidectomy: "or-5" });
   assert.equal(after.matched, 2);
+});
+
+test("a department with two rooms lists all of its cases in both, in one order, each case counted once", () => {
+  // Pong, 27 Nov 2026: "For day that dept has 2 rooms : display both booking and hosxp cases on both rooms". Monday 23
+  // Nov 2026: GENSX holds OR 2 and OR 5; OR 3 is the SCOPE room, OR 8 the emergency room, OR 7 urology's only room.
+  const MONDAY = "2026-11-23";
+  const on = (workbook: WorkbookCase[] | null, bookings: AddedCase[]) =>
+    buildBoardRows({ date: MONDAY, periods: DEFAULT_REPAIR_PERIODS, workbook, bookings, viewer: MX });
+  const first = booking({ date: MONDAY, roomId: "or-5", hn: "1111111", surgeonId: "8", surgeon: "หมอ แปด", operation: "Lap chole", start: 600, end: 660 });
+  const second = booking({ date: MONDAY, roomId: "or-2", hn: "2222222", surgeonId: "7", surgeon: "หมอ เจ็ด", operation: "Hernia", start: 540, end: 600 });
+  const list = (rows: BoardRows["rows"], roomId: string) =>
+    rows.filter((row) => row.roomId === roomId).sort((a, b) => a.order - b.order).map((row) => [row.order, row.procedure, row.shownFrom ? [row.shownFrom.roomId, row.shownFrom.order] : null]);
+
+  // Before an upload: both bookings in both rooms, by their time, the copy saying the room the booking is in and its
+  // place there.
+  const before = on(null, [first, second]);
+  assert.deepEqual(list(before.rows, "or-2"), [[1, "Hernia", null], [2, "Lap chole", ["or-5", 2]]]);
+  assert.deepEqual(list(before.rows, "or-5"), [[1, "Hernia", ["or-2", 1]], [2, "Lap chole", null]]);
+  assert.deepEqual([before.countByRoom["or-2"], before.countByRoom["or-5"]], [2, 2]);
+
+  // After it: the booked cases by time, then HOSxP's others in file order, the same in both rooms. Not the endoscopy in
+  // the SCOPE room, nor the emergency, nor another department's case.
+  const after = on(
+    [
+      wb({ hn: "3333333", surgeon: "นพ. เก้า ศัลย์", operation: "Excision", position: 1 }),
+      wb({ hn: "2222222", surgeon: "นพ. เจ็ด ศัลย์", operation: "Herniorrhaphy", position: 2 }),
+      wb({ hn: "1111111", surgeon: "นพ. แปด ศัลย์", operation: "Lap chole", position: 3 }),
+      wb({ hn: "4444444", surgeon: "นพ. สิบ ศัลย์", operation: "Thyroidectomy", position: 4 }),
+      wb({ hn: "5555555", surgeon: "นพ. เก้า ศัลย์", operation: "Colonoscopy", position: 5 }),
+      wb({ hn: "6666666", surgeon: "นพ. สิบ ศัลย์", operation: "Appendectomy", urgency: "Emergency", position: 6 }),
+      wb({ hn: "7777777", surgeon: "นพ. ยูโร", operation: "TURP", dept: "URO", position: 7 }),
+    ],
+    [first, second],
+  );
+  const pooled = ["Herniorrhaphy", "Lap chole", "Excision", "Thyroidectomy"];
+  for (const roomId of ["or-2", "or-5"]) {
+    assert.deepEqual(list(after.rows, roomId).map(([order, name]) => [order, name]), pooled.map((name, index) => [index + 1, name]), roomId);
+    assert.equal(after.countByRoom[roomId], 4, roomId);
+    assert.equal(after.mismatchByRoom[roomId], 2, `${roomId}: the two nobody booked`);
+  }
+  // Each case is in one room and copied to the other.
+  const homes = after.rows.filter((row) => !row.shownFrom && pooled.includes(row.procedure));
+  assert.equal(homes.length, 4);
+  for (const row of after.rows.filter((item) => item.shownFrom)) {
+    assert.notEqual(row.shownFrom?.roomId, row.roomId);
+    assert.ok(
+      homes.some((home) => home.id === row.id && home.roomId === row.shownFrom?.roomId && home.order === row.shownFrom?.order),
+      `${row.procedure}: copied from its own room, with its place there`,
+    );
+  }
+  // Each case counted once in the totals.
+  assert.equal(after.mismatchCount, after.rows.filter((row) => row.flag && !row.shownFrom).length);
+  assert.equal(after.rows.filter((row) => row.shownFrom && !["or-2", "or-5"].includes(row.roomId)).length, 0, "no copies elsewhere");
+  for (const name of ["Colonoscopy", "Appendectomy", "TURP"]) {
+    const rows = after.rows.filter((row) => row.procedure === name);
+    assert.equal(rows.length, 1, `${name}: once, in its own room (${rows.map((row) => row.roomId).join(", ")})`);
+  }
 });
 
 test("booked cases go by their time, untimed bookings after in booking order, then the cases nobody booked; each row says its time", () => {

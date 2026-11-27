@@ -1,7 +1,7 @@
 import { DAY_END, DAY_START } from "./booking-time.ts";
 import { bookedAtText, type AddedCase } from "./added-cases.ts";
 import { allocationFor, DEPARTMENTS, type DeptCode } from "./allocation.ts";
-import { buildBoardRows, type BoardRow, type BoardRows, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
+import { buildBoardRows, listedRooms, type BoardRow, type BoardRows, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
 import { addDays } from "./days.ts";
 import { isWorkday, type Holiday } from "./holidays.ts";
 import type { RepairPeriods } from "./repair.ts";
@@ -277,14 +277,21 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
   let matched = built.matched;
   const dressingRooms = roomsHeldBy("INFECT", date, periods);
   const bookedAt = bookedAtText(new Date(`${addDays(date, -4)}T21:00:00+07:00`).toISOString());
+  // A department's rooms list each other's cases (lib/board-rows.ts listedRooms): a row added to one is listed in the
+  // others too, so they keep one list.
+  const filled = new Set<string>();
   openRooms(date, periods).forEach((room, r) => {
     const code = allocationFor(room.id, date, periods)?.am?.code;
-    if (!code) return;
+    if (!code || filled.has(room.id)) return;
+    const listed = listedRooms(room.id, code, date, periods);
+    for (const id of listed) filled.add(id);
     const list = casesFor(code);
-    for (let slot = (countByRoom[room.id] ?? 0) + 1; slot <= DEMO_MIN_CASES; slot += 1) {
+    const have = Math.min(...listed.map((id) => countByRoom[id] ?? 0));
+    for (let slot = have + 1; slot <= DEMO_MIN_CASES; slot += 1) {
       const item = list[slot % list.length];
       const surgeon = SURGEONS[(r + slot) % SURGEONS.length];
-      rows.push({
+      for (const id of listed) countByRoom[id] = (countByRoom[id] ?? 0) + 1;
+      const extra: BoardRow = {
         id: `demo-${room.id}-extra-${slot}`,
         roomId: room.id,
         order: slot,
@@ -299,8 +306,9 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
         bookedBy: surgeon.name,
         bookedAt,
         ...(dressingRooms.includes(room.id) ? { doneBy: "surgeon" as const } : {}),
-      });
-      countByRoom[room.id] = slot;
+      };
+      const home = { roomId: room.id, order: slot };
+      rows.push(extra, ...listed.filter((id) => id !== room.id).map((id): BoardRow => ({ ...extra, roomId: id, shownFrom: home })));
       matched += 1;
     }
   });
@@ -312,7 +320,14 @@ export function demoBoardRows(date: string, periods: RepairPeriods, viewer: Boar
     order.set(row.roomId, slot);
     return { ...row, order: slot };
   });
-  return { ...built, rows: sorted, matched, countByRoom };
+  // A copy says its case's new place in the case's own room.
+  const homeOrder = new Map(sorted.filter((row) => !row.shownFrom).map((row) => [`${row.id} ${row.roomId}`, row.order]));
+  const listed = sorted.map((row): BoardRow =>
+    row.shownFrom
+      ? { ...row, shownFrom: { ...row.shownFrom, order: homeOrder.get(`${row.id} ${row.shownFrom.roomId}`) ?? row.shownFrom.order } }
+      : row,
+  );
+  return { ...built, rows: listed, matched, countByRoom };
 }
 
 /**

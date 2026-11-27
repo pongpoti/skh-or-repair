@@ -118,7 +118,8 @@ export function ThaChalomBoard({
     for (const item of rows) next[item.roomId] = (next[item.roomId] ?? 0) + 1;
     return next;
   }, [rows]);
-  const total = open.reduce((sum, item) => sum + (counts[item.room.id] ?? 0), 0);
+  // Each case once (a department's case would be listed in each of its rooms; BoardRow.shownFrom).
+  const total = rows.filter((item) => !item.shownFrom && open.some((entry) => entry.room.id === item.roomId)).length;
   const cases = entry ? rows.filter((item) => item.roomId === entry.room.id).sort((a, b) => a.order - b.order) : [];
   const allocation = entry ? thaChalomAllocation(entry.room.id, date) : null;
 
@@ -184,7 +185,7 @@ export function ThaChalomBoard({
             pathname={pathname}
             className={`flex min-h-0 flex-1 overflow-hidden p-1 lg:p-0 ${adding ? "pb-[calc(max(0.75rem,env(safe-area-inset-bottom))_+_3.75rem)] lg:pb-[4.5rem]" : ""}`}
           >
-            {/* Filling the box as รพ.สมุทรสาคร's plan does, with the same margins (globals.css .tc-plan). */}
+            {/* As wide as รพ.สมุทรสาคร's plan, in the same place (globals.css .tc-plan). */}
             <ThaChalomPlan
               day={day}
               className="tc-plan"

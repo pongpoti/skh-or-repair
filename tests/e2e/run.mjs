@@ -1378,16 +1378,42 @@ async function main() {
         assert((await page.locator('[data-testid="tc-room"][data-room="scope"]').count()) === 1, "the Scope room in the Thursday's list");
       }
       await page.goto(`${APP}/tha-chalom?date=${wednesday}`, { waitUntil: "networkidle" });
-      // a picked day goes along to the other hospital and back
+      // a picked day goes along to the other hospital and back. The board stays on screen until the other one comes
+      // (Pong, 27 Nov 2026: "Why when I am on ท่าฉลอม and select สมุทรสาคร, the entire page reload ?"): no new page and
+      // no loading screen on the way, either way (both boards under one loading boundary, app/(board)/(hospitals)).
+      const watchSwitch = () =>
+        page.evaluate(() => {
+          window.__switchWatch?.disconnect();
+          window.__switchSeen = { loading: false };
+          window.__switchWatch = new MutationObserver((records) => {
+            for (const record of records) {
+              for (const node of record.addedNodes) {
+                if (node instanceof Element && (node.matches('[data-testid="board-loading"]') || node.querySelector('[data-testid="board-loading"]'))) {
+                  window.__switchSeen.loading = true;
+                }
+              }
+            }
+          });
+          window.__switchWatch.observe(document.body, { childList: true, subtree: true });
+        });
+      const switchSeen = async (way) => {
+        const seen = await page.evaluate(() => window.__switchSeen ?? null);
+        assert(seen !== null, `${way}: the same page, not a new one`);
+        assert(seen.loading === false, `${way}: no loading screen on the way`);
+      };
       assert(JSON.stringify((await tabsOf()).map(([, , href]) => href)) === JSON.stringify([`/skh?date=${wednesday}`, null]), `the switch keeps the day: ${JSON.stringify(await tabsOf())}`);
+      await watchSwitch();
       await page.click('[data-testid="place-tab"][data-place="skh"]');
       await page.waitForURL(`${APP}/skh?date=${wednesday}`);
       await page.waitForSelector('[data-testid="place-tab"][data-place="skh"][aria-current="page"]');
+      await switchSeen("ท่าฉลอม to รพ.สมุทรสาคร");
       assert((await page.getAttribute("header time", "datetime")) === wednesday, "รพ.สมุทรสาคร's board on the same Wednesday");
       assert(JSON.stringify((await tabsOf()).map(([, , href]) => href)) === JSON.stringify([null, `/tha-chalom?date=${wednesday}`]), `and back: ${JSON.stringify(await tabsOf())}`);
+      await watchSwitch();
       await page.click('[data-testid="place-tab"][data-place="tha-chalom"]');
       await page.waitForURL(`${APP}/tha-chalom?date=${wednesday}`);
       await page.waitForSelector('[data-testid="place-tab"][data-place="tha-chalom"][aria-current="page"]');
+      await switchSeen("รพ.สมุทรสาคร to ท่าฉลอม");
       assert((await page.getAttribute("header time", "datetime")) === wednesday, "ท่าฉลอม on the same Wednesday again");
       // a nurse books nothing (the doctors book, below); no HOSxP list here; the bar and its menu are รพ.สมุทรสาคร's, for
       // the same person
@@ -1410,7 +1436,16 @@ async function main() {
       await touchTargets(page, "รพ.ท่าฉลอม");
       // laid out as รพ.สมุทรสาคร's board (Pong, 27 Nov 2026: "Arrange component of ท่าฉลอม exact same as สมทุรสาคร"): the
       // plan alone on a phone, right under the bar; from 1024px the open rooms beside it
-      // (1280px last: the list is measured there below)
+      // (1280px last: the list is measured there below). Its frame is as wide as รพ.สมุทรสาคร's (Pong, 27 Nov 2026:
+      // "Resize ท่าฉลอม layout to same width as สมุทรสาคร"), on a phone, a short phone, a tablet and a computer: measured
+      // here, compared on รพ.สมุทรสาคร's board below.
+      const PLAN_SIZES = [[320, 780], [390, 844], [390, 640], [768, 1024], [1024, 900], [1280, 900]];
+      const tcFrames = [];
+      for (const [width, height] of PLAN_SIZES) {
+        await page.setViewportSize({ width, height });
+        await page.waitForTimeout(100);
+        tcFrames.push(await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox());
+      }
       for (const width of [320, 1024, ...WIDTHS]) {
         const height = width >= 1024 ? 900 : 780;
         await page.setViewportSize({ width, height });
@@ -1448,6 +1483,16 @@ async function main() {
         ["x", "y", "width", "height"].every((key) => Math.abs(tcList[key] - skhList[key]) <= 1),
         `the list's card as รพ.สมุทรสาคร's: ${JSON.stringify(tcList)} / ${JSON.stringify(skhList)}`,
       );
+      for (const [index, [width, height]] of PLAN_SIZES.entries()) {
+        await page.setViewportSize({ width, height });
+        await page.waitForTimeout(100);
+        const skhFrame = await page.locator("rect.fp-outer").boundingBox();
+        const tcFrame = tcFrames[index];
+        assert(
+          Math.abs(tcFrame.width - skhFrame.width) <= Math.max(2, skhFrame.width * 0.005) && Math.abs(tcFrame.x - skhFrame.x) <= 2 && Math.abs(tcFrame.y - skhFrame.y) <= 4,
+          `ท่าฉลอม's plan as wide as รพ.สมุทรสาคร's, in the same place, at ${width}×${height}: ${JSON.stringify(tcFrame)} / ${JSON.stringify(skhFrame)}`,
+        );
+      }
       await page.setViewportSize({ width: 390, height: 844 });
 
       // / and the board's address from before (a link kept in a chat) go on to the board at /skh
@@ -2761,9 +2806,19 @@ async function main() {
     /**
      * The booking form's two steps (Pong, 27 Nov 2026): the day view, where a tap on a half hour (`start`, minutes after
      * midnight, or the first free one) gives a time, then ต่อไป to the rest of the form. Nothing is done on the rest.
+     * The day view shows once the ระบุเวลา switch is on (Pong, 27 Nov 2026: "Add toggle time input : disable as
+     * default"): dayViewRead turns it on.
      */
     const FORM = '[data-testid="add-case-dialog"]';
-    const dayViewRead = (page) => page.waitForSelector(`${FORM} [data-testid="day-view"]:not([data-loading])`);
+    const timeOn = async (page) => {
+      const toggle = page.locator(`${FORM} [data-testid="case-time-toggle"]`);
+      if ((await toggle.getAttribute("aria-checked")) !== "true") await toggle.click();
+    };
+    const dayViewRead = async (page) => {
+      await page.waitForSelector(`${FORM} [data-testid="case-time-toggle"]`);
+      await timeOn(page);
+      return page.waitForSelector(`${FORM} [data-testid="day-view"]:not([data-loading])`);
+    };
     const pickTime = async (page, start = null) => {
       await dayViewRead(page);
       const slot =
@@ -2782,9 +2837,9 @@ async function main() {
       await page.waitForSelector(`${FORM} [data-testid="case-when"]`);
     };
     const toDayView = async (page) => {
-      if (await page.locator(`${FORM} [data-testid="day-view"]`).count()) return;
+      if (await page.locator(`${FORM} [data-testid="case-time-section"]`).count()) return;
       await page.click(`${FORM} [data-testid="case-when-change"]`);
-      await page.waitForSelector(`${FORM} [data-testid="day-view"]`);
+      await page.waitForSelector(`${FORM} [data-testid="case-time-section"]`);
     };
     // An old binary .xls starts with the OLE signature D0 CF 11 E0.
     const OLE = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504)]);
@@ -3386,16 +3441,53 @@ async function main() {
       // The day view (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar (just like in
       // google calendar app) then show form input"): the half hours from 08:30 to 15:30 of the room the doctor's choice
       // gives that day (the nephrologist's department has no room of its own during the repair: the mixed room OR 11).
+      // It is behind the ระบุเวลา switch, off to start with (Pong, 27 Nov 2026: "Add toggle time input : disable as
+      // default"): no time, said in the footer.
+      const toggle = `${dialog} [data-testid="case-time-toggle"]`;
+      assert((await page.getAttribute(toggle, "role")) === "switch" && (await page.getAttribute(toggle, "aria-checked")) === "false", "the switch starts off");
+      assert((await textOf(page, toggle)) === "ระบุเวลา", "named ระบุเวลา");
+      assert((await page.locator(`${dialog} [data-testid="day-view"]`).count()) === 0, "no day view while it is off");
+      assert((await textOf(page, '[data-testid="case-time-text"]')) === "ไม่ระบุเวลา", "the footer: no time");
+      assert((await textOf(page, '[data-testid="case-day-room"]')) === "เวลาผ่าตัด · OR 11", `the room shown: ${await textOf(page, '[data-testid="case-day-room"]')}`);
+      const toggleBox = await page.locator(toggle).boundingBox();
+      assert(toggleBox.height >= 44, `the switch is a 44px tap: ${toggleBox.height}`);
+      await ownerShot(page, "booking-time-off.png");
       await dayViewRead(page);
+      assert((await page.getAttribute(toggle, "aria-checked")) === "true", "on");
       assert((await page.locator(`${dialog} [data-testid="day-slot"]`).count()) === 14, "14 half hours");
       assert((await page.getAttribute(`${dialog} [data-testid="day-slot"] >> nth=0`, "data-time")) === "510", "from 08:30");
-      assert((await textOf(page, '[data-testid="case-day-room"]')) === "เวลาผ่าตัด · OR 11", `the room shown: ${await textOf(page, '[data-testid="case-day-room"]')}`);
       assert((await page.locator(`${dialog} [data-testid="day-booking"]`).count()) === 0, "nothing booked yet");
-      assert((await textOf(page, '[data-testid="case-time-text"]')) === "แตะเวลาที่ต้องการ", "the footer asks for a time");
+      assert((await textOf(page, '[data-testid="case-time-text"]')) === "เลือกเวลาที่ต้องการ", "the footer asks for a time");
       assert((await page.locator(`${dialog} [data-testid="case-hn"]`).count()) === 0, "the rest of the form waits");
-      // ต่อไป without a time asks for one
+      // the start and end lists (Pong, 27 Nov 2026: "it is hard to expand time range"): every 15 minutes, the end
+      // waiting for a start
+      const startList = `${dialog} select[data-testid="day-start"]`;
+      const endList = `${dialog} select[data-testid="day-end"]`;
+      assert((await page.locator(`${startList} option:not([value=""])`).count()) === 28, "28 starts, 08:30 to 15:15");
+      assert(await page.locator(endList).isDisabled(), "no end before a start");
+      // ต่อไป without a time asks for one, once the switch is on
       await page.click('[data-testid="case-next"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === "เลือกเวลาผ่าตัด");
+      // a start in the list gives an hour; the end list makes it longer, up to 15:30
+      await page.selectOption(startList, "570");
+      const listPick = async () => [await page.getAttribute('[data-testid="day-pick"]', "data-start"), await page.getAttribute('[data-testid="day-pick"]', "data-end")].join("-");
+      assert((await listPick()) === "570-630", `09:30 to 10:30 from the list: ${await listPick()}`);
+      assert((await page.locator('[data-testid="case-save-status"]').count()) === 0, "the message goes with the pick");
+      assert((await page.locator(`${endList} option`).count()) === 24, "ends from 09:45 to 15:30");
+      assert((await textOf(page, `${endList} option[value="660"]`)) === "11:00 (1 ชม. 30 นาที)", `an end says how long: ${await textOf(page, `${endList} option[value="660"]`)}`);
+      await page.selectOption(endList, "750");
+      assert((await listPick()) === "570-750", `to 12:30: ${await listPick()}`);
+      // a new start keeps the length
+      await page.selectOption(startList, "600");
+      assert((await listPick()) === "600-780", `10:00 to 13:00: ${await listPick()}`);
+      // off sets the time aside and on brings it back
+      await page.click(toggle);
+      assert((await page.locator(`${dialog} [data-testid="day-view"]`).count()) === 0, "off: no day view");
+      assert((await textOf(page, '[data-testid="case-time-text"]')) === "ไม่ระบุเวลา", "off: no time");
+      await page.click(toggle);
+      await page.waitForSelector(`${dialog} [data-testid="day-pick"]`);
+      assert((await listPick()) === "600-780", "on again: the time is back");
+      await ownerShot(page, "booking-time-lists.png");
       // a tap gives an hour from there; the end handle drags it longer in 15-minute steps; the keyboard moves it
       await page.click(`${dialog} [data-testid="day-slot"][data-time="540"]`);
       const pickOf = async () => [await page.getAttribute('[data-testid="day-pick"]', "data-start"), await page.getAttribute('[data-testid="day-pick"]', "data-end")].join("-");
@@ -3640,7 +3732,19 @@ async function main() {
       assert((await pageY.locator(`${dialog} [data-testid="day-booking"]`).count()) === 2, "the day read again: the other booking shows");
       await ownerShot(pageY, "booking-time-taken.png");
       assert((await db.query("SELECT 1 FROM cases WHERE hn = '7900012'")).rowCount === 0, "nothing saved");
-      await db.query("DELETE FROM cases WHERE hn = '7900011'");
+      // With no time (Pong, 27 Nov 2026: "Add toggle time input : disable as default") the same case is booked: a
+      // booking with no time takes no time from anyone.
+      await pageY.click(`${dialog} [data-testid="case-time-toggle"]`);
+      assert((await textOf(pageY, '[data-testid="case-time-text"]')) === "ไม่ระบุเวลา", "the switch off: no time");
+      await pageY.click('[data-testid="case-next"]');
+      await pageY.waitForSelector(`${dialog} [data-testid="case-when"]`);
+      assert((await textOf(pageY, '[data-testid="case-when-time"]')) === "ไม่ระบุเวลา", "the rest says no time");
+      await pageY.click('[data-testid="case-submit"]');
+      await pageY.waitForSelector(`${dialog} .inline-status-success`);
+      const untimed = await db.query("SELECT start_min, end_min FROM cases WHERE hn = '7900012'");
+      assert(untimed.rowCount === 1 && untimed.rows[0].start_min === null && untimed.rows[0].end_min === null, "saved with no time");
+      assert((await pageY.getAttribute(`${dialog} [data-testid="case-time-toggle"]`, "aria-checked")) === "false", "the next patient: the switch as it was");
+      await db.query("DELETE FROM cases WHERE hn IN ('7900011', '7900012')");
       await ctxY.close();
       setNow("2026-11-16T10:00:00+07:00");
 
@@ -4736,11 +4840,15 @@ async function main() {
       await touchTargets(page, "รพ.ท่าฉลอม, a doctor");
       await page.click('[data-testid="add-case-button"]');
       await page.waitForSelector(`${FORM}[open]`);
-      await dayViewRead(page);
+      await page.waitForSelector(`${FORM} [data-testid="case-time-toggle"]`);
       // Wednesday: OR 1 is orthopaedics', and no other room is lent
       assert((await dateValue(page, "case-date")) === "2026-12-02", "the first day that can be booked");
-      assert((await page.locator(`${FORM} [data-testid="day-slot"]:enabled`).count()) === 0, "no time on a day without the department's room");
+      assert(await page.locator(`${FORM} [data-testid="case-time-toggle"]`).isDisabled(), "no time on a day without the department's room");
       assert((await textOf(page, FORM)).includes("ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น"), "and it says so");
+      // and ต่อไป keeps the form on the day (the time being optional, the room is what stops it)
+      await page.click(`${FORM} [data-testid="case-next"]`);
+      await page.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น");
+      assert((await page.locator(`${FORM} [data-testid="case-hn"]`).count()) === 0, "the rest of the form waits");
       await page.click('[data-testid="case-day-next"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="case-date"]')?.dataset.value === "2026-12-03");
       await dayViewRead(page);

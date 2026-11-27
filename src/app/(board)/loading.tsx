@@ -5,7 +5,10 @@ import { BrandMark } from "@/components/brand-mark";
  * The board waits for the sign-in check, the database and the holiday list, so without this a tap on "ตารางผ่าตัด"
  * seemed to do nothing until it arrived (Pong, 17 Nov 2026: back and forth with จัดการระบบ "lags a lot"). The bar and
  * the plan's place are held, so the board does not jump when it comes. Changing the room or the day on the board keeps
- * the board on screen instead (those are the same page).
+ * the board on screen instead (those are the same page), and so does the bar's switch between the two hospitals: both
+ * boards sit in one route group, (hospitals), under this boundary, so the switch changes a segment below it and the
+ * board stays until the other one comes (Pong, 27 Nov 2026: "Why when I am on ท่าฉลอม and select สมุทรสาคร, the entire
+ * page reload ?"). The plan's box is รพ.สมุทรสาคร's shape, which รพ.ท่าฉลอม's plan takes too (globals.css .tc-plan).
  */
 export default function BoardLoading() {
   return (

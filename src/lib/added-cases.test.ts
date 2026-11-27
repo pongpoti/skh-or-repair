@@ -691,7 +691,7 @@ test("booking again refuses a day that already has the patient in that room choi
 // ---------------------------------------------------------------------------------------------------------------
 // The booking's time (Pong, 27 Nov 2026: picked on the day view, 08:30 to 15:30; a booked time is taken)
 
-test("the time: a new booking needs one, in 15-minute steps from 08:30 to 15:30; an untimed booking's edit may keep none", () => {
+test("the time: optional, in 15-minute steps from 08:30 to 15:30 when given; an edit may add one or drop it", () => {
   const time = (start: unknown, end: unknown, context: Partial<BookingContext> = {}) => {
     const checked = check({ ...(context.editing ? asInput(own(context.editing)) : ok), start, end }, context);
     return checked.ok ? [checked.value.start, checked.value.end] : [checked.field, checked.error];
@@ -699,19 +699,22 @@ test("the time: a new booking needs one, in 15-minute steps from 08:30 to 15:30;
   assert.deepEqual(time(510, 570), [510, 570], "08:30 to 09:30");
   assert.deepEqual(time(915, 930), [915, 930], "the last quarter hour");
   assert.deepEqual(time(510, 930), [510, 930], "the whole day");
-  for (const [start, end] of [[undefined, undefined], [null, null], [540, null], [undefined, 600]]) {
+  // Pong, 27 Nov 2026: "Add toggle time input : disable as default": a booking with no time
+  assert.deepEqual(time(undefined, undefined), [null, null], "no time");
+  assert.deepEqual(time(null, null), [null, null], "no time");
+  for (const [start, end] of [[540, null], [undefined, 600]]) {
     assert.deepEqual(time(start, end), ["time", TIME_MISSING_TEXT], `${start}-${end}`);
   }
   for (const [start, end] of [[495, 555], [900, 945], [545, 600], [600, 600], [660, 600], ["540", "600"], [540.5, 600], [true, 600]]) {
     assert.deepEqual(time(start, end), ["time", "เวลาไม่ถูกต้อง เลือกใหม่"], `${start}-${end}`);
   }
-  // An edit of a booking from before the form asked keeps none, or takes one; a timed booking's edit needs one.
+  // An edit of an untimed booking keeps none, or takes one; a timed booking's edit may drop its time.
   const untimed = own({ date: "2026-11-17" });
   const editing = { today: "2026-11-16", earliest: "2026-11-17", editing: untimed };
   assert.deepEqual(time(null, null, editing), [null, null]);
   assert.deepEqual(time(600, 660, editing), [600, 660]);
   const timed = { ...editing, editing: own({ date: "2026-11-17", start: 540, end: 600 }) };
-  assert.deepEqual(time(null, null, timed), ["time", TIME_MISSING_TEXT]);
+  assert.deepEqual(time(null, null, timed), [null, null]);
   // A closed day's note edit keeps the booking's own time, whatever the form sends.
   const closed = { today: "2026-11-17", earliest: "2026-11-18", editing: own({ date: "2026-11-17", start: 540, end: 600 }) };
   assert.deepEqual(time(540, 600, closed), [540, 600]);
