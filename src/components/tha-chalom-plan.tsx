@@ -14,18 +14,23 @@ import { roomDayText, type ThaChalomRoomDay, type ThaChalomUse } from "@/lib/tha
 
 /**
  * One unit of this drawing in รพ.สมุทรสาคร's plan's units (components/floor-plan.tsx): Pong drew these ORs about 166
- * units across, รพ.สมุทรสาคร's are about 196. The board draws the plan at รพ.สมุทรสาคร's scale times this, so an OR here
- * is as big on the screen as one there (Pong, 27 Nov 2026: "Layout size of ท่าฉลอม is too large"; globals.css .tc-plan),
- * and the ring, number and label below are รพ.สมุทรสาคร's sizes divided by it, so they read the same too.
+ * units across, รพ.สมุทรสาคร's are about 196.
  */
 const SKH_UNITS = 1.18;
-/** รพ.สมุทรสาคร's ring 47 and number 56, or 36 and 44 in a short or split room; its department label 40. */
-const RING = 47 / SKH_UNITS;
-const RING_SMALL = 36 / SKH_UNITS;
-const NUMBER = 56 / SKH_UNITS;
-const NUMBER_SMALL = 44 / SKH_UNITS;
-/** A room this much shorter than รพ.สมุทรสาคร's 191 takes the small ring, as its short OR 7 does (OR 4 here). */
-const SHORT = 160;
+/**
+ * How much bigger than รพ.สมุทรสาคร's an OR here is on the screen (Pong, 27 Nov 2026: filling the screen was "too large",
+ * the same size as รพ.สมุทรสาคร's "Too small"). The board draws the plan at รพ.สมุทรสาคร's scale times SCALE (globals.css
+ * .tc-plan), and the ring, number and label below are รพ.สมุทรสาคร's sizes divided by it, so they read the same as there.
+ */
+const ZOOM = 4 / 3;
+const SCALE = SKH_UNITS * ZOOM;
+/** รพ.สมุทรสาคร's ring 47 and number 56, or 36 and 44 in a short or split room; its department label 40 (globals.css). */
+const RING = 47 / SCALE;
+const RING_SMALL = 36 / SCALE;
+const NUMBER = 56 / SCALE;
+const NUMBER_SMALL = 44 / SCALE;
+/** A room shorter than this on the screen, in รพ.สมุทรสาคร's units, takes the small ring, as its short OR 7 does. */
+const SHORT = 170;
 
 type Or = {
   id: string;
@@ -125,9 +130,9 @@ function OrRoom({ or, entry }: { or: Or; entry: ThaChalomRoomDay | null }) {
   // As on รพ.สมุทรสาคร's plan: a split room's small ring on the seam, half way down, with the morning's label above it
   // and the afternoon's below; otherwise the ring a little above the middle and the label under it (closer together in
   // a short room).
-  const short = or.bottom - or.top < SHORT;
-  const ringY = entry.split ? middle : middle - (short ? 30 : 36) / SKH_UNITS;
-  const labelY = middle + (short ? 44 : 54) / SKH_UNITS;
+  const short = (or.bottom - or.top) * SCALE < SHORT;
+  const ringY = entry.split ? middle : middle - (short ? 30 : 36) / SCALE;
+  const labelY = middle + (short ? 44 : 54) / SCALE;
   return (
     <g
       className={`tcp-or is-${state}${entry.split ? " is-split" : ""}`}
