@@ -10,16 +10,37 @@ import {
   bookingChange,
   bookingState,
   checkCase,
+  daySlots,
   deptRooms,
   earliestBookingDay,
   editedMessage,
   roomAmong,
   STARTED_TEXT,
+  timeClash,
+  timeOf,
   type AddedCase,
+  type CaseField,
+  type DaySlot,
 } from "@/lib/added-cases";
+import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { getUser } from "@/lib/auth/server";
 import { bookingUnderWay } from "@/lib/board-rows";
-import { addedToday, DAILY_ADD_LIMIT, doctorFor, insertCase, listCasesBy, listCasesOn, ownCase, removeCase, restoreCase, UNDO_MINUTES, updateCase, updateNote } from "@/lib/cases";
+import {
+  addedToday,
+  DAILY_ADD_LIMIT,
+  doctorFor,
+  insertCase,
+  listCasesBy,
+  listCasesOn,
+  ownCase,
+  removeCase,
+  removedCase,
+  restoreCase,
+  UNDO_MINUTES,
+  updateCase,
+  updateNote,
+  withDayLock,
+} from "@/lib/cases";
 import { bangkokParts, now, today as todayInBangkok } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
@@ -35,10 +56,17 @@ import { BOARD_PATH } from "@/lib/places";
  */
 export type CaseResult =
   | { ok: true; mine: AddedCase[]; message: string }
-  /** `earliest` is set when the day had become too soon (15:00 passed while the form was open), for the calendar. */
-  | { ok: false; error: string; mine?: AddedCase[]; earliest?: string };
+  /**
+   * `earliest` is set when the day had become too soon (15:00 passed while the form was open), for the calendar; `field`
+   * names what the error is about when the form cannot tell (a time another booking took meanwhile).
+   */
+  | { ok: false; error: string; mine?: AddedCase[]; earliest?: string; field?: CaseField };
 
-const NOT_DOCTOR: CaseResult = { ok: false, error: "จองได้เฉพาะแพทย์ ลองออกแล้วเข้าระบบใหม่" };
+/** The day view's bookings of one day (components/day-view.tsx). */
+export type DayResult = { ok: true; date: string; slots: DaySlot[] } | { ok: false; error: string };
+
+const NOT_DOCTOR_TEXT = "จองได้เฉพาะแพทย์ ลองออกแล้วเข้าระบบใหม่";
+const NOT_DOCTOR: CaseResult = { ok: false, error: NOT_DOCTOR_TEXT };
 const FAILED: CaseResult = { ok: false, error: "บันทึกไม่สำเร็จ ลองอีกครั้ง" };
 
 /** Server actions can be called by anyone who can reach the site, so each one checks the doctor again. */
@@ -87,11 +115,18 @@ export async function addCase(input: unknown): Promise<CaseResult> {
       return { ok: false, error: `จองได้ไม่เกิน ${DAILY_ADD_LIMIT} รายการต่อวัน` };
     }
 
-    // A department with several rooms that day: the room of the doctor's own booking there, else the emptier one.
-    const rooms = value.dressing ? [] : deptRooms(doctor.subtype, value.operation, value.date, periods);
-    if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, await listCasesOn(pool, value.date), periods);
-
-    await insertCase(pool, doctor.id, user.sub, value);
+    // Under the day's lock: the time is checked free in its room and taken in one go (Pong, 27 Nov 2026).
+    const taken = await withDayLock(pool, value.date, async (client) => {
+      const day = await listCasesOn(client, value.date);
+      // A department with several rooms that day: the room of the doctor's own booking there, else the emptier one
+      // that is free at that time.
+      const rooms = value.dressing ? [] : deptRooms(doctor.subtype, value.operation, value.date, periods);
+      if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods, timeOf(value));
+      if (timeClash(timeOf(value), value.roomId, value.date, day, periods)) return true;
+      await insertCase(client, doctor.id, user.sub, value);
+      return false;
+    });
+    if (taken) return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: await listCasesBy(pool, doctor.id, today) };
     revalidatePath(BOARD_PATH);
     return { ok: true, mine: await listCasesBy(pool, doctor.id, today), message: bookedMessage(value) };
   } catch (error) {
@@ -158,22 +193,26 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
       revalidatePath(BOARD_PATH);
       return { ok: true, mine: await mine(), message: "บันทึกแล้ว" };
     }
-    if (!value.dressing) {
-      const sameRoom = value.date === booking.date && bookedChoice(editing, periods) === "dept";
-      const rooms = deptRooms(doctor.subtype, value.operation, value.date, periods);
-      if (sameRoom && rooms.includes(bookedRoom(editing, periods).roomId)) value.roomId = bookedRoom(editing, periods).roomId;
-      else if (rooms.length > 1) {
-        // Among the day's other bookings: this one does not hold a room for itself.
-        const day = (await listCasesOn(pool, value.date)).filter((item) => item.id !== booking.id);
-        value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods);
+    // Under the new day's lock, as a new booking: its room worked out and its time checked free there.
+    const saved = await withDayLock(pool, value.date, async (client): Promise<"taken" | "same" | "gone" | { requeue: boolean; moved: boolean }> => {
+      // Among the day's other bookings: this one does not hold a room or a time for itself.
+      const day = (await listCasesOn(client, value.date)).filter((item) => item.id !== booking.id);
+      if (!value.dressing) {
+        const sameRoom = value.date === booking.date && bookedChoice(editing, periods) === "dept";
+        const rooms = deptRooms(doctor.subtype, value.operation, value.date, periods);
+        if (sameRoom && rooms.includes(bookedRoom(editing, periods).roomId)) value.roomId = bookedRoom(editing, periods).roomId;
+        else if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods, timeOf(value));
       }
-    }
-
-    const change = bookingChange(editing, value, periods);
-    if (!change.changed) return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
-    if (!(await updateCase(pool, id, doctor.id, value, change.requeue))) return { ok: false, error: GONE, mine: await mine() };
+      const change = bookingChange(editing, value, periods);
+      if (!change.changed) return "same";
+      if (timeClash(timeOf(value), value.roomId, value.date, day, periods)) return "taken";
+      return (await updateCase(client, id, doctor.id, value, change.requeue)) ? change : "gone";
+    });
+    if (saved === "same") return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
+    if (saved === "taken") return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: await mine() };
+    if (saved === "gone") return { ok: false, error: GONE, mine: await mine() };
     revalidatePath(BOARD_PATH);
-    return { ok: true, mine: await mine(), message: editedMessage(value, booking, change) };
+    return { ok: true, mine: await mine(), message: editedMessage(value, booking, saved) };
   } catch (error) {
     logFailure("Editing a booking failed", error);
     return FAILED;
@@ -207,7 +246,7 @@ export async function deleteCase(id: unknown): Promise<CaseResult> {
 
 /**
  * Books back a booking the doctor cancelled moments ago (เลิกทำ on the cancel's answer), in its old place in the queue:
- * within UNDO_MINUTES of the cancel, and only while its day has not gone.
+ * within UNDO_MINUTES of the cancel, and only while its day has not gone and its time is still free in its room.
  */
 export async function undoCancel(id: unknown): Promise<CaseResult> {
   if (!isCaseId(id)) return FAILED;
@@ -216,15 +255,44 @@ export async function undoCancel(id: unknown): Promise<CaseResult> {
     if (!signed) return NOT_DOCTOR;
     const { doctor, pool } = signed;
     const today = todayInBangkok();
-    const restored = await restoreCase(pool, id, doctor.id, today);
+    const cancelled = await removedCase(pool, id, doctor.id);
+    const restored = cancelled
+      ? await withDayLock(pool, cancelled.date, async (client) => {
+          const periods = await getRepairPeriods(client);
+          const room = bookedRoom(cancelled, periods).roomId;
+          if (timeClash(timeOf(cancelled), room, cancelled.date, await listCasesOn(client, cancelled.date), periods, cancelled.id)) return "taken";
+          return (await restoreCase(client, id, doctor.id, today)) ? "restored" : "late";
+        })
+      : "late";
     revalidatePath(BOARD_PATH);
     const mine = await listCasesBy(pool, doctor.id, today);
-    return restored
-      ? { ok: true, mine, message: "จองคืนแล้ว คิวเดิม" }
-      : { ok: false, mine, error: `เลิกทำได้ภายใน ${UNDO_MINUTES} นาทีหลังยกเลิก จองใหม่แทน` };
+    if (restored === "restored") return { ok: true, mine, message: "จองคืนแล้ว คิวเดิม" };
+    if (restored === "taken") return { ok: false, mine, error: "เวลานั้นมีคนจองแล้ว จองใหม่แทน" };
+    return { ok: false, mine, error: `เลิกทำได้ภายใน ${UNDO_MINUTES} นาทีหลังยกเลิก จองใหม่แทน` };
   } catch (error) {
     logFailure("Restoring a booking failed", error);
     return { ok: false, error: "จองคืนไม่สำเร็จ ลองอีกครั้ง" };
+  }
+}
+
+/**
+ * The bookings of one day for the booking form's day view (Pong, 27 Nov 2026: "select time ... on day view of calendar
+ * (just like in google calendar app)"): every room's, where each is now, with its time, operation and surgeon; never an
+ * HN. Only for a signed-in doctor, and only for a day from today to BOOK_AHEAD_DAYS ahead.
+ */
+export async function dayBookings(date: unknown): Promise<DayResult> {
+  try {
+    if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "วันที่ไม่ถูกต้อง" };
+    const signed = await signedInDoctor();
+    if (!signed) return { ok: false, error: NOT_DOCTOR_TEXT };
+    const { doctor, pool } = signed;
+    const today = todayInBangkok();
+    if (date < today || date > addDays(today, BOOK_AHEAD_DAYS)) return { ok: false, error: "วันที่ไม่ถูกต้อง" };
+    const [day, periods] = await Promise.all([listCasesOn(pool, date), getRepairPeriods(pool)]);
+    return { ok: true, date, slots: daySlots(day, periods, doctor.id) };
+  } catch (error) {
+    logFailure("Reading a day's bookings failed", error);
+    return { ok: false, error: "โหลดการจองไม่ได้ ลองใหม่" };
   }
 }
 

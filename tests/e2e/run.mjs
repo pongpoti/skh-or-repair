@@ -2724,6 +2724,34 @@ async function main() {
       await page.waitForFunction(([id, want]) => document.querySelector(`[data-testid="${id}"]`)?.dataset.value === want, [testId, iso]);
     };
     const dateValue = (page, testId) => page.getAttribute(`[data-testid="${testId}"]`, "data-value");
+    /**
+     * The booking form's two steps (Pong, 27 Nov 2026): the day view, where a tap on a half hour (`start`, minutes after
+     * midnight, or the first free one) gives a time, then ต่อไป to the rest of the form. Nothing is done on the rest.
+     */
+    const FORM = '[data-testid="add-case-dialog"]';
+    const dayViewRead = (page) => page.waitForSelector(`${FORM} [data-testid="day-view"]:not([data-loading])`);
+    const pickTime = async (page, start = null) => {
+      await dayViewRead(page);
+      const slot =
+        start === null
+          ? page.locator(`${FORM} [data-testid="day-slot"]:enabled`).first()
+          : page.locator(`${FORM} [data-testid="day-slot"][data-time="${start}"]`);
+      await slot.click();
+      await page.waitForSelector(`${FORM} [data-testid="day-pick"]:not([data-clash])`);
+    };
+    const toDetails = async (page, start = undefined) => {
+      if (await page.locator(`${FORM} [data-testid="case-when"]`).count()) return;
+      await dayViewRead(page);
+      const picked = await page.locator(`${FORM} [data-testid="day-pick"]:not([data-clash])`).count();
+      if (start !== undefined || !picked) await pickTime(page, start ?? null);
+      await page.click(`${FORM} [data-testid="case-next"]`);
+      await page.waitForSelector(`${FORM} [data-testid="case-when"]`);
+    };
+    const toDayView = async (page) => {
+      if (await page.locator(`${FORM} [data-testid="day-view"]`).count()) return;
+      await page.click(`${FORM} [data-testid="case-when-change"]`);
+      await page.waitForSelector(`${FORM} [data-testid="day-view"]`);
+    };
     // An old binary .xls starts with the OLE signature D0 CF 11 E0.
     const OLE = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(504)]);
     const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -3223,8 +3251,10 @@ async function main() {
       const scrubDialog = '[data-testid="scrub-dialog"]';
       const alertText = () => textOf(page, '[data-testid="case-save-status"]');
       const choiceOf = (page) => page.getAttribute('[data-testid="case-room"]', "data-choice");
-      const fillCase = async (page, { date, hn, operation, note = null }) => {
+      const fillCase = async (page, { date, hn, operation, note = null, start = undefined }) => {
+        await toDayView(page);
         if ((await dateValue(page, "case-date")) !== date) await pickDate(page, "case-date", date);
+        await toDetails(page, start);
         await page.fill(`${dialog} input[data-testid="case-hn"]`, hn);
         await page.fill('[data-testid="case-operation"]', operation);
         if (note !== null) await page.fill('[data-testid="case-note"]', note);
@@ -3246,7 +3276,9 @@ async function main() {
           (want) => document.querySelector('[data-testid="add-case-dialog"] .inline-status-success')?.textContent?.trim() === want,
           expected,
         );
-        assert((await choiceOf(page)) === "dept", "the next patient starts on OR X again");
+        // the next patient starts afresh on the day view (and on OR X again: fillCase checks it)
+        await page.waitForSelector(`${dialog} [data-testid="day-view"]`);
+        assert((await page.locator(`${dialog} [data-testid="day-pick"]`).count()) === 0, "no time picked for the next patient");
       };
       const book = async (page, item) => {
         await fillCase(page, item);
@@ -3294,15 +3326,6 @@ async function main() {
       assert((await textOf(page, "#add-case-title")) === "จองห้องผ่าตัด", "dialog title");
       // the department on a line of its own, under the surgeon's name
       assert((await textOf(page, '[data-testid="case-dept"]')) === "อายุรกรรมโรคไต", "the department line");
-      // two rooms to pick from, each named with the room it is that day: the nephrologist's department has no room of its
-      // own during the repair, so OR X is the mixed-department room OR 11; the dressing room is OR 10
-      assert((await choiceOf(page)) === "dept", "OR X picked to start with");
-      // the department above the room number (Pong, 15 Nov 2026)
-      const orX = await textOf(page, 'label:has([data-testid="case-room-dept"])');
-      assert(orX.endsWith("OR 11") && orX.length > "OR 11".length, `OR X: the department, then the room: ${orX}`);
-      // no ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026)
-      assert((await page.$$(`${dialog} input[name="shift"]`)).length === 0, "no ในเวลา/นอกเวลา choice");
-      assert((await textOf(page, 'label:has([data-testid="case-room-dressing"])')) === "ห้องทำแผลOR 10", `the dressing room: ${await textOf(page, 'label:has([data-testid="case-room-dressing"])')}`);
       assert((await dateValue(page, "case-date")) === "2026-11-16", "the form starts on Monday");
       assert((await textOf(page, '[data-testid="case-date"]')).includes("วันจันทร์ที่ 16 พฤศจิกายน 2569"), "the day written out in Thai");
       // the 15:00 rule in Pong's words, always, then the earliest day (Pong, 15 Nov 2026), a little larger than before
@@ -3325,6 +3348,56 @@ async function main() {
       await page.keyboard.press("Escape");
       await calendar.waitFor({ state: "detached" });
       assert(await page.isVisible(`${dialog}[open]`), "Escape closes the calendar, not the form");
+
+      // The day view (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar (just like in
+      // google calendar app) then show form input"): the half hours from 08:30 to 15:30 of the room the doctor's choice
+      // gives that day (the nephrologist's department has no room of its own during the repair: the mixed room OR 11).
+      await dayViewRead(page);
+      assert((await page.locator(`${dialog} [data-testid="day-slot"]`).count()) === 14, "14 half hours");
+      assert((await page.getAttribute(`${dialog} [data-testid="day-slot"] >> nth=0`, "data-time")) === "510", "from 08:30");
+      assert((await textOf(page, '[data-testid="case-day-room"]')) === "เวลาผ่าตัด · OR 11", `the room shown: ${await textOf(page, '[data-testid="case-day-room"]')}`);
+      assert((await page.locator(`${dialog} [data-testid="day-booking"]`).count()) === 0, "nothing booked yet");
+      assert((await textOf(page, '[data-testid="case-time-text"]')) === "แตะเวลาที่ต้องการ", "the footer asks for a time");
+      assert((await page.locator(`${dialog} [data-testid="case-hn"]`).count()) === 0, "the rest of the form waits");
+      // ต่อไป without a time asks for one
+      await page.click('[data-testid="case-next"]');
+      await page.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === "เลือกเวลาผ่าตัด");
+      // a tap gives an hour from there; the end handle drags it longer in 15-minute steps; the keyboard moves it
+      await page.click(`${dialog} [data-testid="day-slot"][data-time="540"]`);
+      const pickOf = async () => [await page.getAttribute('[data-testid="day-pick"]', "data-start"), await page.getAttribute('[data-testid="day-pick"]', "data-end")].join("-");
+      assert((await pickOf()) === "540-600", `09:00 to 10:00: ${await pickOf()}`);
+      assert((await page.locator('[data-testid="case-save-status"]').count()) === 0, "the message goes with the tap");
+      const handle = await page.locator('[data-testid="day-handle-end"]').boundingBox();
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2 + 30, { steps: 3 });
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2 + 44, { steps: 3 });
+      await page.mouse.up();
+      assert((await pickOf()) === "540-630", `dragged to 10:30: ${await pickOf()}`);
+      await page.focus('[data-testid="day-pick"] [role="button"]');
+      await page.keyboard.press("ArrowDown");
+      assert((await pickOf()) === "555-645", `the keyboard moves it 15 minutes: ${await pickOf()}`);
+      await page.keyboard.press("ArrowUp");
+      assert((await textOf(page, '[data-testid="case-time-text"]')) === "09:00–10:30 น. 1 ชม. 30 นาที", `the footer: ${await textOf(page, '[data-testid="case-time-text"]')}`);
+      await ownerShot(page, "booking-day-view.png");
+      await page.click('[data-testid="case-next"]');
+      await page.waitForSelector(`${dialog} [data-testid="case-when"]`);
+      assert((await textOf(page, '[data-testid="case-when-time"]')) === "09:00–10:30 น. · 1 ชม. 30 นาที", `the time above the rest: ${await textOf(page, '[data-testid="case-when-time"]')}`);
+      // its back arrow goes to the day view, the time kept; ต่อไป comes back
+      await page.click('[data-testid="add-case-back"]');
+      await page.waitForSelector(`${dialog} [data-testid="day-view"]`);
+      assert((await pickOf()) === "540-630", "the time kept");
+      await page.click('[data-testid="case-next"]');
+      await page.waitForSelector(`${dialog} [data-testid="case-when"]`);
+      // two rooms to pick from, each named with the room it is that day: OR X is the mixed-department room OR 11; the
+      // dressing room is OR 10
+      assert((await choiceOf(page)) === "dept", "OR X picked to start with");
+      // the department above the room number (Pong, 15 Nov 2026)
+      const orX = await textOf(page, 'label:has([data-testid="case-room-dept"])');
+      assert(orX.endsWith("OR 11") && orX.length > "OR 11".length, `OR X: the department, then the room: ${orX}`);
+      // no ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026)
+      assert((await page.$$(`${dialog} input[name="shift"]`)).length === 0, "no ในเวลา/นอกเวลา choice");
+      assert((await textOf(page, 'label:has([data-testid="case-room-dressing"])')) === "ห้องทำแผลOR 10", `the dressing room: ${await textOf(page, 'label:has([data-testid="case-room-dressing"])')}`);
 
       // nothing typed: the HN first, its boxes marked; then the operation, which is required
       await page.click('[data-testid="case-submit"]');
@@ -3377,6 +3450,7 @@ async function main() {
           await ownerShot(page, "booking-note.png");
         },
       });
+      await toDetails(page);
       assert((await page.inputValue('[data-testid="case-note"]')) === "", "the note is cleared for the next patient");
       assert((await db.query("SELECT note FROM cases WHERE hn = $1", [HN_TODAY])).rows[0]?.note === NOTE_SAVED, "the note as saved");
       // the doctor's own list shows it under the operation, line breaks kept
@@ -3438,15 +3512,16 @@ async function main() {
       // the dressing room and its answer in the doctor's own list
       assert((await textOf(page, '[data-testid="my-case-scrub"]')) === "ฝาก scrub ทำ", "the scrub answer in the doctor's list");
       const rows = await db.query(
-        "SELECT c.op_date::text AS d, c.room_id, c.hn, coalesce(c.operation, '') AS op, c.dressing, c.scrub_does FROM cases c JOIN users u ON u.id = c.surgeon_id WHERE u.first_name || ' ' || u.last_name = $1 ORDER BY c.id",
+        "SELECT c.op_date::text AS d, c.room_id, c.hn, coalesce(c.operation, '') AS op, c.dressing, c.scrub_does, c.start_min, c.end_min FROM cases c JOIN users u ON u.id = c.surgeon_id WHERE u.first_name || ' ' || u.last_name = $1 ORDER BY c.id",
         [RP.drX.name],
       );
       assert(
         JSON.stringify(rows.rows) ===
           JSON.stringify([
-            { d: "2026-11-16", room_id: "or-11", hn: HN_TODAY, op: "Perm cath insertion", dressing: false, scrub_does: null },
-            { d: "2026-11-17", room_id: "or-10", hn: HN_X_MISSING, op: "Dresing wound back", dressing: true, scrub_does: true },
-            { d: "2026-11-17", room_id: "or-11", hn: "7000002", op: "ORIF Lt distal radius", dressing: false, scrub_does: null },
+            { d: "2026-11-16", room_id: "or-11", hn: HN_TODAY, op: "Perm cath insertion", dressing: false, scrub_does: null, start_min: 540, end_min: 630 },
+            // the time picked on Monday after the first booking (08:30 up to the doctor's own 09:00) goes along to Tuesday
+            { d: "2026-11-17", room_id: "or-10", hn: HN_X_MISSING, op: "Dresing wound back", dressing: true, scrub_does: true, start_min: 510, end_min: 540 },
+            { d: "2026-11-17", room_id: "or-11", hn: "7000002", op: "ORIF Lt distal radius", dressing: false, scrub_does: null, start_min: 510, end_min: 570 },
           ]),
         `stored bookings: ${JSON.stringify(rows.rows)}`,
       );
@@ -3457,6 +3532,7 @@ async function main() {
       await page.click('[data-testid="add-case-button"]');
       await page.waitForSelector(`${dialog}[open]`);
       assert((await dateValue(page, "case-date")) === "2026-11-17", "Monday 14:59: Tuesday first");
+      await toDetails(page);
       await page.fill(`${dialog} input[data-testid="case-hn"]`, "7900003");
       await page.fill('[data-testid="case-operation"]', "AV fistula Lt arm");
       setNow("2026-11-16T15:00:30+07:00");
@@ -3464,6 +3540,7 @@ async function main() {
       const rule = "หลังเวลา 15.00 น. ระบบจะปิดรับการจอง ของวันทำการถัดไป";
       const cutOff = `${rule} · จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569`;
       await page.waitForFunction((want) => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === want, cutOff);
+      // back on the day view, the day moved on
       assert((await dateValue(page, "case-date")) === "2026-11-18", `moved on to Wednesday: ${await dateValue(page, "case-date")}`);
       assert((await textOf(page, '[data-testid="case-date-hint"]')) === `${rule} จองได้ตั้งแต่ วันพุธที่ 18 พ.ย. 2569`, "the hint says why");
       await ownerShot(page, "booking-cutoff.png");
@@ -3503,7 +3580,33 @@ async function main() {
       await pageY.goto(`${APP}/skh`, { waitUntil: "networkidle" });
       await pageY.click('[data-testid="add-case-button"]');
       await pageY.waitForSelector(`${dialog}[open]`);
-      await book(pageY, { date: "2026-11-17", hn: HN_Y_MATCH, operation: "Total thyroidectomy", room: "or-12" });
+      await book(pageY, { date: "2026-11-17", hn: HN_Y_MATCH, operation: "Total thyroidectomy", room: "or-12", start: 600 });
+      assert((await textOf(pageY, '[data-testid="my-case-time"]')) === "· 10:00–11:00 น.", `the time in the doctor's own list: ${await textOf(pageY, '[data-testid="my-case-time"]')}`);
+      // Pong, 27 Nov 2026: "No, a booked time is taken". Another booking of the same room shows it taken: its half hours
+      // cannot be tapped, the next tap stops at it, and a time taken while the form was open is refused by the server.
+      await pickDate(pageY, "case-date", "2026-11-17");
+      await dayViewRead(pageY);
+      assert((await pageY.locator(`${dialog} [data-testid="day-booking"][data-own]`).count()) === 1, "the doctor's own booking on the day view");
+      assert(await pageY.locator(`${dialog} [data-testid="day-slot"][data-time="600"]`).isDisabled(), "10:00 taken");
+      assert(await pageY.locator(`${dialog} [data-testid="day-slot"][data-time="630"]`).isDisabled(), "10:30 taken");
+      await pageY.click(`${dialog} [data-testid="day-slot"][data-time="570"]`);
+      assert((await pageY.getAttribute('[data-testid="day-pick"]', "data-end")) === "600", "09:30 gives half an hour, up to the booking");
+      // taken meanwhile, here by the doctor's own other booking from another phone (only a general surgeon's booking is
+      // in OR 12, and doctor Y is the e2e's only one)
+      await db.query(
+        "INSERT INTO cases (op_date, room_id, hn, operation, surgeon_id, line_sub, start_min, end_min) VALUES ('2026-11-17', 'or-12', '7900011', 'Lap chole', $1, $2, 570, 600)",
+        [RP.drY.userId, RP.drY.sub],
+      );
+      await pageY.click('[data-testid="case-next"]');
+      await pageY.fill(`${dialog} input[data-testid="case-hn"]`, "7900012");
+      await pageY.fill('[data-testid="case-operation"]', "Hernia");
+      await pageY.click('[data-testid="case-submit"]');
+      await pageY.waitForFunction(() => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === "เวลานี้มีการจองแล้ว เลือกเวลาอื่น");
+      await pageY.waitForSelector(`${dialog} [data-testid="day-pick"][data-clash]`);
+      assert((await pageY.locator(`${dialog} [data-testid="day-booking"]`).count()) === 2, "the day read again: the other booking shows");
+      await ownerShot(pageY, "booking-time-taken.png");
+      assert((await db.query("SELECT 1 FROM cases WHERE hn = '7900012'")).rowCount === 0, "nothing saved");
+      await db.query("DELETE FROM cases WHERE hn = '7900011'");
       await ctxY.close();
       setNow("2026-11-16T10:00:00+07:00");
 
@@ -3569,6 +3672,8 @@ async function main() {
       await ownerShot(board, "room-no-table.png");
       assert(JSON.stringify(await sheetRows(board)) === JSON.stringify([["booking", null, null]]), `OR 11: ${JSON.stringify(await sheetRows(board))}`);
       assert((await textOf(board, ".case-row p")).startsWith("Perm cath insertion"), "the booking's operation, now required");
+      // its time, for everyone (Pong, 27 Nov 2026)
+      assert((await textOf(board, '.case-row [data-testid="row-time"]')) === "09:00–10:30 น.", `the row's time: ${await textOf(board, '.case-row [data-testid="row-time"]')}`);
       // the row's icon alone at its right end (Pong, 15 Nov 2026: "no text"), with the longer name for a screen reader
       const icon = board.locator('.case-row [data-testid="row-icon"]');
       assert((await icon.getAttribute("data-source")) === "booking" && (await icon.locator("svg").count()) === 1, "the booking's icon");
@@ -3849,7 +3954,8 @@ async function main() {
         }),
       );
       assert(JSON.stringify(layout.map((row) => row.lines)) === JSON.stringify([
-        ["row-op", "row-patient", "row-hn", "row-surgeon", "row-booked-at"],
+        // a booking's time under the surgeon (Pong, 27 Nov 2026); HOSxP's own cases have none
+        ["row-op", "row-patient", "row-hn", "row-surgeon", "row-time", "row-booked-at"],
         ["row-op", "row-patient", "row-hn", "row-surgeon"],
         ["row-op", "row-patient", "row-hn", "row-surgeon"],
       ]), `the rows' lines: ${JSON.stringify(layout)}`);
@@ -4402,9 +4508,12 @@ async function main() {
       assert(await page.locator('[data-testid="case-date-calendar"] [data-date="2026-12-01"]').isDisabled(), "not today");
       await ownerShot(page, "row-actions-move.png");
       await pickDate(page, "case-date", "2026-12-04");
+      // a booking from before the form asked takes a time on its new day
+      await toDetails(page, 600);
       await page.click('[data-testid="case-submit"]');
       await saved("เลื่อนไป OR 12 วันศุกร์ที่ 4 ธ.ค. 2569 แล้ว");
       assert((await queued(first)).date === "2026-12-04", "moved in the database");
+      assert(JSON.stringify((await db.query("SELECT start_min, end_min FROM cases WHERE id = $1", [first])).rows[0]) === JSON.stringify({ start_min: 600, end_min: 660 }), "with its time");
       await closeForm();
       await page.waitForFunction(() => document.querySelectorAll(".room-sheet .case-row").length === 1);
 
@@ -4444,14 +4553,17 @@ async function main() {
       await page.click('[data-testid="booking-again"]');
       await page.waitForSelector(`${dialog}[open]`);
       assert((await textOf(page, "#add-case-title")) === "จองซ้ำวันอื่น");
-      assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7100002", "the same patient");
       assert((await dateValue(page, "case-date")) === "2026-12-02", "on the first day that can be booked");
       await pickDate(page, "case-date", "2026-12-04");
+      // Friday 10:00 is the moved booking's: the first free time is 08:30
+      await toDetails(page);
+      assert((await textOf(page, '[data-testid="case-when-time"]')) === "08:30–09:30 น. · 1 ชม.", await textOf(page, '[data-testid="case-when-time"]'));
+      assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7100002", "the same patient");
       await page.click('[data-testid="case-submit"]');
       await saved("จอง OR 12 วันศุกร์ที่ 4 ธ.ค. 2569 แล้ว");
-      assert((await page.inputValue(`${dialog} input[data-testid="case-hn"]`)) === "7100002", "kept for the next day of a series");
-      // a second tap books nothing more: the patient is on Friday in that room already
-      await page.click('[data-testid="case-submit"]');
+      // back on the day view for the next day of a series, the patient kept: ต่อไป on the same day books nothing more
+      await page.waitForSelector(`${dialog} [data-testid="day-view"]`);
+      await page.click('[data-testid="case-next"]');
       await page.waitForFunction(
         (text) => document.querySelector('[data-testid="case-save-status"]')?.textContent?.trim() === text,
         "วันนั้นจองผู้ป่วยคนนี้แล้ว เลือกวันอื่น",
@@ -4566,6 +4678,7 @@ async function main() {
       // something is typed, and the real button, room or icon where the coach asks for a tap.
       const taps = {
         book: '[data-testid="add-case-button"]',
+        "form-next": '[data-testid="case-next"]',
         "form-submit": '[data-testid="case-submit"]',
         "form-close": '[data-testid="add-case-close"]',
         room: "#or-12 .fp-floor",
@@ -4583,6 +4696,7 @@ async function main() {
         "plan-symbols": "tutorial-plan-symbols.png",
         priority: "tutorial-priority.png",
         book: "tutorial-book.png",
+        "form-time": "tutorial-time.png",
         "form-hn": "tutorial-hn.png",
         "my-row": "tutorial-my-row.png",
         "my-manage": "tutorial-my-manage.png",

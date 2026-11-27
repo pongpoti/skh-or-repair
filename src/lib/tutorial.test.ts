@@ -13,6 +13,8 @@ const TODAY = "2026-11-19"; // the Thursday before: the made-up doctors booked o
 const mine = (more: Partial<AddedCase> = {}): AddedCase => ({
   id: TUTORIAL_ME,
   date: DAY,
+  start: null,
+  end: null,
   roomId: "or-12",
   hn: "1234567",
   operation: "Lap chole",

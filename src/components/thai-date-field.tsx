@@ -551,7 +551,8 @@ export function ThaiDateField({
   openSignal?: object | null;
 }): JSX.Element {
   const fieldRef = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
+  // Open from the start when mounted with a signal (the booking form's day view, shown once the dialog opens).
+  const [open, setOpen] = useState(() => openSignal !== null);
   // Whether the keyboard opened the calendar, which moves the focus into it.
   const [byKey, setByKey] = useState(false);
   const [prevSignal, setPrevSignal] = useState(openSignal);

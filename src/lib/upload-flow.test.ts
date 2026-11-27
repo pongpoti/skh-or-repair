@@ -344,6 +344,8 @@ function booking(more: Partial<AddedCase>): AddedCase {
   return {
     id: String(nextId),
     date: THURSDAY,
+    start: null,
+    end: null,
     roomId: "or-12",
     hn: `7700${nextId}`,
     operation: "",

@@ -1,3 +1,4 @@
+import { DAY_END, DAY_START } from "./booking-time.ts";
 import { bookedAtText, type AddedCase } from "./added-cases.ts";
 import { allocationFor, DEPARTMENTS, type DeptCode } from "./allocation.ts";
 import { buildBoardRows, type BoardRow, type BoardRows, type BoardViewer, type WorkbookCase } from "./board-rows.ts";
@@ -207,6 +208,8 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
     const flagged = r % 2 === 0;
     const emergency = code === "EMER";
     const dressing = code === "INFECT";
+    // The booked cases' times, one after another from 08:30, 30 or 45 minutes each; one that would run past 15:30 has none.
+    let clock = DAY_START;
     for (let i = 0; i < count; i += 1) {
       const item = list[(mix + i) % list.length];
       const surgeon = SURGEONS[(r * 3 + i) % SURGEONS.length];
@@ -230,6 +233,9 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
         position,
       });
       if (kind === "matched") {
+        const length = (seed(`${date}|${room.id}|${i}|length`) % 2) * 15 + 30;
+        const time = shift === "in" && clock + length <= DAY_END ? { start: clock, end: clock + length } : { start: null, end: null };
+        if (time.end !== null) clock = time.end;
         bookings.push({
           id,
           date,
@@ -245,6 +251,7 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
           surgeon: surgeon.name,
           subtype: item.dept,
           bookedAt: bookedAtFor(date, seed(`${date}|${room.id}|${i}`)),
+          ...time,
         });
       }
     }

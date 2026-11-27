@@ -1,4 +1,5 @@
 import type { DeptCode } from "./allocation.ts";
+import { checkTime, overlaps, TIME_MISSING_TEXT, type TimeRange } from "./booking-time.ts";
 import { addDays, thaiDate, workdayIndex } from "./days.ts";
 import { checkHn, normalizeHn } from "./hn.ts";
 import { holidayIn, nextWorkdayIn, type Holiday } from "./holidays.ts";
@@ -74,7 +75,46 @@ export type CaseInput = {
    * as NULL). Everyone who opens the board sees it on the booking's row (lib/board-rows.ts).
    */
   note: string;
+  /**
+   * The booking's time on its day (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar"),
+   * minutes after midnight on 15-minute steps from 08:30 to 15:30 (lib/booking-time.ts); both null for a booking made
+   * before the form asked. Two bookings in one room never share a minute (timeClash).
+   */
+  start: number | null;
+  end: number | null;
 };
+
+/**
+ * A booking as the day view shows it (components/day-view.tsx): where it is now (bookedRoom), its time, its operation and
+ * its surgeon, never the HN. `own` marks the viewing doctor's.
+ */
+export type DaySlot = {
+  id: string;
+  roomId: string;
+  start: number | null;
+  end: number | null;
+  operation: string;
+  surgeon: string;
+  own: boolean;
+};
+
+/** The day's bookings as the day view shows them to the doctor `viewerId`. */
+export function daySlots(day: readonly AddedCase[], periods: RepairPeriods, viewerId: string): DaySlot[] {
+  return day.map((booking) => ({
+    id: booking.id,
+    roomId: bookedRoom(booking, periods).roomId,
+    start: booking.start,
+    end: booking.end,
+    operation: booking.operation || NO_OPERATION_LABEL,
+    surgeon: booking.surgeon,
+    own: booking.surgeonId === viewerId,
+  }));
+}
+
+/** A booking's time, or null for one made before the form asked. */
+export function timeOf(booking: Pick<CaseInput, "start" | "end">): TimeRange | null {
+  return booking.start !== null && booking.end !== null ? { start: booking.start, end: booking.end } : null;
+}
 
 /** A case from the cases table, as the board and the form show it. */
 export type AddedCase = Omit<CaseInput, "hn" | "dressing"> & {
@@ -123,7 +163,7 @@ export function bookedAtText(iso: string): string {
 }
 
 /** The form field an error is about, for the form to mark and focus. */
-export type CaseField = "date" | "hn" | "operation" | "room" | "shift" | "note";
+export type CaseField = "date" | "time" | "hn" | "operation" | "room" | "shift" | "note";
 
 /** `earliest` is set when the day was refused for being too soon, so the form can move its calendar on. */
 export type CheckedCase =
@@ -299,17 +339,47 @@ export function borrowsRoom(subtype: string | null | undefined, operation: strin
  * Which of a department's rooms (`rooms`, deptRooms) a doctor's new booking takes on `date`, among the day's bookings
  * (`day`, every doctor's, as lib/cases.ts listCasesOn gives them): the room of the doctor's own earlier booking there,
  * so one surgeon's list stays in one room, else the one with the fewest bookings (on a tie the first in number order).
- * Pong, 22 Nov 2026: "How to deal with matching cases of dept that has 2 OR rooms ?"
+ * Pong, 22 Nov 2026: "How to deal with matching cases of dept that has 2 OR rooms ?" With a `time`, the rooms free then
+ * come first (the doctor's own room is kept even when it is not: timeClash refuses the time then).
  */
-export function roomAmong(rooms: readonly string[], surgeonId: string, date: string, day: readonly AddedCase[], periods: RepairPeriods): string {
+export function roomAmong(
+  rooms: readonly string[],
+  surgeonId: string,
+  date: string,
+  day: readonly AddedCase[],
+  periods: RepairPeriods,
+  time: TimeRange | null = null,
+): string {
   const placedNow = day
     .filter((booking) => booking.date === date)
     .map((booking) => ({ booking, room: bookedRoom(booking, periods) }))
     .filter(({ room }) => !room.dressing && rooms.includes(room.roomId));
   const own = placedNow.find(({ booking }) => booking.surgeonId === surgeonId);
   if (own) return own.room.roomId;
+  const free = time ? rooms.filter((room) => !timeClash(time, room, date, day, periods)) : [];
+  const among = free.length > 0 ? free : rooms;
   const count = (room: string) => placedNow.filter((item) => item.room.roomId === room).length;
-  return rooms.reduce((best, room) => (count(room) < count(best) ? room : best));
+  return among.reduce((best, room) => (count(room) < count(best) ? room : best));
+}
+
+/**
+ * Whether `time` on `date` shares a minute with another booking in room `roomId` (where each booking is now, bookedRoom),
+ * leaving out the booking `selfId` (an edit's own). Pong, 27 Nov 2026: one room runs one case at a time.
+ */
+export function timeClash(
+  time: TimeRange | null,
+  roomId: string,
+  date: string,
+  day: readonly AddedCase[],
+  periods: RepairPeriods,
+  selfId: string | null = null,
+): boolean {
+  if (time === null) return false;
+  return day.some((booking) => {
+    if (booking.date !== date || booking.id === selfId) return false;
+    const other = timeOf(booking);
+    return other !== null && overlaps(other, time) && bookedRoom(booking, periods).roomId === roomId;
+  });
 }
 
 /**
@@ -388,12 +458,12 @@ export const REQUEUE_TEXT = "เปลี่ยนวัน ห้อง หร�
  * What an edit changes (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete"). `requeue`: a
  * new day, another room (the doctor's other choice of room, or a name that sends the case elsewhere, as an endoscopy to
  * the SCOPE room) or another patient (HN) counts as a new booking, at the back of its room's queue ("จองก่อน ได้คิวก่อน"),
- * so an early booking cannot hold a place for another case; fixing the operation's name, the note or the scrub answer
- * keeps the place. The room is compared with where the booking is now (bookedRoom), so an admin's move of the repair's
+ * so an early booking cannot hold a place for another case; fixing the operation's name, the note, the scrub answer or
+ * the time keeps the place (a room's cases go by their times on the board; the queue orders those without one and ties). The room is compared with where the booking is now (bookedRoom), so an admin's move of the repair's
  * dates is no change of the doctor's. `moved`: the room or the day changed. `changed`: anything is saved at all.
  */
 export function bookingChange(
-  before: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "note" | "subtype">,
+  before: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "note" | "subtype" | "start" | "end">,
   after: CaseInput,
   periods: RepairPeriods,
 ): { changed: boolean; requeue: boolean; moved: boolean } {
@@ -407,6 +477,8 @@ export function bookingChange(
     after.roomId !== before.roomId ||
     after.operation !== before.operation ||
     after.note !== before.note ||
+    after.start !== before.start ||
+    after.end !== before.end ||
     (after.dressing && after.scrubDoes !== before.scrubDoes);
   return { changed, requeue, moved };
 }
@@ -497,7 +569,7 @@ export type BookingContext = {
    * The doctor's own booking being edited, when the input is its new state (editCase): its own day needs none of a new
    * booking's day checks, and once that day is closed (bookingState) only the note may change.
    */
-  editing?: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "subtype">;
+  editing?: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "subtype" | "start" | "end">;
 };
 
 /**
@@ -525,6 +597,14 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
     if (holiday) return refuse("date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
   }
 
+  // The time, picked on the day view before the rest (Pong, 27 Nov 2026): a new booking needs one; an edit of a booking
+  // made before the form asked may keep none.
+  const time = checkTime(raw.start, raw.end);
+  if (!time.ok) return refuse("time", time.error);
+  if (time.time === null && !(editing && editing.start === null)) return refuse("time", TIME_MISSING_TEXT);
+  const start = time.time?.start ?? null;
+  const end = time.time?.end ?? null;
+
   if (closed && editing) {
     // Only the note: the HN, the operation and the room choice must be the booking's own, as the form leaves them (locked;
     // a booking from before they were required may have no HN or name). The room stays where the day's list has it.
@@ -535,7 +615,18 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
     const room = bookedRoom(editing, periods);
     return {
       ok: true,
-      value: { date, roomId: room.roomId, hn: editing.hn ?? "", operation: editing.operation, shift: "in", dressing: room.dressing, scrubDoes: room.dressing ? editing.scrubDoes : null, note: note.note },
+      value: {
+        date,
+        roomId: room.roomId,
+        hn: editing.hn ?? "",
+        operation: editing.operation,
+        shift: "in",
+        dressing: room.dressing,
+        scrubDoes: room.dressing ? editing.scrubDoes : null,
+        note: note.note,
+        start: editing.start,
+        end: editing.end,
+      },
     };
   }
 
@@ -566,7 +657,7 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   // Last, as in the form.
   const note = checkNote(raw.note);
   if (!note.ok) return refuse("note", note.error);
-  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note: note.note } };
+  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note: note.note, start, end } };
 }
 
 function checkNote(raw: unknown): { ok: true; note: string } | { ok: false; error: string } {
@@ -587,11 +678,12 @@ function sameHn(raw: unknown, own: string | null): boolean {
 }
 
 /**
- * The first of the HN, the operation and the room choice (with its scrub answer) that the form's input changed from the
- * booking being edited, or null when it changed none: a closed day's edit may change only the note. An empty HN or name
+ * The first of the time, the HN, the operation and the room choice (with its scrub answer) that the form's input changed
+ * from the booking being edited, or null when it changed none: a closed day's edit may change only the note. An empty HN or name
  * is the same as a booking's missing one.
  */
 function changedField(raw: Record<string, unknown>, editing: NonNullable<BookingContext["editing"]>, periods: RepairPeriods): CaseField | null {
+  if ((raw.start ?? null) !== editing.start || (raw.end ?? null) !== editing.end) return "time";
   const blank = raw.hn === undefined || raw.hn === null || raw.hn === "";
   if (blank ? editing.hn !== null : !sameHn(raw.hn, editing.hn)) return "hn";
   const operation = cleanOperation(typeof raw.operation === "string" ? raw.operation : "");
@@ -603,16 +695,27 @@ function changedField(raw: Record<string, unknown>, editing: NonNullable<Booking
 }
 
 /**
- * The board with the doctors' added cases for its day after the imported ones in each room, in the order they were
- * added. Cases in a room that is not in use for operations that day (closed, or a recovery or instrument room during
- * the repair) are left off.
+ * Bookings in a room's order: by their time (Pong, 27 Nov 2026), then those without one in the order given (the queue).
+ * Stable: bookings at the same time keep the order given.
+ */
+export function byTime<T extends Pick<CaseInput, "start">>(bookings: readonly T[]): T[] {
+  return bookings
+    .map((item, index) => ({ item, index }))
+    .sort((a, b) => (a.item.start ?? Infinity) - (b.item.start ?? Infinity) || a.index - b.index)
+    .map(({ item }) => item);
+}
+
+/**
+ * The board with the doctors' added cases for its day after the imported ones in each room, by their time and then in
+ * the order they were added. Cases in a room that is not in use for operations that day (closed, or a recovery or
+ * instrument room during the repair) are left off.
  */
 export function withAddedCases(board: DayBoard, added: readonly AddedCase[], periods: RepairPeriods): DayBoard {
   const order = new Map<string, number>();
   for (const item of board.operations) order.set(item.roomId, Math.max(order.get(item.roomId) ?? 0, item.order));
 
   const operations: Operation[] = [...board.operations];
-  for (const item of added) {
+  for (const item of byTime(added)) {
     if (item.date !== board.date || roomUse(item.roomId, board.date, periods) !== "open") continue;
     const slot = (order.get(item.roomId) ?? 0) + 1;
     order.set(item.roomId, slot);

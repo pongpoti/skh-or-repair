@@ -10,7 +10,7 @@ import { demoBoardRows } from "@/lib/demo-schedule";
 import { addDays, parseDay, todayIso, weekDates } from "@/lib/days";
 import { holidaysBetween } from "@/lib/holidays";
 import { currentRepairPeriods } from "@/lib/repair-store";
-import { previewAddCase, previewEditCase, previewMine, previewRemoveCase, previewRestoreCase } from "./actions";
+import { previewAddCase, previewDay, previewEditCase, previewMine, previewRemoveCase, previewRestoreCase } from "./actions";
 import { SAMPLE_DOCTOR_ID, sampleCases } from "./sample";
 
 export const dynamic = "force-dynamic";
@@ -118,7 +118,7 @@ export default async function PreviewPage({
     const name = "ตัวอย่าง หนึ่ง";
     const subtype = params.dept?.trim() || "GENSX";
     const earliest = earliestBookingDay(day.today, day.minutes, holidays);
-    const context = { today: day.today, earliest, periods, subtype, holidays, name };
+    const context = { today: day.today, earliest, periods, subtype, holidays, name, sample: Boolean(params.sample) };
     adding = {
       doctor: { name, subtype },
       today: day.today,
@@ -130,6 +130,7 @@ export default async function PreviewPage({
       onEdit: previewEditCase.bind(null, context),
       onRemove: previewRemoveCase,
       onRestore: previewRestoreCase,
+      onDay: previewDay.bind(null, context),
     };
   }
 

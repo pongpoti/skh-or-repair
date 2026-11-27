@@ -36,6 +36,8 @@ function booking(more: Partial<AddedCase>): AddedCase {
   return {
     id: String(next),
     date: DAY,
+    start: null,
+    end: null,
     roomId: "or-12",
     hn: `B${next}`,
     operation: "",
@@ -515,4 +517,32 @@ test("a department with two rooms: bookings stay where the doctor saw them, and 
   const where = Object.fromEntries(after.rows.map((row) => [row.procedure, row.roomId]));
   assert.deepEqual(where, { "Lap appendectomy": "or-5", Herniorrhaphy: "or-5", "Lap chole": "or-2", Excision: "or-2", Thyroidectomy: "or-5" });
   assert.equal(after.matched, 2);
+});
+
+test("booked cases go by their time, untimed bookings after in booking order, then the cases nobody booked; each row says its time", () => {
+  const late = booking({ start: 660, end: 720, hn: "5550001", operation: "Late" });
+  const untimed = booking({ hn: "5550002", operation: "Untimed" });
+  const early = booking({ start: 540, end: 600, hn: "5550003", operation: "Early" });
+  const middle = booking({ start: 600, end: 630, hn: "5550004", operation: "Middle" });
+  // HOSxP's list in its own order, the case nobody booked first: the booked times still lead.
+  const workbook = [
+    wb({ hn: "5550009", operation: "Nobody's", position: 1 }),
+    ...[late, untimed, early, middle].map((item, index) => wb({ hn: item.hn ?? "", operation: item.operation, position: index + 2 })),
+  ];
+  for (const uploaded of [false, true]) {
+    const rows = build(uploaded ? workbook : null, [late, untimed, early, middle]).rows.filter((row) => row.roomId === "or-12");
+    assert.deepEqual(
+      rows.map((row) => [row.procedure, row.order, row.time ?? null]),
+      [
+        ["Early", 1, "09:00–10:00"],
+        ["Middle", 2, "10:00–10:30"],
+        ["Late", 3, "11:00–12:00"],
+        ["Untimed", 4, null],
+        ...(uploaded ? [["Nobody's", 5, null]] : []),
+      ],
+      uploaded ? "uploaded" : "before the upload",
+    );
+  }
+  // Everyone sees the time, not only the doctor and MX.
+  assert.equal(build(null, [early], NOBODY).rows[0].time, "09:00–10:00");
 });

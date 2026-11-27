@@ -94,7 +94,7 @@ function booking(
   operation: string,
   hn: string,
   bookedAt: string,
-  more: { dressing?: boolean; scrubDoes?: boolean | null; note?: string } = {},
+  more: { dressing?: boolean; scrubDoes?: boolean | null; note?: string; time?: [number, number] } = {},
 ): AddedCase | null {
   const dressing = more.dressing ?? false;
   const room = bookingRoom(subtype, operation, date, periods, dressing ? "dressing" : "dept");
@@ -113,6 +113,8 @@ function booking(
     surgeon: who.name,
     subtype,
     bookedAt,
+    start: more.time?.[0] ?? null,
+    end: more.time?.[1] ?? null,
   };
 }
 
@@ -178,9 +180,19 @@ export function tutorialCases({
   const dressingHn = hn();
 
   const made = [
-    booking("tutorial-gone", date, periods, BONE, other, other === "ORTHO" ? "ORIF distal radius, left" : "Herniorrhaphy, right inguinal", goneHn, eveAt(today, 9, 12)),
-    booking("tutorial-dressing", date, periods, SKIN, "PLASTIC", "D/S + VAC, sacral wound", dressingHn, eveAt(today, 10, 5), { dressing: true, scrubDoes: true }),
-    booking("tutorial-colleague", date, periods, KIND, doctor.subtype, LONG_OPERATION, colleagueHn, eveAt(today, 11, 41), { note: "เตรียมเลือด 2 unit\nขอ ultrasound" }),
+    booking("tutorial-gone", date, periods, BONE, other, other === "ORTHO" ? "ORIF distal radius, left" : "Herniorrhaphy, right inguinal", goneHn, eveAt(today, 9, 12), {
+      time: [9 * 60, 10 * 60 + 30],
+    }),
+    booking("tutorial-dressing", date, periods, SKIN, "PLASTIC", "D/S + VAC, sacral wound", dressingHn, eveAt(today, 10, 5), {
+      dressing: true,
+      scrubDoes: true,
+      time: [9 * 60 + 30, 10 * 60],
+    }),
+    // The morning of the doctor's own room: the practice booking takes a time after it.
+    booking("tutorial-colleague", date, periods, KIND, doctor.subtype, LONG_OPERATION, colleagueHn, eveAt(today, 11, 41), {
+      note: "เตรียมเลือด 2 unit\nขอ ultrasound",
+      time: [8 * 60 + 30, 10 * 60 + 30],
+    }),
   ].filter((item): item is AddedCase => item !== null);
   const bookings = mine ? [...made, mine] : made;
 

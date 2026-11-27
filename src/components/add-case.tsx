@@ -3,8 +3,9 @@
 import { useRouter } from "next/navigation";
 import { flushSync } from "react-dom";
 import { Fragment, useEffect, useRef, useState, useTransition, type CSSProperties } from "react";
-import type { CaseResult } from "@/app/(board)/actions";
+import type { CaseResult, DayResult } from "@/app/(board)/actions";
 import { BACK_ICON } from "@/components/booking-actions";
+import { DayView } from "@/components/day-view";
 import { HnField } from "@/components/hn-field";
 import { InlineStatus } from "@/components/inline-status";
 import { ThaiDateField, type DayState } from "@/components/thai-date-field";
@@ -39,10 +40,13 @@ import {
   SCRUB_YES,
   SAME_DAY_TEXT,
   scrubTag,
+  timeOf,
   type AddedCase,
   type CaseField,
+  type DaySlot,
   type RoomChoice,
 } from "@/lib/added-cases";
+import { busyTimes, isFree, lengthText, rangeText, TIME_TAKEN_TEXT, type TimeRange } from "@/lib/booking-time";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate } from "@/lib/days";
 import { displayHn, normalizeHn } from "@/lib/hn";
@@ -58,6 +62,13 @@ const DIALOG = `${DIALOG_LOOK} w-[min(32rem,calc(100%-1.5rem))]`;
 const QUESTION_DIALOG = `${DIALOG_LOOK} w-[min(24rem,calc(100%-2.5rem))]`;
 
 const UNSAVED = "บันทึกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองใหม่";
+const DAY_UNREAD = "โหลดการจองไม่ได้ ลองใหม่";
+
+const CHEVRON = (dir: "left" | "right") => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={dir === "left" ? "m15 18-6-6 6-6" : "m9 18 6-6-6-6"} />
+  </svg>
+);
 
 /** A picked radio: brown edge and tint. The input itself is visually hidden but still takes focus and arrow keys. */
 const OPTION =
@@ -98,7 +109,12 @@ function DeptTag({ dept }: { dept: Department | null }) {
 const later = (a: string, b: string | null) => (b && b > a ? b : a);
 
 /**
- * The doctor's booking of a room for one patient, in a dialog (Pong, 15 Nov 2026): the day, in Thai with a calendar
+ * The doctor's booking of a room for one patient, in a dialog, in two steps (Pong, 27 Nov 2026: "select time (time range
+ * 8.30 to 15.30) on day view of calendar (just like in google calendar app) then show form input"): first the day and the
+ * time on a day view (components/day-view.tsx) that shows the bookings already in the room, a booked time being taken
+ * (Pong's pick, 27 Nov 2026); then ต่อไป shows the rest, under the day and time with เปลี่ยน to go back.
+ *
+ * The rest (Pong, 15 Nov 2026): the day, in Thai with a calendar
  * that offers only the days that can be booked (from the next workday, or the one after once 15:00 has passed, up to
  * 60 days ahead, never a weekend or holiday); the patient's 7-digit HN on its own card (the HOSxP workbook's case is
  * matched by it); the operation's name, required; the room, the doctor's own choice between their department's room
@@ -133,6 +149,7 @@ export function AddCase({
   onAdd,
   onEdit,
   onRemove,
+  onDay,
 }: {
   /** Set to a new object to open the dialog (CaseRequest). */
   request: CaseRequest | null;
@@ -152,6 +169,8 @@ export function AddCase({
   onAdd: (input: unknown) => Promise<CaseResult>;
   onEdit: (id: string, input: unknown) => Promise<CaseResult>;
   onRemove: (id: string) => Promise<CaseResult>;
+  /** The bookings of one day, every room's, for the day view (app/(board)/actions.ts dayBookings). */
+  onDay: (date: string) => Promise<DayResult>;
 }) {
   const router = useRouter();
   const ref = useRef<HTMLDialogElement>(null);
@@ -196,6 +215,15 @@ export function AddCase({
   const [editing, setEditing] = useState<AddedCase | null>(null);
   // Opens the calendar (a move): a new object each time.
   const [calendarOpen, setCalendarOpen] = useState<object | null>(null);
+  // The time picked on the day view (null until one is).
+  const [time, setTime] = useState<TimeRange | null>(null);
+  // The form's two steps: the day view, then the rest. `opened`: the one it opened on (an edit of a booking's details
+  // opens on them, and its back arrow then goes to the row's sheet).
+  const [step, setStep] = useState<"time" | "details">("time");
+  const [opened, setOpened] = useState<"time" | "details">("time");
+  // The day view's bookings by day, as last read; `version` reads them again (on each opening, and after a save).
+  const [days, setDays] = useState<Record<string, { version: number; slots: DaySlot[]; error: string }>>({});
+  const [version, setVersion] = useState(0);
 
   // The server's list wins whenever the page reloads (another device may have added or removed a case).
   const [prevInitial, setPrevInitial] = useState(initialMine);
@@ -270,6 +298,12 @@ export function AddCase({
     setNote(from?.note ?? "");
     setChoice(picked);
     setScrubDoes(picked === "dressing" && typeof from?.scrubDoes === "boolean" ? from.scrubDoes : null);
+    // An edit keeps its time; booking again tries the same time on the other day (the day view drops it if taken).
+    setTime(from ? timeOf(from) : null);
+    const opensOn = next.mode === "edit" && next.focus === "details" ? "details" : "time";
+    setStep(opensOn);
+    setOpened(opensOn);
+    setVersion((current) => current + 1);
     setInvalid(null);
     setError("");
     setDone("");
@@ -282,6 +316,23 @@ export function AddCase({
     setPrevRequest(request);
     if (request) begin(request);
   }
+
+  // The day view's bookings: read for the day shown whenever it changes, on each opening and after each save.
+  const isOpen = request !== null;
+  useEffect(() => {
+    if (!isOpen) return;
+    let live = true;
+    const keep = (slots: DaySlot[], error: string) => {
+      if (live) setDays((all) => ({ ...all, [date]: { version, slots, error } }));
+    };
+    onDay(date).then(
+      (result) => (result.ok ? keep(result.slots, "") : keep([], result.error)),
+      () => keep([], DAY_UNREAD),
+    );
+    return () => {
+      live = false;
+    };
+  }, [isOpen, date, version, onDay]);
 
   useEffect(() => {
     const dialog = ref.current;
@@ -301,7 +352,13 @@ export function AddCase({
   }
 
   function focusField(field: CaseField | undefined) {
-    if (field === "hn") hnRef.current?.focus();
+    if (field === "time") {
+      const dialog = ref.current;
+      (
+        dialog?.querySelector<HTMLElement>('[data-testid="day-pick"] [role="button"]') ??
+        dialog?.querySelector<HTMLElement>('[data-testid="day-slot"]:enabled')
+      )?.focus();
+    } else if (field === "hn") hnRef.current?.focus();
     else if (field === "operation") operationRef.current?.focus();
     else if (field === "note") noteRef.current?.focus();
     else if (field === "date") dateRef.current?.querySelector<HTMLElement>("button")?.focus();
@@ -371,9 +428,11 @@ export function AddCase({
     if (pending || !field) return;
     focusAfter.current = null;
     focusField(field);
-  }, [pending]);
+  }, [pending, step]);
 
   function refuse(message: string, field: CaseField | undefined, saving = false) {
+    // The day and the time are on the day view.
+    if (field === "date" || field === "time") setStep("time");
     setAbout("save");
     setError(message);
     setDone("");
@@ -384,9 +443,13 @@ export function AddCase({
 
   function save(event: React.FormEvent) {
     event.preventDefault();
+    if (step === "time") {
+      next();
+      return;
+    }
     // No ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026): a booking is saved as ในเวลา, and a HOSxP case it matches keeps
     // its own เวร on the board.
-    const input = { date, hn, operation, room: choice, scrubDoes, note };
+    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null };
     const edit = mode === "edit" ? editing : null;
     const checked = checkCase(input, {
       today,
@@ -405,12 +468,24 @@ export function AddCase({
       refuse(SAME_DAY_TEXT, "date");
       return;
     }
+    // Taken in the room picked (the other room's day may differ from the day view's): back to the day view.
+    if (time && !locked && !isFree(time, busy)) {
+      refuse(TIME_TAKEN_TEXT, "time");
+      return;
+    }
     setInvalid(null);
     startTransition(async () => {
       try {
         // The checked value carries the HN normalised and the room; the server checks it all again and works out the
         // room itself, from the doctor's choice and their department as the database has it.
         const result = edit ? await onEdit(edit.id, input) : await onAdd(input);
+        if (!result.ok && result.field === "time") {
+          // Another doctor took the time meanwhile: the day view reads the day again and shows it taken.
+          setVersion((current) => current + 1);
+          refuse(result.error, "time", true);
+          if (result.mine) setMine(result.mine);
+          return;
+        }
         if (!result.ok && result.earliest) {
           // 15:00 passed while the form was open: the calendar moves on with the server's first day.
           setMovedOn(result.earliest);
@@ -421,15 +496,24 @@ export function AddCase({
           return;
         }
         apply(result, "save");
+        // The day view shows the saved booking.
+        if (result.ok) setVersion((current) => current + 1);
         // An edit keeps what it saved, and booking again keeps the patient for the next day of a series.
         if (result.ok && mode === "new") {
-          // Ready for the next patient on the same day, whose room is chosen afresh.
+          // Ready for the next patient on the same day: back on the day view, whose room is chosen afresh.
           setHn("");
           setOperation("");
           setNote("");
           setChoice("dept");
           setScrubDoes(null);
-          focusAfter.current = "hn";
+          setTime(null);
+          setStep("time");
+          focusAfter.current = "time";
+        }
+        // Booking again: the next day of a series is picked on the day view, the patient and the time kept.
+        if (result.ok && mode === "again") {
+          setStep("time");
+          focusAfter.current = "date";
         }
       } catch {
         setAbout("save");
@@ -437,6 +521,57 @@ export function AddCase({
         setDone("");
       }
     });
+  }
+
+  /**
+   * ต่อไป on the day view: the day and the time are checked as a save checks them, then the rest of the form shows (its
+   * other fields are checked on the save).
+   */
+  function next() {
+    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null };
+    const edit = mode === "edit" ? editing : null;
+    const checked = checkCase(input, {
+      today,
+      earliest: first,
+      periods,
+      subtype: doctor.subtype,
+      holidays,
+      ...(edit ? { editing: { ...edit, subtype: doctor.subtype } } : {}),
+    });
+    if (!checked.ok && (checked.field === "date" || checked.field === "time")) {
+      refuse(checked.error, checked.field);
+      return;
+    }
+    if (mode === "again" && bookedAlready(mine, { date, hn, choice }, periods)) {
+      refuse(SAME_DAY_TEXT, "date");
+      return;
+    }
+    if (time && !locked && !isFree(time, busy)) {
+      refuse(TIME_TAKEN_TEXT, "time");
+      return;
+    }
+    if (invalid === "date" || invalid === "time" || about === "save") {
+      setInvalid(null);
+      setError("");
+      setDone("");
+    }
+    setStep("details");
+    // Back on the day view later, the calendar stays shut.
+    setCalendarOpen(null);
+    focusAfter.current = hn ? "operation" : "hn";
+  }
+
+  /** The workday before or after the one shown, among the days that can be booked (an edit's own day too). */
+  function dayStep(direction: 1 | -1): string | null {
+    const from = editing && editing.date < first ? editing.date : first;
+    let day = date;
+    for (let tries = 0; tries < BOOK_AHEAD_DAYS + 7; tries += 1) {
+      day = addDays(day, direction);
+      if (day < from || day > last) return null;
+      if (editing && day === editing.date) return day;
+      if (day >= first && !closedDayNote(day, holidays)) return day;
+    }
+    return null;
   }
 
   function remove(id: string) {
@@ -488,6 +623,44 @@ export function AddCase({
     const found = getRoom(roomId);
     return found ? roomLabel(found) : roomId;
   };
+  // The day view: the bookings in the room the doctor's choice gives (a department's rooms that day, when the server
+  // still picks one of them), the doctor's own edited booking left out.
+  const shownRooms = room.ok ? (choice === "dept" && deptChoices ? deptChoices : [room.roomId]) : [];
+  const read = days[date];
+  const loading = !read || read.version !== version;
+  const slots = read?.slots ?? [];
+  const selfId = mode === "edit" && editing ? editing.id : null;
+  const busy = busyTimes(
+    shownRooms.map((roomId) =>
+      slots
+        .filter((slot) => slot.roomId === roomId && slot.id !== selfId)
+        .map(timeOf)
+        .filter((item): item is TimeRange => item !== null),
+    ),
+  );
+  const timeFree = time === null || isFree(time, busy);
+  // A time another booking has (kept from another day, or taken meanwhile) shows as taken until another is picked.
+  const clash = !loading && !locked && !timeFree;
+  const shownName = room.ok ? (shownRooms.length > 1 ? shownRooms.map(label).join(" / ") : label(room.roomId)) : "";
+  const prevDay = dayStep(-1);
+  const nextDay = dayStep(1);
+  const pickDay = (iso: string) => {
+    setDate(iso);
+    edited("date");
+  };
+
+  // The rest of the form, reached from the day view: its back arrow goes to the day view.
+  const toTime = step === "details" && opened === "time";
+  function showTime() {
+    focusAfter.current = "time";
+    setStep("time");
+  }
+  const lockedNote = (
+    <p className="mt-1.5 text-[0.8125rem] leading-5 font-semibold text-ink-2" data-testid="case-locked">
+      {NOTE_ONLY_TEXT} หรือเลื่อนไปวันอื่น
+    </p>
+  );
+
   const saveError = about === "save" && error ? error : "";
   // Whether saving this edit puts the case at the back of the queue (lib/added-cases.ts bookingChange): a new day, room
   // choice or HN.
@@ -509,8 +682,11 @@ export function AddCase({
     >
       <form onSubmit={save} noValidate>
         <div className="flex items-start justify-between gap-3">
-          {/* Opened from a row's จัดการ: back to its actions (Pong, 26 Nov 2026: "add back button"). */}
-          {back ? (
+          {/*
+            Opened from a row's จัดการ: back to its actions (Pong, 26 Nov 2026: "add back button"). On the rest of the
+            form, after the day view: back to the day view.
+          */}
+          {back || toTime ? (
             <button
               type="button"
               className="btn btn-ghost -mr-2 -ml-2 size-11 min-h-0 shrink-0 rounded-full p-0"
@@ -518,8 +694,12 @@ export function AddCase({
               title="ย้อนกลับ"
               disabled={pending}
               onClick={() => {
+                if (toTime) {
+                  showTime();
+                  return;
+                }
                 ref.current?.close();
-                back();
+                back?.();
               }}
               data-testid="add-case-back"
             >
@@ -561,17 +741,43 @@ export function AddCase({
           content by default, which would push the form past a narrow phone's edge.
         */}
         <fieldset disabled={pending} className="mt-5 min-w-0 space-y-4">
+          {step === "time" ? (
+          <>
           <div ref={dateRef}>
-            <label htmlFor="case-date" className="text-sm font-semibold text-ink">
-              วันที่ผ่าตัด
-            </label>
+            {/* The day before and after beside the label, as Google Calendar's arrows over its day. */}
+            <div className="-my-2 flex items-center justify-between gap-2">
+              <label htmlFor="case-date" className="text-sm font-semibold text-ink">
+                วันที่ผ่าตัด
+              </label>
+              <span className="-mr-2 flex">
+                <button
+                  type="button"
+                  className="btn btn-ghost size-11 min-h-0 rounded-full p-0"
+                  aria-label="วันก่อนหน้า"
+                  title="วันก่อนหน้า"
+                  disabled={!prevDay}
+                  onClick={() => prevDay && pickDay(prevDay)}
+                  data-testid="case-day-prev"
+                >
+                  {CHEVRON("left")}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost size-11 min-h-0 rounded-full p-0"
+                  aria-label="วันถัดไป"
+                  title="วันถัดไป"
+                  disabled={!nextDay}
+                  onClick={() => nextDay && pickDay(nextDay)}
+                  data-testid="case-day-next"
+                >
+                  {CHEVRON("right")}
+                </button>
+              </span>
+            </div>
             <ThaiDateField
               id="case-date"
               value={date}
-              onChange={(iso) => {
-                setDate(iso);
-                edited("date");
-              }}
+              onChange={pickDay}
               min={first}
               max={last}
               dayState={dayState}
@@ -595,12 +801,71 @@ export function AddCase({
               <span className="block">{bookableFrom(first)}</span>
             </p>
             {/* An edit's own day once 15:00 the day before passed: the fields below wait for another day. */}
-            {locked ? (
-              <p className="mt-1.5 text-[0.8125rem] leading-5 font-semibold text-ink-2" data-testid="case-locked">
-                {NOTE_ONLY_TEXT} หรือเลื่อนไปวันอื่น
-              </p>
+            {locked ? lockedNote : null}
+          </div>
+
+          {/*
+            The time, on the day view of the room the doctor's choice gives that day (the department's, until the rest of
+            the form picks the dressing room).
+          */}
+          <div>
+            <p className="flex flex-wrap items-baseline gap-x-1.5 text-sm" data-testid="case-day-room">
+              <span className="font-semibold text-ink">เวลาผ่าตัด</span>{" "}
+              {shownName ? <span className="text-ink-2">· {shownName}</span> : null}
+            </p>
+            {!room.ok ? (
+              <p className="mt-0.5 text-[0.8125rem] leading-5 font-semibold text-[var(--stop)]">{room.error}</p>
+            ) : null}
+            <div className="mt-1.5">
+              <DayView
+                slots={slots}
+                loading={loading}
+                rooms={shownRooms}
+                selfId={selfId}
+                value={time}
+                onChange={(next) => {
+                  setTime(next);
+                  edited("time");
+                }}
+                readOnly={locked}
+                clash={clash}
+                invalid={invalid === "time"}
+                describedBy={describe("time")}
+              />
+            </div>
+            {read?.error && !loading ? (
+              <div className="mt-1.5 flex items-center gap-2">
+                <InlineStatus tone="warning" role="alert" className="flex-1">
+                  {read.error}
+                </InlineStatus>
+                <button type="button" className="btn btn-ghost min-h-11 px-3 text-sm" onClick={() => setVersion((current) => current + 1)}>
+                  ลองใหม่
+                </button>
+              </div>
             ) : null}
           </div>
+          </>
+          ) : (
+          <>
+          {/* The day and the time picked, with the way back to them. */}
+          <div className="flex items-center gap-3 rounded-xl border border-line bg-white px-3 py-2" data-testid="case-when">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-ink">{thaiDate(date)}</p>
+              <p className="text-sm text-ink-2 tabular-nums" data-testid="case-when-time">
+                {time ? `${rangeText(time)} น. · ${lengthText(time)}` : "ไม่ระบุเวลา"}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost min-h-11 shrink-0 px-3 text-sm"
+              aria-label="เปลี่ยนวันและเวลา"
+              onClick={showTime}
+              data-testid="case-when-change"
+            >
+              เปลี่ยน
+            </button>
+          </div>
+          {locked ? lockedNote : null}
 
           {/* min-w-0 as the outer fieldset; disabled on an edit's closed day. */}
           <fieldset disabled={locked} className="locked-fields min-w-0 space-y-4" data-testid="case-locked-fields">
@@ -732,6 +997,15 @@ export function AddCase({
                 <span className="text-sm font-semibold text-[var(--stop)]" data-testid="case-room-why">
                   {room.error}
                 </span>
+              ) : clash ? (
+                <>
+                  <span className="text-sm font-semibold text-[var(--stop)]" data-testid="case-room-why">
+                    {TIME_TAKEN_TEXT}
+                  </span>
+                  <button type="button" className="btn btn-ghost min-h-11 px-2 text-sm" onClick={showTime} data-testid="case-time-change">
+                    เปลี่ยนเวลา
+                  </button>
+                </>
               ) : choice === "dressing" && scrubDoes !== null ? (
                 <>
                   <span className="text-xs text-muted" data-testid="case-room-why">
@@ -796,9 +1070,47 @@ export function AddCase({
               {REQUEUE_TEXT}
             </p>
           ) : null}
+          </>
+          )}
         </fieldset>
 
-        {/* A save's answer is said quietly beside จองห้อง: left of the buttons, or on its own line above them on a phone. */}
+        {step === "time" ? (
+          // The day view is taller than a phone: ต่อไป stays in sight at the dialog's foot, with the time picked.
+          <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex items-center gap-3 border-t border-line bg-surface px-4 py-3 min-[360px]:-mx-5 min-[360px]:px-5 sm:-mx-6 sm:px-6">
+            <div className="min-w-0 flex-1">
+              {saveError ? (
+                <InlineStatus tone="warning" role="alert" id="case-save-status" testId="case-save-status">
+                  {saveError}
+                </InlineStatus>
+              ) : about === "save" && done ? (
+                <InlineStatus tone="success" role="status">
+                  {done}
+                </InlineStatus>
+              ) : clash ? (
+                <InlineStatus tone="warning" testId="case-time-taken">
+                  {TIME_TAKEN_TEXT}
+                </InlineStatus>
+              ) : (
+                <p className="text-sm leading-5 tabular-nums" data-testid="case-time-text" aria-live="polite">
+                  {time ? (
+                    <>
+                      <span className="font-bold text-ink">{rangeText(time)} น.</span>{" "}
+                      <span className="whitespace-nowrap text-muted">{lengthText(time)}</span>
+                    </>
+                  ) : locked ? (
+                    <span className="text-muted">ไม่ระบุเวลา</span>
+                  ) : (
+                    <span className="text-muted">แตะเวลาที่ต้องการ</span>
+                  )}
+                </p>
+              )}
+            </div>
+            <button type="submit" disabled={pending} className="btn btn-primary shrink-0" data-testid="case-next">
+              ต่อไป
+            </button>
+          </div>
+        ) : (
+        /* A save's answer is said quietly beside จองห้อง: left of the buttons, or on its own line above them on a phone. */
         <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end sm:gap-4">
           {saveError ? (
             <InlineStatus tone="warning" role="alert" className="sm:flex-1" id="case-save-status" testId="case-save-status">
@@ -818,6 +1130,7 @@ export function AddCase({
             </button>
           </div>
         </div>
+        )}
       </form>
 
       {/* An edit is about one booking: the list waits until the form books again. */}
@@ -847,6 +1160,7 @@ export function AddCase({
               const { roomId, dressing } = bookedRoom(item, periods);
               const room = getRoom(roomId);
               const asking = confirming === item.id;
+              const when = timeOf(item);
               // A case whose room is not in use that day (the ventilation repair moves the rooms) is not on the board.
               const offBoard = roomUse(roomId, item.date, periods) !== "open";
               // Names the booking for the cancel button's screen-reader label: several can share a day and an HN.
@@ -863,6 +1177,7 @@ export function AddCase({
                     <p className="text-xs font-semibold text-ink-2">
                       {thaiDate(item.date, "short")} · {room ? roomLabel(room) : roomId}
                       {dressing ? ` ${DRESSING_ROOM_NAME}` : null}
+                      {when ? <span className="tabular-nums" data-testid="my-case-time">{` · ${rangeText(when)} น.`}</span> : null}
                       {dressing && typeof item.scrubDoes === "boolean" ? (
                         <span className="badge badge-muted ml-1.5 align-middle" data-testid="my-case-scrub">
                           {scrubTag(item.scrubDoes)}
@@ -895,7 +1210,7 @@ export function AddCase({
                         // The list hides while editing: the focus goes up to the form's first field with it.
                         flushSync(() => begin({ mode: "edit", booking: item, focus: "details" }));
                         ref.current?.scrollTo({ top: 0 });
-                        ref.current?.querySelector<HTMLElement>('[data-testid="case-date"]')?.focus({ preventScroll: true });
+                        ref.current?.querySelector<HTMLElement>('[data-testid="case-when-change"]')?.focus({ preventScroll: true });
                       }}
                       className="btn btn-ghost min-h-11 px-3 text-sm"
                       aria-label={`แก้ไข ${what}`}

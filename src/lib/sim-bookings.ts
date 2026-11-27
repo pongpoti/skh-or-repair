@@ -74,6 +74,9 @@ export function simulatedBookings(cases: readonly WorkbookCase[], date: string, 
       surgeon: withoutTitle(surgeon),
       subtype: deptOf.get(surgeon) ?? item.dept,
       bookedAt: bookedAtFor(date, seed(`${item.caseId}|${date}|at`)),
+      // No times: the simulation stands in for the day's bookings from its HOSxP list, which has none.
+      start: null,
+      end: null,
     });
   }
   drafts.sort((a, b) => a.bookedAt.localeCompare(b.bookedAt) || a.id.localeCompare(b.id));
