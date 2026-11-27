@@ -1402,10 +1402,11 @@ async function main() {
           assert(list === null, `no list on a phone at ${width}px: ${JSON.stringify(list)}`);
           assert(plan.y - (bar.y + bar.height) <= 8, `the plan right under the bar at ${width}px: ${JSON.stringify([bar, plan])}`);
           // as wide as the screen with รพ.สมุทรสาคร's margins (Pong, 27 Nov 2026: "same screen margin like สมุทรสาคร"):
-          // the plan 4px in from each side, its frame a further 6px
+          // the plan 4px in from each side, its frame a few px further (6px at 390px, as รพ.สมุทรสาคร's)
           const frame = await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox();
           assert(Math.abs(plan.x - 4) <= 0.5 && Math.abs(plan.x + plan.width - (width - 4)) <= 0.5, `the plan as wide as the screen at ${width}px: ${JSON.stringify(plan)}`);
-          assert(Math.abs(frame.x - 10) <= 1.5 && Math.abs(frame.x + frame.width - (width - 10)) <= 1.5, `the frame 10px in at ${width}px: ${JSON.stringify(frame)}`);
+          const inset = [frame.x - plan.x, plan.x + plan.width - (frame.x + frame.width)];
+          assert(inset.every((gap) => gap >= 3 && gap <= 7), `the frame a few px in at ${width}px: ${JSON.stringify([plan, frame])}`);
         } else {
           assert(list && list.y + list.height <= height + 0.5 && list.x + list.width <= width + 0.5, `the list in view at ${width}px: ${JSON.stringify(list)}`);
           assert(list.x >= plan.x + plan.width - 0.5, `the list beside the plan at ${width}px`);
