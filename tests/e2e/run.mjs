@@ -4336,12 +4336,14 @@ async function main() {
         JSON.stringify(dressingRoom) === JSON.stringify([["hosxp", null, "HN 7000003"], ["hosxp", null, "HN 7000010"]]),
         `OR 10: ${JSON.stringify(dressingRoom)}`,
       );
-      // who does each dressing instead of where it came from: nobody booked these, so the doctor
-      assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["surgeon", "surgeon"]), `OR 10's icons: ${JSON.stringify(await rowIcons(page))}`);
+      // who does each dressing instead of where it came from: nobody booked these and HOSxP names them dressings, so
+      // the scrub nurse (Pong, 27 Nov 2026: "For hosxp cases that are classified as dressing, app will automatically
+      // assign พยาบาลทำ")
+      assert(JSON.stringify(await rowIcons(page)) === JSON.stringify(["scrub", "scrub"]), `OR 10's icons: ${JSON.stringify(await rowIcons(page))}`);
       await page.click('.case-row [data-testid="row-icon"]');
       const doctorTip = page.locator('[data-testid="row-icon-tip"]');
-      assert((await doctorTip.textContent()) === "แพทย์ทำเอง", "the doctor's name in a bubble");
-      assert((await doctorTip.evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(127, 191, 183)", "green, like the doctor's scrubs");
+      assert((await doctorTip.textContent()) === "ฝาก scrub ทำ", "the scrub's name in a bubble");
+      assert((await doctorTip.evaluate((el) => getComputedStyle(el).backgroundColor)) === "rgb(228, 154, 162)", "pink, like the nurse");
       await doctorTip.click();
       await doctorTip.waitFor({ state: "detached" });
       assert((await page.locator(".room-sheet .case-row").count()) === 2, "a tap on the bubble closes only the bubble");
@@ -5241,7 +5243,7 @@ async function main() {
             `three dressings, then a graft that stays in its department's room: ${JSON.stringify(examples)}`,
           );
         },
-        doers: async () => assert(JSON.stringify(await rowIcons(page)) === '["scrub","surgeon"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(page))}`),
+        doers: async () => assert(JSON.stringify(await rowIcons(page)) === '["surgeon","scrub"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(page))}`),
       });
       assert(!walked.includes("examples"), `no card on the real days before: ${walked.join(", ")}`);
       assert(walked.indexOf("priority") >= 0 && walked.indexOf("priority") + 1 === walked.indexOf("book"), `the priority card just before the booking: ${walked.join(", ")}`);
@@ -5340,7 +5342,7 @@ async function main() {
             const rows = await sheetRows(nursePage);
             assert(JSON.stringify(rows) === JSON.stringify([["matched", null, null], ["hosxp", "unbooked", null]]), `after the upload: ${JSON.stringify(rows)}`);
           },
-          doers: async () => assert(JSON.stringify(await rowIcons(nursePage)) === '["scrub","surgeon"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(nursePage))}`),
+          doers: async () => assert(JSON.stringify(await rowIcons(nursePage)) === '["surgeon","scrub"]', `the dressing room's portraits: ${JSON.stringify(await rowIcons(nursePage))}`),
         },
       );
       for (const id of ["book", "form-hn", "form-submit", "booked", "my-row", "my-manage", "upload-button"]) {

@@ -53,7 +53,7 @@ test("before the upload: the bookings alone, calendar icons, the doctor's own HN
   );
   assert.equal(room[0].note, "เตรียมเลือด 2 unit\nขอ ultrasound", "the colleague's note for the team");
   assert.deepEqual(rowsIn(board, "or-13").map((row) => row.source), ["booking"], "the booking HOSxP will not list");
-  assert.deepEqual(rowsIn(board, "or-10").map((row) => row.doneBy), ["scrub"], "the dressing for the scrub nurse");
+  assert.deepEqual(rowsIn(board, "or-10").map((row) => row.doneBy), ["surgeon"], "the doctor's own dressing");
   assert.equal(board.mismatchCount, 0);
 });
 
@@ -73,7 +73,7 @@ test("after the upload: handshakes, HOSxP's unbooked case with its mark, the dre
   assert.equal(room[2].flag, "unbooked");
   assert.deepEqual(board.mismatchByRoom, { "or-12": 1 }, "the room's ! mark");
   assert.deepEqual(rowsIn(board, "or-13"), [], "the booking HOSxP does not list is gone");
-  assert.deepEqual(rowsIn(board, "or-10").map((row) => row.doneBy), ["scrub", "surgeon"]);
+  assert.deepEqual(rowsIn(board, "or-10").map((row) => row.doneBy), ["surgeon", "scrub"], "the booked one the doctor's, HOSxP's unbooked one the scrub nurse's");
 });
 
 test("the dressing room by name: HOSxP's general surgery case nobody booked goes there by itself, and the card's examples", () => {
@@ -82,7 +82,7 @@ test("the dressing room by name: HOSxP's general surgery case nobody booked goes
     const board = tutorialBoard({ date: DAY, today: TODAY, periods: REPAIR, doctor: { ...DOCTOR, subtype }, mine: null, phase: "after" });
     const auto = board.rows.filter((row) => row.procedure === AUTO_DRESSING_OPERATION);
     assert.equal(auto.length, 1, subtype);
-    assert.deepEqual([auto[0].roomId, auto[0].source, auto[0].flag ?? null, auto[0].doneBy], ["or-10", "hosxp", null, "surgeon"], `${subtype}: in the dressing room, not general surgery's OR 12, with no mark`);
+    assert.deepEqual([auto[0].roomId, auto[0].source, auto[0].flag ?? null, auto[0].doneBy], ["or-10", "hosxp", null, "scrub"], `${subtype}: in the dressing room, not general surgery's OR 12, with no mark, for the scrub nurse`);
     assert.equal(board.mismatchByRoom["or-10"] ?? 0, 0, `${subtype}: no "!" on the dressing room`);
   }
   // the card asks the rule; what it teaches: three dressings, and a graft stays in its department's room
