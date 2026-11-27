@@ -2209,16 +2209,16 @@ a.place-tab:has(.place-tab-label[data-pending]) {
 
 /*
  * รพ.ท่าฉลอม's plan on its board is as wide as รพ.สมุทรสาคร's (Pong, 27 Nov 2026: "Resize ท่าฉลอม layout to same width
- * as สมุทรสาคร"): its box is รพ.สมุทรสาคร's plan's (floor-plan.tsx: the swipe area's height, 1207 × 1706, narrowed to
- * the area's width when that is less), and the drawing, wider for its height, fills the box's width from the top
- * (tha-chalom-plan.tsx, xMidYMin meet). Both frames sit about 1.6% of the width in from the box's sides.
+ * as สมุทรสาคร"): its box is รพ.สมุทรสาคร's plan's (floor-plan.tsx: the swipe area's height, 1183 × 1682, narrowed to
+ * the area's width when that is less), and the drawing, wider for its height, fills the box's width, centred up and
+ * down (tha-chalom-plan.tsx, xMidYMid meet; Pong, 27 Nov 2026: "align layout center and slight increase size"). Both frames sit about 0.7% of the width in from the box's sides.
  */
 .tc-plan {
   flex: 0 1 auto;
   min-width: 0;
   width: auto;
   height: 100%;
-  aspect-ratio: 1207 / 1706;
+  aspect-ratio: 1183 / 1682;
 }
 
 

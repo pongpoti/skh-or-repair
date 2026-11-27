@@ -29,8 +29,8 @@ export default function BoardLoading() {
       <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden" role="status" aria-label="กำลังโหลด…">
         <div className="relative mx-auto flex min-h-0 w-full max-w-[120rem] flex-1 flex-col overflow-hidden sm:px-3 lg:flex-row lg:gap-6 lg:px-6 lg:pt-3 lg:pb-4">
           <div className="flex min-h-0 flex-1 justify-center overflow-hidden p-1 lg:p-0">
-            {/* The plan's own shape (components/floor-plan.tsx, viewBox 1207 × 1706). */}
-            <span className="skeleton block h-full max-h-full aspect-[1207/1706] max-w-full rounded-2xl opacity-70" aria-hidden />
+            {/* The plan's own shape (components/floor-plan.tsx, drawn in 1183 × 1682). */}
+            <span className="skeleton block h-full max-h-full aspect-[1183/1682] max-w-full rounded-2xl opacity-70" aria-hidden />
           </div>
           <div className="hidden min-h-0 flex-1 flex-col gap-3 px-5 pt-4 lg:flex" aria-hidden>
             <span className="skeleton block h-7 w-40 rounded-md" />

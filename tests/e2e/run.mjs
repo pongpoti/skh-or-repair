@@ -1281,7 +1281,7 @@ async function main() {
       assert((await page.locator('[data-testid="place-card"], [data-testid="place-title"]').count()) === 0, "no choice of hospital");
       // the bar's switch: รพ.สมุทรสาคร lit, รพ.ท่าฉลอม one tap away (Pong, 26 Nov 2026: "seamless navigation between 2 places")
       const tabsOf = () =>
-        page.$$eval('[data-testid="place-tab"]', (els) => els.map((el) => [el.dataset.place, el.textContent.trim(), el.getAttribute("href"), el.getAttribute("aria-current")]));
+        page.$$eval('[data-testid="place-tab"]', (els) => els.map((el) => [el.dataset.place, (el.firstElementChild ?? el).textContent.trim(), el.getAttribute("href"), el.getAttribute("aria-current")]));
       assert(
         JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "รพ.สมุทรสาคร", null, "page"], ["tha-chalom", "รพ.ท่าฉลอม", "/tha-chalom", null]]),
         `the switch on รพ.สมุทรสาคร's board: ${JSON.stringify(await tabsOf())}`,
@@ -1453,10 +1453,12 @@ async function main() {
       // here, compared on รพ.สมุทรสาคร's board below.
       const PLAN_SIZES = [[320, 780], [390, 844], [390, 640], [768, 1024], [1024, 900], [1280, 900]];
       const tcFrames = [];
+      const tcBoxes = [];
       for (const [width, height] of PLAN_SIZES) {
         await page.setViewportSize({ width, height });
         await page.waitForTimeout(100);
         tcFrames.push(await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox());
+        tcBoxes.push(await page.locator('[data-testid="tha-chalom-plan"]').boundingBox());
       }
       for (const width of [320, 1024, ...WIDTHS]) {
         const height = width >= 1024 ? 900 : 780;
@@ -1475,11 +1477,12 @@ async function main() {
           assert(list === null, `no list on a phone at ${width}px: ${JSON.stringify(list)}`);
           assert(plan.y - (bar.y + bar.height) <= 8, `the plan right under the bar at ${width}px: ${JSON.stringify([bar, plan])}`);
           // as wide as the screen with รพ.สมุทรสาคร's margins (Pong, 27 Nov 2026: "same screen margin like สมุทรสาคร"):
-          // the plan 4px in from each side, its frame a few px further (6px at 390px, as รพ.สมุทรสาคร's)
+          // the plan 4px in from each side, its frame a few px further (about 7px at 390px, as รพ.สมุทรสาคร's: a little
+          // bigger since Pong's "slight increase size", 27 Nov 2026)
           const frame = await page.locator('[data-testid="tha-chalom-plan"] .tcp-frame').boundingBox();
           assert(Math.abs(plan.x - 4) <= 0.5 && Math.abs(plan.x + plan.width - (width - 4)) <= 0.5, `the plan as wide as the screen at ${width}px: ${JSON.stringify(plan)}`);
           const inset = [frame.x - plan.x, plan.x + plan.width - (frame.x + frame.width)];
-          assert(inset.every((gap) => gap >= 3 && gap <= 7), `the frame a few px in at ${width}px: ${JSON.stringify([plan, frame])}`);
+          assert(inset.every((gap) => gap >= 1.5 && gap <= 5), `the frame a few px in at ${width}px: ${JSON.stringify([plan, frame])}`);
         } else {
           assert(list && list.y + list.height <= height + 0.5 && list.x + list.width <= width + 0.5, `the list in view at ${width}px: ${JSON.stringify(list)}`);
           assert(list.x >= plan.x + plan.width - 0.5, `the list beside the plan at ${width}px`);
@@ -1502,11 +1505,18 @@ async function main() {
         await page.setViewportSize({ width, height });
         await page.waitForTimeout(100);
         const skhFrame = await page.locator("rect.fp-outer").boundingBox();
+        const skhBox = await page.locator('svg[aria-label="แปลนห้องผ่าตัด"]').boundingBox();
         const tcFrame = tcFrames[index];
         assert(
-          Math.abs(tcFrame.width - skhFrame.width) <= Math.max(2, skhFrame.width * 0.005) && Math.abs(tcFrame.x - skhFrame.x) <= 2 && Math.abs(tcFrame.y - skhFrame.y) <= 4,
+          Math.abs(tcFrame.width - skhFrame.width) <= Math.max(2, skhFrame.width * 0.005) && Math.abs(tcFrame.x - skhFrame.x) <= 2,
           `ท่าฉลอม's plan as wide as รพ.สมุทรสาคร's, in the same place, at ${width}×${height}: ${JSON.stringify(tcFrame)} / ${JSON.stringify(skhFrame)}`,
         );
+        // both centred up and down in the room their box has under the bar (Pong, 27 Nov 2026: "align layout center")
+        for (const [name, frame, box] of [["รพ.สมุทรสาคร", skhFrame, skhBox], ["ท่าฉลอม", tcFrame, tcBoxes[index]]]) {
+          const above = frame.y - box.y;
+          const below = box.y + box.height - (frame.y + frame.height);
+          assert(Math.abs(above - below) <= 10, `${name}'s plan centred at ${width}×${height}: ${above} above, ${below} below`);
+        }
       }
       await page.setViewportSize({ width: 390, height: 844 });
 
@@ -3406,11 +3416,10 @@ async function main() {
       for (const [width, height] of [[390, 844], [360, 640]]) {
         await page.setViewportSize({ width, height });
         const r = await page.evaluate(() => {
-          const svg = document.querySelector('svg[aria-label="แปลนห้องผ่าตัด"]').getBoundingClientRect();
+          const frame = document.querySelector('svg[aria-label="แปลนห้องผ่าตัด"] rect.fp-outer').getBoundingClientRect();
           const button = document.querySelector('[data-testid="add-case-button"]').getBoundingClientRect();
-          // The drawing is top-aligned in its box (xMidYMin meet) at the plan's own aspect ratio.
           return {
-            planBottom: svg.top + Math.min(svg.height, (svg.width * 1706) / 1207),
+            planBottom: frame.bottom,
             buttonTop: button.top,
             buttonCentre: button.left + button.width / 2,
             glow: getComputedStyle(document.querySelector('[data-testid="add-case-button"]')).animationName,
@@ -4050,7 +4059,7 @@ async function main() {
       assert((await page.getAttribute("header time", "datetime")) === "2026-11-17", "dated Tuesday");
       assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "uploaded: no alert");
       // no ไม่ตรง badge since 16 Nov 2026: the strip is empty; the rooms keep their mismatch marks
-      assert((await page.locator("[data-notice-id]").count()) === 0, `uploaded: an empty strip: ${await textOf(page, "[data-notice-strip]")}`);
+      assert((await page.locator("[data-notice-id]").count()) === 0, "uploaded: no notice in the switch");
       // nor an admin who is not a doctor
       assert((await page.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button for an admin who is not a DR");
       // test mode is for admins only: on a day with its upload, a non-admin's /?notices=all has no false "no table" badge
@@ -4331,7 +4340,7 @@ async function main() {
       await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-17");
       await dialog.waitFor({ state: "hidden" });
       assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดวันนี้", "today's eyebrow");
-      assert((await page.locator("[data-notice-id]").count()) === 0, `Tuesday has its upload: ${await textOf(page, "[data-notice-strip]")}`);
+      assert((await page.locator("[data-notice-id]").count()) === 0, "Tuesday has its upload: no notice in the switch");
       await ownerShot(page, "board-picked-day.png");
       // a room opened on the picked day keeps it, and shows that day's cases
       await page.goto(`${APP}/skh?date=2026-11-17&room=or-12`, { waitUntil: "networkidle" });

@@ -303,8 +303,8 @@ export function ThaChalomPlan({
   const pick: Pick | null = onSelect ? { selectedId, onSelect, cases, mismatches } : null;
   return (
     <svg
-      viewBox="25.5 98.5 590.25 626"
-      preserveAspectRatio="xMidYMin meet"
+      viewBox="31.1 104.1 579.05 614.8"
+      preserveAspectRatio="xMidYMid meet"
       className={className}
       role={day ? "group" : "img"}
       aria-label="แปลนห้องผ่าตัด รพ.ท่าฉลอม: ห้องผ่าตัด 1 ถึง 4 และห้อง Scope"
