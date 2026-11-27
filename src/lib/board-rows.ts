@@ -70,6 +70,11 @@ export type BoardRow = Operation & {
   /** รพ.ท่าฉลอม's rows say so (buildThaChalomRows), for their rooms' names; รพ.สมุทรสาคร's leave it out. */
   place?: PlaceId;
   /**
+   * "calendar": the row's booking came from a doctor's calendar through the calendar API (lib/calendar-api.ts), shown
+   * as a จากปฏิทิน badge for every viewer. Left out for a booking made on the board and a case nobody booked.
+   */
+  via?: "calendar";
+  /**
    * A case of a department with two rooms or more that day is listed in each of them (Pong, 27 Nov 2026: "For day that
    * dept has 2 rooms : display both booking and hosxp cases on both rooms"): the copy in a room other than the one the
    * case was put in (lib/placement.ts placeAll: one surgeon, one room) says that room, and the case's place in that
@@ -444,6 +449,7 @@ function mergeRows(
         ...when(booking),
         ...timeText(booking),
         ...noteOf(booking),
+        ...viaOf(booking),
         ...doneByIn(roomId, dressingRooms, booking),
         ...hospital,
       };
@@ -492,6 +498,7 @@ function mergeRows(
       ...when(booking),
       ...timeText(booking),
       ...noteOf(booking),
+      ...viaOf(booking),
       ...doneByIn(roomId, dressingRooms, booking),
       ...hospital,
     };
@@ -536,6 +543,8 @@ function when(booking: AddedCase): { bookedAt?: string } {
   return text ? { bookedAt: text } : {};
 }
 const noteOf = (booking: AddedCase): { note?: string } => (booking.note ? { note: booking.note } : {});
+/** A booking the calendar API pushed says so on its row (BoardRow.via). */
+const viaOf = (booking: AddedCase): { via?: "calendar" } => (booking.via === "calendar" ? { via: "calendar" } : {});
 function timeText(booking: AddedCase): { time?: string } {
   const time = timeOf(booking);
   return time ? { time: rangeText(time) } : {};

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdmin } from "@/lib/admin";
+import { isCalendarApiPath } from "@/lib/calendar-api-path";
 import { checkSession } from "@/lib/auth/user";
 import { db } from "@/lib/db";
 import { cookieName, cookieOptions } from "@/lib/cookies";
@@ -17,8 +18,9 @@ import { UNAVAILABLE_PATH, unavailablePath } from "@/lib/unavailable";
  * 3. per-request CSP nonce
  * 4. device gate (lib/gate.ts): on Vercel, a phone outside the LIFF app in LINE (or a client that is no browser) gets
  *    the "open in LINE" page for every page and 403 for every API call, before the sign-in gate. Computers and tablets
- *    pass. The Telegram webhook and /preview* are exempt.
- * 5. auth gate: everything except /login*, /api/auth/*, the Telegram webhook, /unavailable and /preview* needs a valid
+ *    pass. The Telegram webhook, the calendar API (lib/calendar-api-path.ts) and /preview* are exempt.
+ * 5. auth gate: everything except /login*, /api/auth/*, the Telegram webhook, the calendar API, /unavailable and /preview*
+ *    needs a valid
  *    session (pages ALSO verify the session themselves; this is the first line, not the only one). The /preview pages
  *    answer 404 unless NODE_ENV is development. When the database cannot check a valid session (an outage), a page goes
  *    to the outage page /unavailable (lib/unavailable.ts) and an API call gets 503; the cookie is kept, so the user is
@@ -28,7 +30,8 @@ import { UNAVAILABLE_PATH, unavailablePath } from "@/lib/unavailable";
  *    sign in) and 403 for every API call. A phone in the LIFF app is not checked.
  * 7. admin gate: /admin* answers the mistyped-address 404 to a session whose sub is not in AUTH_ADMIN_LINE_IDS, before
  *    anything renders (the page's own check runs behind its loading screen, whose response is already a 200).
- * The Telegram webhook is server-to-server (no Origin, no session): its route checks Telegram's secret header.
+ * The Telegram webhook and the calendar API are server-to-server (no Origin, no session): the webhook's route checks
+ * Telegram's secret header, the calendar API's its bearer key (lib/calendar-api.ts). Both are exempt by exact path only.
  */
 
 function isPublicPath(pathname: string): boolean {
@@ -37,6 +40,7 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/login/") ||
     pathname.startsWith("/api/auth/") ||
     pathname === TELEGRAM_WEBHOOK_PATH ||
+    isCalendarApiPath(pathname) ||
     pathname === GATE_PATH ||
     pathname === DESK_ONLY_PATH ||
     pathname === UNAVAILABLE_PATH ||
@@ -88,9 +92,11 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(target, 308);
   }
 
-  // 2. CSRF: any state-changing method must come from our own origin (except Telegram's webhook calls).
+  // 2. CSRF: any state-changing method must come from our own origin (except the server-to-server calls: Telegram's
+  //    webhook and the calendar API, whose routes check their own secret).
   const method = req.method.toUpperCase();
-  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && pathname !== TELEGRAM_WEBHOOK_PATH) {
+  const serverToServer = pathname === TELEGRAM_WEBHOOK_PATH || isCalendarApiPath(pathname);
+  if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !serverToServer) {
     if (!app || !isSameOrigin(req.headers, app.origin)) {
       return NextResponse.json({ error: app ? "ทำรายการไม่สำเร็จ โหลดหน้าใหม่แล้วลองอีกครั้ง" : "ระบบยังไม่พร้อม ติดต่อผู้ดูแล" }, { status: 403, headers: { "Cache-Control": "no-store" } });
     }
@@ -109,8 +115,7 @@ export async function proxy(req: NextRequest) {
   // 4. Device gate: the LIFF app in LINE on a phone, or a computer or tablet browser. Runs before the sign-in gate, so a
   //    phone browser outside LINE never reaches the LINE login. The answer depends on the User-Agent, so it must not be
   //    cached across browsers.
-  const gateExempt =
-    pathname === TELEGRAM_WEBHOOK_PATH || pathname === GATE_PATH || pathname === "/preview" || pathname.startsWith("/preview/");
+  const gateExempt = serverToServer || pathname === GATE_PATH || pathname === "/preview" || pathname.startsWith("/preview/");
   if (!gateExempt && !clientAllowed(req.headers.get("user-agent"), gateMode())) {
     const headers = { "Cache-Control": "no-store", Vary: "User-Agent" };
     if (pathname.startsWith("/api/")) {

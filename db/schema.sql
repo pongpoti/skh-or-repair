@@ -445,3 +445,18 @@ CREATE TABLE IF NOT EXISTS tutorial_seen (
   user_id  integer     PRIMARY KEY REFERENCES users (id),
   seen_at  timestamptz NOT NULL DEFAULT now()
 );
+-- Bookings a calendar pushed through the server-to-server calendar API (lib/calendar-api.ts; Pong, 27 Nov 2026: a CVT
+-- surgeon's own calendar books his cases on the board, the booking form staying the main way): api_client names the
+-- caller ('calendar'), external_id is the calendar's own id of the record. Both NULL for a booking made on the board.
+-- Such a booking is the named doctor's, with line_sub 'api:' and the client; it changes through the API only (the
+-- doctor may cancel it on the board, never edit it or book it back). Live bookings hold each calendar id once; a
+-- cancelled one keeps its row, and the calendar may book the same id again. Applied to existing databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'api_client' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN api_client text CONSTRAINT cases_api_client_check CHECK (api_client ~ '^[a-z][a-z0-9-]{1,31}$'),
+      ADD COLUMN external_id bigint CONSTRAINT cases_external_id_check CHECK (external_id > 0);
+    ALTER TABLE cases ADD CONSTRAINT cases_api_check CHECK ((api_client IS NULL) = (external_id IS NULL));
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS cases_api_key ON cases (api_client, external_id) WHERE removed_at IS NULL AND api_client IS NOT NULL;

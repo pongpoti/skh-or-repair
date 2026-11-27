@@ -21,7 +21,7 @@
 // stub in tests/mock-line.mjs (BOT_HOLIDAYS_URL). They upload tests/fixtures/e2e-or-export.xlsx, the made-up sample
 // moved to Tue 17 Nov 2026 with invented HNs (tests/e2e/make-workbook.py).
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import net from "node:net";
@@ -64,6 +64,8 @@ const LINE_ID = "1234567890";
 const LINE_SECRET = randomBytes(16).toString("hex");
 const SMS_API_KEY = randomBytes(16).toString("hex");
 const SMS_SECRET_KEY = randomBytes(24).toString("hex");
+// the calendar API's key (scripts/calendar-api-key.mjs makes one the same way); the app is given its SHA-256 only
+const CAL_KEY = `skhor_${randomBytes(32).toString("base64url")}`;
 // The users list (table users, invented names, no numbers): DOC1 claims DOC1_NAME at the first login, DOC2 claims
 // DOC2_NAME from a second LINE account (both nurses: doctors no longer claim by number, they sign in by email, see
 // EMAIL_DOC); RETIRED's name is deactivated (it holds a claim made by hand); BREAK_GLASS is only in ALLOWED_PHONES.
@@ -196,7 +198,7 @@ const intl = (p) => `66${p.slice(1)}`;
 function baseEnv() {
   const env = { ...process.env };
   for (const k of Object.keys(env)) {
-    if (/^(VERCEL|SMS_|DEESMSX_|ALLOWED_|TELEGRAM_|AUTH_ADMIN)/.test(k)) delete env[k];
+    if (/^(VERCEL|SMS_|DEESMSX_|ALLOWED_|TELEGRAM_|AUTH_ADMIN|CALENDAR_)/.test(k)) delete env[k];
   }
   return env;
 }
@@ -671,6 +673,8 @@ async function main() {
     // two admins, the second a doctor's LINE account (spaces and an empty entry are ignored); SUB_A, the first-login
     // account, is not one
     AUTH_ADMIN_LINE_IDS: ` ${ADMIN_SUB} ,, ${ADMIN_DR_SUB}`,
+    // the calendar API on (lib/calendar-api.ts): the key's hash only
+    CALENDAR_API_KEY_SHA256: createHash("sha256").update(CAL_KEY, "utf8").digest("hex"),
   };
 
   if (process.env.E2E_SKIP_BUILD !== "1") {
@@ -4982,6 +4986,121 @@ async function main() {
       await db.query("DELETE FROM cases WHERE surgeon_id = $1 AND op_date BETWEEN '2026-12-01' AND '2026-12-04'", [dr]);
     });
 
+    await t("calendar API (Pong, 27 Nov 2026): a CVT surgeon's calendar books, moves and cancels through the proxy with its key alone; the board shows จากปฏิทิน, and the doctor can only cancel such a booking there", async () => {
+      // Tuesday 1 Dec 2026 at 10:00: Wednesday 2 Dec is the first day that can be booked (CVT's room: OR 13 on Wednesdays)
+      setNow("2026-12-01T10:00:00+07:00");
+      const cvt = (
+        await db.query("INSERT INTO users (first_name, last_name, type, subtype, active) VALUES ('หทัย', 'ทดลองดี', 'DR', 'CVT', true) RETURNING id::text AS id")
+      ).rows[0].id;
+      const api = async (method, path = "", body, headers = {}) => {
+        const r = await fetch(`${APP}/api/v1/calendar/cases${path}`, {
+          method,
+          headers: { authorization: `Bearer ${CAL_KEY}`, ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+          redirect: "manual",
+        });
+        const text = await r.text();
+        return { status: r.status, text, body: text ? JSON.parse(text) : null, auth: r.headers.get("www-authenticate"), location: r.headers.get("location") };
+      };
+      // the record as the calendar sends it, with the patient's details the API never keeps
+      const record = (id, more = {}) => ({
+        id,
+        admitDate: "2026-12-01",
+        operationStart: "2026-12-02T09:00:00",
+        operationEnd: "2026-12-02T11:00:00",
+        type: "Surgery",
+        hn: "7300001",
+        citizenId: "1100000000001",
+        fullName: "นายทดลอง ปฏิทินหัวใจ",
+        age: 60,
+        dx: "severe aortic stenosis",
+        planOperation: "AVR",
+        status: "ได้วันผ่าตัดแล้ว นัด admit",
+        doctorId: 1,
+        doctorName: "นพ.หทัย ทดลองดี",
+        remarks: [],
+        ...more,
+      });
+
+      // no key, a wrong key, or a page's call: refused by the route itself (no session, no redirect to sign in)
+      for (const headers of [{ authorization: "" }, { authorization: `Bearer skhor_${"0".repeat(43)}` }]) {
+        const refused = await api("GET", "", undefined, headers);
+        assert(refused.status === 401 && refused.body.error === "unauthorized" && refused.auth === 'Bearer realm="calendar"', `no key: ${refused.status} ${refused.text}`);
+      }
+      const page0 = await api("POST", "", record(501), { origin: "https://evil.example" });
+      assert(page0.status === 403 && page0.body.error === "browser_not_allowed", `from a page: ${page0.status} ${page0.text}`);
+
+      // POST books it (no Origin header: the proxy's same-origin check does not apply to this server-to-server path)
+      const created = await api("POST", "", record(501));
+      assert(created.status === 201 && created.body.result === "created" && created.location === "/api/v1/calendar/cases/501", `created: ${created.status} ${created.text}`);
+      const room = created.body.case.room;
+      assert(created.body.case.date === "2026-12-02" && created.body.case.start === "09:00" && created.body.case.end === "11:00" && /^OR \d+$/.test(room), created.text);
+      assert(created.body.ignored.includes("citizenId") && created.body.ignored.includes("fullName"), "the fields not read are named");
+      for (const secret of ["7300001", "AVR", "1100000000001", "ทดลอง ปฏิทิน", "aortic"]) assert(!created.text.includes(secret), `${secret} in the answer`);
+      const row = (await db.query("SELECT surgeon_id::text AS surgeon, hn, operation, note, line_sub, api_client, external_id::text AS ext FROM cases WHERE external_id = 501")).rows;
+      assert(JSON.stringify(row) === JSON.stringify([{ surgeon: cvt, hn: "7300001", operation: "AVR", note: null, line_sub: "api:calendar", api_client: "calendar", ext: "501" }]), JSON.stringify(row));
+      assert((await api("POST", "", record(501))).body.result === "unchanged", "sent again: nothing changes");
+
+      // the board, for any viewer: the row says จากปฏิทิน
+      const roomId = `or-${room.slice(3)}`;
+      const board = await htmlAs(RP.nurse, `/skh?date=2026-12-02&room=${roomId}`);
+      assert(board.status === 200 && board.html.includes('data-testid="row-via-calendar"') && board.html.includes("จากปฏิทิน"), "the badge on the board");
+
+      // PUT moves it (the calendar's เลื่อนคิว); GET reads it; the list has it; DELETE cancels it
+      const moved = await api("PUT", "/501", record(501, { operationStart: "2026-12-02T13:00:00", operationEnd: "2026-12-02T15:00:00" }));
+      assert(moved.status === 200 && moved.body.result === "updated" && moved.body.case.start === "13:00", `moved: ${moved.status} ${moved.text}`);
+      assert((await api("GET", "/501")).body.case.status === "booked", "GET one");
+      const listed = await api("GET", "?from=2026-12-01&to=2026-12-31");
+      assert(listed.status === 200 && JSON.stringify(listed.body.cases.map((item) => item.id)) === "[501]", listed.text);
+      const cancelled = await api("DELETE", "/501");
+      assert(cancelled.status === 200 && cancelled.body.result === "cancelled" && cancelled.body.case.status === "cancelled", cancelled.text);
+      assert((await db.query("SELECT removed_at FROM cases WHERE external_id = 501")).rows[0].removed_at !== null, "cancelled in the database");
+      // a doctor outside CVT cannot be named
+      const other = await api("POST", "", record(502, { doctorName: `นพ.${RP.drY.name}` }));
+      assert(other.status === 422 && other.body.error === "doctor_not_allowed", other.text);
+
+      // the doctor's own row of a calendar booking: จัดการ offers only จองซ้ำวันอื่น and ยกเลิกจอง; a cancel has no undo
+      const dr = RP.drY.userId;
+      const own = (
+        await db.query(
+          `INSERT INTO cases (op_date, room_id, hn, operation, dressing, surgeon_id, line_sub, api_client, external_id)
+           VALUES ('2026-12-03', 'or-12', '7300002', 'Lap chole', false, $1, 'api:calendar', 'calendar', 503) RETURNING id::text AS id`,
+          [dr],
+        )
+      ).rows[0].id;
+      const ctx = await contextAs(RP.drY);
+      const page = await ctx.newPage();
+      const errors = [];
+      page.on("pageerror", (e) => errors.push(e.message));
+      const sheet = '[data-testid="booking-sheet"]';
+      await page.goto(`${APP}/skh?date=2026-12-03&room=or-12`, { waitUntil: "networkidle" });
+      const ownRow = page.locator(".room-sheet .case-row", { hasText: "HN 7300002" });
+      await ownRow.waitFor();
+      assert((await ownRow.locator('[data-testid="row-via-calendar"]').count()) === 1, "the badge on the doctor's row");
+      await ownRow.locator('[data-testid="row-manage"]').click();
+      await page.waitForSelector(`${sheet}[open][data-step="menu"]`);
+      await page.waitForTimeout(400);
+      assert((await textOf(page, '[data-testid="booking-sheet-rule"]')) === "เคสนี้มาจากปฏิทิน แก้ไขที่ปฏิทิน", await textOf(page, '[data-testid="booking-sheet-rule"]'));
+      assert(JSON.stringify(await page.$$eval(`${sheet} .booking-action`, (items) => items.map((item) => item.textContent.trim()))) === JSON.stringify(["จองซ้ำวันอื่น", "ยกเลิกจอง"]), "cancel and book again only");
+      await ownerShot(page, "calendar-booking-sheet.png");
+      await page.click('[data-testid="booking-cancel"]');
+      await page.waitForSelector(`${sheet}[data-step="confirm"]`);
+      assert((await textOf(page, '[data-testid="booking-confirm-note"]')) === "ยกเลิกแล้วเลิกทำไม่ได้ จองใหม่ที่ปฏิทิน");
+      await page.waitForTimeout(400);
+      await page.click('[data-testid="booking-confirm"]');
+      await page.waitForSelector(`${sheet}[data-step="cancelled"]`);
+      assert((await page.locator('[data-testid="booking-restore"]').count()) === 0, "no undo for the calendar's booking");
+      assert((await db.query("SELECT removed_at FROM cases WHERE id = $1", [own])).rows[0].removed_at !== null, "cancelled on the board");
+      assert((await api("GET", "/503")).body.case.status === "cancelled", "the calendar reads the cancel");
+      assert(errors.length === 0, `page errors: ${errors.join("; ")}`);
+      await ctx.close();
+
+      await db.query("DELETE FROM cases WHERE api_client = 'calendar'");
+      // (the e2e trigger marked the new doctor's tutorial as seen)
+      await db.query("DELETE FROM tutorial_seen WHERE user_id = $1", [cvt]);
+      await db.query("DELETE FROM users WHERE id = $1", [cvt]);
+    });
+
     await t("รพ.ท่าฉลอม: a doctor books their department's room in its table with the same form; its rooms open their booked cases; each hospital's bookings stay on its own board", async () => {
       // Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also", then on the decision card "No, own department's room only".
       // Tuesday 1 Dec 2026 at 10:00: Wednesday is the first day that can be booked. Doctor Y is a general surgeon, whose
@@ -5727,6 +5846,16 @@ async function main() {
       // nobody signed in on a computer: LINE Login's QR code, as before
       const login = await get("/login", UA_DESKTOP);
       assert(login.status === 307 && login.location === "/api/auth/line/start", `computer /login: ${login.status} ${login.location}`);
+      // the calendar API (Pong, 27 Nov 2026): a server's call, no browser, no session, past every gate with its key
+      for (const ua of ["curl/8.5.0", UA_DESKTOP, ""]) {
+        const r = await fetch(`${GATE_APP}/api/v1/calendar/cases`, { headers: { "user-agent": ua, authorization: `Bearer ${CAL_KEY}` }, redirect: "manual" });
+        const text = await r.text();
+        assert(r.status === 200 && JSON.parse(text).ok === true, `calendar API through the gate (${ua || "no UA"}): ${r.status} ${text.slice(0, 120)}`);
+      }
+      // only its own paths: one segment more is the gate's as before
+      const beyond = await fetch(`${GATE_APP}/api/v1/calendar/cases/1/x`, { headers: { "user-agent": "curl/8.5.0", authorization: `Bearer ${CAL_KEY}` }, redirect: "manual" });
+      const beyondText = await beyond.text();
+      assert(beyond.status === 403 && JSON.parse(beyondText).error === "open-in-line" && beyond.headers.get("www-authenticate") === null, `a path beyond the API: ${beyond.status} ${beyondText.slice(0, 120)}`);
 
       // the page as a computer shows it
       const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2, locale: "th-TH", userAgent: UA_DESKTOP });
@@ -5822,6 +5951,8 @@ async function main() {
         assert(!log.includes(SMS_API_KEY) && !log.includes(SMS_SECRET_KEY), `deeSMSX key in the ${proc.name} log`);
         assert(webhookSecret && !log.includes(webhookSecret), `webhook secret in the ${proc.name} log`);
         assert(!log.includes(BOT_TOKEN), `the holidays token in the ${proc.name} log`);
+        // the calendar API's key, and the patient's details its records carry
+        assert(!log.includes(CAL_KEY) && !/1100000000001|7300001|7300002|ปฏิทินหัวใจ|aortic/.test(log), `the calendar's key or a patient's details in the ${proc.name} log`);
         // no HN and nothing of a workbook row (patients' made-up names, operations) is ever logged
         for (const hn of [...WORKBOOK_HNS, HN_TODAY, HN_X_MISSING]) assert(!log.includes(hn), `an HN in the ${proc.name} log`);
         assert(!/ตัวอย่าง|ผู้ป่วย|cholecystectomy|thyroidectomy/i.test(log), `a workbook row in the ${proc.name} log`);

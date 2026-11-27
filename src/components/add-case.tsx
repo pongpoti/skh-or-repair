@@ -1264,6 +1264,7 @@ export function AddCase({
                       ) : null}
                       {item.shift === "out" ? <span className="badge badge-warning ml-1.5 align-middle">นอกเวลา</span> : null}
                       {offBoard ? <span className="badge badge-warning ml-1.5 align-middle">ห้องนี้ไม่เปิดวันนั้น</span> : null}
+                      {item.via === "calendar" ? <span className="badge badge-muted ml-1.5 align-middle" data-testid="my-case-via-calendar">จากปฏิทิน</span> : null}
                     </p>
                     {/* Cases saved before bookings carried an HN have none; they show their operation as before. */}
                     {item.hn ? (
@@ -1281,22 +1282,25 @@ export function AddCase({
                     ) : null}
                   </div>
                   <div className="flex shrink-0 flex-col items-stretch gap-1">
-                    {/* The form edits it in place (a booking whose day has gone is not in the list). */}
-                    <button
-                      type="button"
-                      disabled={pending}
-                      onClick={() => {
-                        // The list hides while editing: the focus goes up to the form's first field with it.
-                        flushSync(() => begin({ mode: "edit", booking: item, focus: "details" }));
-                        ref.current?.scrollTo({ top: 0 });
-                        ref.current?.querySelector<HTMLElement>('[data-testid="case-when-change"]')?.focus({ preventScroll: true });
-                      }}
-                      className="btn btn-ghost min-h-11 px-3 text-sm"
-                      aria-label={`แก้ไข ${what}`}
-                      data-testid="my-case-edit"
-                    >
-                      แก้ไข
-                    </button>
+                    {/* The form edits it in place (a booking whose day has gone is not in the list); one from the
+                        doctor's calendar changes at the calendar (lib/calendar-api.ts), so it has no แก้ไข. */}
+                    {item.via === "calendar" ? null : (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          // The list hides while editing: the focus goes up to the form's first field with it.
+                          flushSync(() => begin({ mode: "edit", booking: item, focus: "details" }));
+                          ref.current?.scrollTo({ top: 0 });
+                          ref.current?.querySelector<HTMLElement>('[data-testid="case-when-change"]')?.focus({ preventScroll: true });
+                        }}
+                        className="btn btn-ghost min-h-11 px-3 text-sm"
+                        aria-label={`แก้ไข ${what}`}
+                        data-testid="my-case-edit"
+                      >
+                        แก้ไข
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={pending}

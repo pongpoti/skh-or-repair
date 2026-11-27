@@ -36,11 +36,14 @@ interface CaseRow {
   start_min: number | null;
   end_min: number | null;
   place: PlaceId;
+  api_client: string | null;
+  external_id: string | null;
 }
 
 const COLUMNS =
   "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.operation, c.shift, c.dressing, c.scrub_does, c.note, " +
-  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.queued_at AS booked_at, c.edited_at, c.start_min, c.end_min, c.place";
+  "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.queued_at AS booked_at, c.edited_at, c.start_min, c.end_min, c.place, " +
+  "c.api_client, c.external_id::text AS external_id";
 
 function toCase(r: CaseRow): AddedCase {
   return {
@@ -68,6 +71,8 @@ function toCase(r: CaseRow): AddedCase {
     end: r.end_min,
     // รพ.ท่าฉลอม's bookings say so; รพ.สมุทรสาคร's leave it out, as they always have.
     ...(r.place === "tha-chalom" ? { place: r.place } : {}),
+    // A booking the calendar API pushed (lib/calendar-api.ts) says so: it changes at the calendar, not on the board.
+    ...(r.api_client ? { via: "calendar" as const } : {}),
   };
 }
 
@@ -120,10 +125,13 @@ export async function listCasesBy(pool: Q, surgeonId: string, from: string, plac
   return rows.map(toCase);
 }
 
-/** Cases this doctor added in the last 24 hours (removed ones included). */
+/**
+ * Cases this doctor added on the board in the last 24 hours (removed ones included): the calendar API's pushes are not
+ * theirs to count (lib/calendar-api.ts has its own limit).
+ */
 export async function addedToday(pool: Q, surgeonId: string): Promise<number> {
   const { rows } = await pool.query<{ n: number }>(
-    "SELECT count(*)::int AS n FROM cases WHERE surgeon_id = $1 AND created_at > now() - interval '24 hours'",
+    "SELECT count(*)::int AS n FROM cases WHERE surgeon_id = $1 AND api_client IS NULL AND created_at > now() - interval '24 hours'",
     [surgeonId],
   );
   return rows[0].n;
@@ -132,11 +140,18 @@ export async function addedToday(pool: Q, surgeonId: string): Promise<number> {
 /**
  * Saves a checked case (lib/added-cases.ts checkCase: the HN normalised, the room worked out from the doctor's choice)
  * with this doctor as the surgeon. Returns its id. An empty operation name or note is stored as NULL, never as "".
+ * `api`: a booking the calendar API pushed, its client and the calendar's own id of the record (lib/calendar-api.ts).
  */
-export async function insertCase(pool: Q, surgeonId: string, lineSub: string, input: CaseInput): Promise<string> {
+export async function insertCase(
+  pool: Q,
+  surgeonId: string,
+  lineSub: string,
+  input: CaseInput,
+  api: { client: string; externalId: string } | null = null,
+): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, note, surgeon_id, line_sub, start_min, end_min, place)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id::text AS id`,
+    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, note, surgeon_id, line_sub, start_min, end_min, place, api_client, external_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id::text AS id`,
     [
       input.date,
       input.roomId,
@@ -151,6 +166,8 @@ export async function insertCase(pool: Q, surgeonId: string, lineSub: string, in
       input.start,
       input.end,
       input.place ?? "skh",
+      api?.client ?? null,
+      api?.externalId ?? null,
     ],
   );
   return rows[0].id;
@@ -240,4 +257,57 @@ export async function removeCase(pool: Q, id: string, surgeonId: string): Promis
     [id, surgeonId],
   );
   return rowCount === 1;
+}
+
+/** A booking the calendar API pushed (lib/calendar-api.ts), with the calendar's id of it and whether it was cancelled. */
+export interface CalendarCase {
+  booking: AddedCase;
+  /** The calendar's own id of the record (cases.external_id). */
+  externalId: string;
+  /** When it was cancelled (cases.removed_at), an ISO time; null while it is booked. */
+  cancelledAt: string | null;
+}
+
+interface CalendarRow extends CaseRow {
+  removed_at: Date | null;
+}
+
+const toCalendarCase = (r: CalendarRow): CalendarCase => ({
+  booking: toCase(r),
+  externalId: r.external_id ?? "",
+  cancelledAt: r.removed_at ? r.removed_at.toISOString() : null,
+});
+
+/**
+ * The client's booking of one calendar record: the one booked now, else the last one cancelled (the calendar may book a
+ * cancelled id again, so there can be several), or null when the calendar never pushed it.
+ */
+export async function calendarCase(pool: Q, client: string, externalId: string): Promise<CalendarCase | null> {
+  const { rows } = await pool.query<CalendarRow>(
+    `SELECT ${COLUMNS}, c.removed_at FROM cases c JOIN users u ON u.id = c.surgeon_id
+     WHERE c.api_client = $1 AND c.external_id = $2
+     ORDER BY (c.removed_at IS NULL) DESC, c.removed_at DESC, c.id DESC LIMIT 1`,
+    [client, externalId],
+  );
+  return rows.length ? toCalendarCase(rows[0]) : null;
+}
+
+/** The client's bookings booked now with their day from `from` to `to` (YYYY-MM-DD), by day and queue; at most `limit`. */
+export async function calendarCasesBetween(pool: Q, client: string, from: string, to: string, limit: number): Promise<CalendarCase[]> {
+  const { rows } = await pool.query<CalendarRow>(
+    `SELECT ${COLUMNS}, c.removed_at FROM cases c JOIN users u ON u.id = c.surgeon_id
+     WHERE c.api_client = $1 AND c.removed_at IS NULL AND c.op_date BETWEEN $2 AND $3
+     ORDER BY c.op_date, c.queued_at, c.id LIMIT $4`,
+    [client, from, to, limit],
+  );
+  return rows.map(toCalendarCase);
+}
+
+/** Bookings the client pushed in the last 24 hours (cancelled ones included), for the API's own daily limit. */
+export async function calendarAddedToday(pool: Q, client: string): Promise<number> {
+  const { rows } = await pool.query<{ n: number }>(
+    "SELECT count(*)::int AS n FROM cases WHERE api_client = $1 AND created_at > now() - interval '24 hours'",
+    [client],
+  );
+  return rows[0].n;
 }

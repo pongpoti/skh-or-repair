@@ -9,6 +9,7 @@ import {
   bookedRoom,
   bookingChange,
   bookingState,
+  CALENDAR_TEXT,
   checkCase,
   daySlots,
   deptRooms,
@@ -25,7 +26,7 @@ import {
 import { isAdmin } from "@/lib/admin";
 import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { getUser } from "@/lib/auth/server";
-import { bookingUnderWay } from "@/lib/board-rows";
+import { startedToday } from "@/lib/booking-started";
 import {
   addedToday,
   DAILY_ADD_LIMIT,
@@ -45,11 +46,9 @@ import {
 import { bangkokParts, now, today as todayInBangkok } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
-import type { RepairPeriods } from "@/lib/repair";
 import { getRepairPeriods } from "@/lib/repair-store";
 import { markTutorialSeen } from "@/lib/tutorial-store";
 import { userForSession } from "@/lib/user-list";
-import { workbookForDay } from "@/lib/workbook-store";
 import { BOARD_PATH, THA_CHALOM_PATH, type PlaceId } from "@/lib/places";
 
 /**
@@ -170,24 +169,7 @@ const GONE = "การจองนี้ถูกยกเลิกไปแล
 const PAST = "ผ่านวันผ่าตัดแล้ว แก้ไม่ได้";
 
 /**
- * Whether today's booking is on a row HOSxP says is under way or over (lib/board-rows.ts bookingUnderWay), on its
- * hospital's board: the row's actions then offer only booking again, and the server refuses an edit or a cancel. Only
- * today's list can say so.
- */
-async function startedToday(pool: Awaited<ReturnType<typeof db>>, booking: AddedCase, today: string, surgeonId: string, periods?: RepairPeriods): Promise<boolean> {
-  if (booking.date !== today) return false;
-  const place: PlaceId = booking.place === "tha-chalom" ? "tha-chalom" : "skh";
-  const [workbook, bookings, inForce] = await Promise.all([
-    workbookForDay(pool, today, place),
-    listCasesOn(pool, today, place),
-    periods ? Promise.resolve(periods) : getRepairPeriods(pool),
-  ]);
-  if (!workbook) return false;
-  return bookingUnderWay({ date: today, periods: inForce, workbook: workbook.cases, bookings }, booking.id, surgeonId, place);
-}
-
-/**
- * Saves the doctor's edit of one of their own bookings (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move
+ * Saves the doctor's edit of one of their own bookings (not one the calendar API pushed: CALENDAR_TEXT) (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move
  * date, delete and other functions"): the new day, HN, operation, room choice, scrub answer and note, checked as a new
  * booking is (lib/added-cases.ts checkCase), except that its own day needs no day checks. Until 15:00 the day before it
  * all can change, the day too (a move); from then on only the note, though the case can still move to a day that is
@@ -215,6 +197,8 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
     const place: PlaceId = booking ? (booking.place ?? "skh") : formPlace(input);
     const mine = () => listCasesBy(pool, doctor.id, today, place);
     if (!booking) return { ok: false, error: GONE, mine: await mine() };
+    // The calendar's booking changes at the calendar (lib/calendar-api.ts), whose next push would undo an edit here.
+    if (booking.via === "calendar") return { ok: false, error: CALENDAR_TEXT, mine: await mine() };
     const earliest = firstBookingDay(admin, today, minutes, holidays);
     if (bookingState(booking.date, today, earliest) === "past") return { ok: false, error: PAST, mine: await mine() };
     if (await startedToday(pool, booking, today, doctor.id, periods)) return { ok: false, error: STARTED_TEXT, mine: await mine() };
@@ -313,6 +297,8 @@ async function restoreAt(boardPlace: PlaceId, id: unknown): Promise<CaseResult> 
     const today = todayInBangkok();
     const cancelled = await removedCase(pool, id, doctor.id);
     const place: PlaceId = cancelled ? (cancelled.place ?? "skh") : boardPlace;
+    // A calendar's booking, cancelled by its doctor or the calendar, is booked again at the calendar only.
+    if (cancelled?.via === "calendar") return { ok: false, mine: await listCasesBy(pool, doctor.id, today, place), error: CALENDAR_TEXT };
     const restored = cancelled
       ? await withDayLock(pool, cancelled.date, async (client) => {
           const periods = await getRepairPeriods(client);

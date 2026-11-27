@@ -325,3 +325,22 @@ export function assertOtpReady(): void {
   }
   if (names.length) throw new ConfigError([...new Set(names)]);
 }
+
+/**
+ * The calendar API's keys (lib/calendar-api.ts; Pong, 27 Nov 2026): CALENDAR_API_KEY_SHA256 holds the SHA-256 (64 hex)
+ * of each key the calendar may send, comma-separated so a new key can be added before the old one is taken out. Only
+ * the hashes are kept here; the keys themselves are made by scripts/calendar-api-key.mjs and handed to the calendar's
+ * developer. Null when unset: the API is off and answers 404. Throws ConfigError (the name only) when malformed.
+ */
+export function calendarApiKeyHashes(): string[] | null {
+  const raw = read("CALENDAR_API_KEY_SHA256");
+  if (!raw) return null;
+  const hashes = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const c = new Collector();
+  if (!hashes.length || hashes.length > 4 || hashes.some((h) => !/^[0-9a-f]{64}$/.test(h))) c.bad.push("CALENDAR_API_KEY_SHA256");
+  c.done();
+  return hashes;
+}
