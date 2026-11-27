@@ -34,6 +34,8 @@ const PREVIEW_STAFF: StaffView[] = PREVIEW_PEOPLE.map(([name, type, subtype], in
   type,
   subtype,
   subtypeName: subtypeLabel(type, subtype) ?? subtype,
+  // every other one has registered, on an invented day
+  registeredOn: index % 2 === 0 ? `${15 + index} พ.ย. 2569` : null,
 }));
 
 /**

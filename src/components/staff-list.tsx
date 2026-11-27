@@ -63,6 +63,47 @@ function byTypeThenName(a: StaffView, b: StaffView): number {
   return (TYPE_ORDER.get(a.type) ?? 9) - (TYPE_ORDER.get(b.type) ?? 9) || a.name.localeCompare(b.name, "th");
 }
 
+/** Who the list shows by sign-up (Pong, 27 Nov 2026: "display regis status ... Add search filter"). */
+type Status = "" | "yes" | "no";
+const STATUS_OPTIONS: Array<{ value: Status; label: string }> = [
+  { value: "", label: "ทุกคน" },
+  { value: "yes", label: "ลงทะเบียนแล้ว" },
+  { value: "no", label: "ยังไม่ลงทะเบียน" },
+];
+
+/** A status button: smaller than the type buttons, one row of three. */
+const STATUS_OPTION =
+  "flex min-h-11 min-w-0 flex-col items-center justify-center rounded-xl border border-line-strong bg-white px-1 py-1 text-center leading-tight text-ink transition-colors hover:border-brand aria-pressed:border-brand aria-pressed:bg-brand-tint aria-pressed:shadow-[inset_0_0_0_1px_var(--brand)]";
+
+const TICK = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M5 12.5l4.5 4.5L19 7.5" />
+  </svg>
+);
+
+/**
+ * Whether this person has registered: a green tick with the day, or a quiet grey "not yet". The words say it, so the
+ * meaning does not rest on colour alone.
+ */
+function RegisteredTag({ on }: { on: string | null }) {
+  if (!on) {
+    return (
+      <span className="shrink-0 text-right text-xs leading-5 text-muted" data-testid="staff-registered-no">
+        ยังไม่ลงทะเบียน
+      </span>
+    );
+  }
+  return (
+    <span className="flex shrink-0 flex-col items-end text-right" data-testid="staff-registered-yes">
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--live-tint)] px-2 text-xs leading-5 font-semibold text-[var(--live)]">
+        {TICK}
+        ลงทะเบียนแล้ว
+      </span>
+      <span className="mt-0.5 text-[0.6875rem] leading-4 text-muted tabular-nums">{on}</span>
+    </span>
+  );
+}
+
 /** The type's code on a quiet tag, the same width for all four. */
 function TypeTag({ type }: { type: UserType }) {
   return (
@@ -106,6 +147,7 @@ export function StaffList({
   const [type, setType] = useState<UserType | "">("");
   const [subtype, setSubtype] = useState("");
   const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<Status>("");
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [addError, setAddError] = useState("");
   // The email or number field was left once (or the form sent): from then on it says what is wrong as it is typed.
@@ -140,13 +182,21 @@ export function StaffList({
     return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "th"));
   }, [people, type]);
 
+  /** Everyone the type and specialty or unit pick out, before the sign-up filter and the search. */
+  const picked = useMemo(
+    () => people.filter((person) => (!type || person.type === type) && (!subtype || person.subtype === subtype)),
+    [people, type, subtype],
+  );
+  const registeredCount = useMemo(() => people.filter((person) => person.registeredOn).length, [people]);
+  const pickedRegistered = useMemo(() => picked.filter((person) => person.registeredOn).length, [picked]);
+
   const shown = useMemo(() => {
     const needle = searchKey(query);
-    return people.filter(
+    return picked.filter(
       (person) =>
-        (!type || person.type === type) && (!subtype || person.subtype === subtype) && (!needle || searchKey(person.name).includes(needle)),
+        (!status || (status === "yes") === Boolean(person.registeredOn)) && (!needle || searchKey(person.name).includes(needle)),
     );
-  }, [people, type, subtype, query]);
+  }, [picked, status, query]);
 
   const pickType = (next: UserType | "") => {
     setType(next);
@@ -170,6 +220,7 @@ export function StaffList({
   function showAdded(name: string, message: string) {
     setType("");
     setSubtype("");
+    setStatus("");
     setQuery(name);
     setDone(message);
     addRef.current?.close();
@@ -201,7 +252,7 @@ export function StaffList({
         return;
       }
       const subtypeName = subtypeLabel(draft.type, draft.subtype) ?? draft.subtype;
-      setList((current) => [...current, { id: `new-${current.length + 1}`, name, type: draft.type, subtype: draft.subtype, subtypeName }]);
+      setList((current) => [...current, { id: `new-${current.length + 1}`, name, type: draft.type, subtype: draft.subtype, subtypeName, registeredOn: null }]);
       showAdded(name, `เพิ่ม ${name} แล้ว`);
       return;
     }
@@ -244,7 +295,9 @@ export function StaffList({
 
   const summary = (
     <>
-      <p data-testid="staff-summary-count">ผู้ใช้ที่ใช้งานอยู่ {people.length} คน</p>
+      <p data-testid="staff-summary-count">
+        ผู้ใช้ที่ใช้งานอยู่ {people.length} คน · ลงทะเบียนแล้ว {registeredCount} คน
+      </p>
       {done ? (
         <InlineStatus tone="success" role="status" className="mt-1">
           {done}
@@ -314,10 +367,30 @@ export function StaffList({
             </label>
           ) : null}
         </div>
+        <div role="group" aria-label="การลงทะเบียน" className="grid grid-cols-3 gap-1.5" data-testid="staff-status">
+          {STATUS_OPTIONS.map((option) => {
+            const count = option.value === "" ? picked.length : option.value === "yes" ? pickedRegistered : picked.length - pickedRegistered;
+            return (
+              <button
+                key={option.value || "all"}
+                type="button"
+                aria-pressed={status === option.value}
+                onClick={() => setStatus(option.value)}
+                className={STATUS_OPTION}
+                data-testid={`staff-status-${option.value || "all"}`}
+              >
+                <span className="text-[0.8125rem] font-semibold">{option.label}</span>
+                <span className="text-xs text-muted tabular-nums">{count} คน</span>
+              </button>
+            );
+          })}
+        </div>
         <p className="text-sm text-muted" role="status" data-testid="staff-count">
           {shown.length === people.length
             ? `ทั้งหมด ${people.length} คน`
-            : `แสดง ${shown.length} จาก ${people.length} คน${type ? ` · ${TYPE_LABELS[type]}` : ""}`}
+            : `แสดง ${shown.length} จาก ${people.length} คน${type ? ` · ${TYPE_LABELS[type]}` : ""}${
+                status ? ` · ${status === "yes" ? "ลงทะเบียนแล้ว" : "ยังไม่ลงทะเบียน"}` : ""
+              }`}
         </p>
       </div>
 
@@ -328,7 +401,12 @@ export function StaffList({
       ) : (
         <ul className="divide-y divide-line" data-testid="staff-list">
           {shown.map((person) => (
-            <li key={person.id} className="flex items-center gap-3 px-4 py-2.5 sm:px-5" data-type={person.type}>
+            <li
+              key={person.id}
+              className="flex items-center gap-3 px-4 py-2.5 sm:px-5"
+              data-type={person.type}
+              data-registered={person.registeredOn ? "yes" : "no"}
+            >
               <TypeTag type={person.type} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[0.9375rem] font-semibold text-ink">{person.name}</p>
@@ -340,6 +418,7 @@ export function StaffList({
                   </span>
                 </p>
               </div>
+              <RegisteredTag on={person.registeredOn} />
             </li>
           ))}
         </ul>
