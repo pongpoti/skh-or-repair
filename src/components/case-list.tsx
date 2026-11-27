@@ -366,9 +366,14 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
                   วันเวลาที่จองคิว : {item.bookedAt}
                 </p>
               ) : null}
-              {item.shift === "out" || item.note || booking ? (
+              {item.shift === "out" || item.note || item.via || booking ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   {item.shift === "out" ? <span className="badge badge-warning">นอกเวลา</span> : null}
+                  {item.via === "calendar" ? (
+                    <span className="badge badge-muted" data-testid="row-via-calendar">
+                      จากปฏิทิน
+                    </span>
+                  ) : null}
                   {item.note ? (
                     <button
                       type="button"

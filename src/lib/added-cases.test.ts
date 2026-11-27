@@ -223,7 +223,7 @@ test("the room choice is checked: only OR X or ห้องทำแผล, and 
   // a day without the room: another day may have one
   assert.deepEqual(
     check({ ...ok, room: "dept" }, { subtype: "OBGYN" }),
-    { ok: false, field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้" },
+    { ok: false, code: "obgyn_building", field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้" },
   );
   assert.deepEqual(error({ room: "dressing", scrubDoes: true, operation: "x" }), "ok", "no department needed for the dressing room");
   assert.equal(check({ ...ok, room: "dept" }, { subtype: null }).ok, false, "but needed for OR X");
@@ -276,6 +276,7 @@ test("dates: from the earliest day up to 60 days ahead, weekdays only, not a hol
   };
   assert.deepEqual(error("2026-11-13"), {
     ok: false,
+    code: "date_too_early",
     field: "date",
     error: "จองได้ตั้งแต่ วันจันทร์ที่ 16 พ.ย. 2569",
     earliest: "2026-11-16",
@@ -283,19 +284,20 @@ test("dates: from the earliest day up to 60 days ahead, weekdays only, not a hol
   // Friday after 15:00: Monday has closed, and the answer carries the new first day for the form's calendar
   assert.deepEqual(error("2026-11-16", { earliest: earliestBookingDay(TODAY, at(15, 30)) }), {
     ok: false,
+    code: "date_too_early",
     field: "date",
     error: "หลังเวลา 15.00 น. ระบบจะปิดรับการจอง ของวันทำการถัดไป · จองได้ตั้งแต่ วันอังคารที่ 17 พ.ย. 2569",
     earliest: "2026-11-17",
   });
   assert.equal(error("2026-11-17", { earliest: "2026-11-17" }), "ok");
   for (const date of [undefined, "", "2026-11-16x", "2026-02-30", 20261116]) {
-    assert.deepEqual(error(date), { ok: false, field: "date", error: "เลือกวันที่ผ่าตัด" }, JSON.stringify(date));
+    assert.deepEqual(error(date), { ok: false, code: "date_missing", field: "date", error: "เลือกวันที่ผ่าตัด" }, JSON.stringify(date));
   }
   assert.equal(error(addDays(TODAY, 60)), "ok");
   assert.match((error(addDays(TODAY, 61)) as { error: string }).error, /ไม่เกิน 60 วัน/);
   assert.match((error("2026-11-21") as { error: string }).error, /เสาร์-อาทิตย์/);
   const holiday = error("2026-12-10", { holidays: DECEMBER });
-  assert.deepEqual(holiday, { ok: false, field: "date", error: "วันหยุด (วันรัฐธรรมนูญ) เลือกวันอื่น" });
+  assert.deepEqual(holiday, { ok: false, code: "holiday", field: "date", error: "วันหยุด (วันรัฐธรรมนูญ) เลือกวันอื่น" });
 });
 
 test("the HN is required, 7 digits, stored normalised", () => {
@@ -313,9 +315,9 @@ test("the HN is required, 7 digits, stored normalised", () => {
 test("the operation's name is required (Pong, 15 Nov 2026) and at most 300 characters", () => {
   for (const operation of [undefined, null, "", "   ", "\u200b"]) {
     const checked = check({ ...ok, operation });
-    assert.deepEqual(checked, { ok: false, field: "operation", error: "ใส่ชื่อการผ่าตัด" }, JSON.stringify(operation));
+    assert.deepEqual(checked, { ok: false, code: "operation_invalid", field: "operation", error: "ใส่ชื่อการผ่าตัด" }, JSON.stringify(operation));
   }
-  assert.deepEqual(check({ ...ok, operation: 5 }), { ok: false, field: "operation", error: "ชื่อการผ่าตัดไม่ถูกต้อง" });
+  assert.deepEqual(check({ ...ok, operation: 5 }), { ok: false, code: "operation_invalid", field: "operation", error: "ชื่อการผ่าตัดไม่ถูกต้อง" });
   assert.equal(check({ ...ok, operation: "x".repeat(MAX_OPERATION) }).ok, true);
   assert.equal(check({ ...ok, operation: "x".repeat(MAX_OPERATION + 1) }).ok, false);
 });
@@ -324,13 +326,13 @@ test("the shift defaults to in hours and must be in or out; nothing at all is re
   const checked = check({ date: ok.date, hn: ok.hn, operation: ok.operation, start: ok.start, end: ok.end });
   assert.ok(checked.ok);
   assert.equal(checked.value.shift, "in");
-  assert.deepEqual(check({ ...ok, shift: "night" }), { ok: false, field: "shift", error: "เลือกในเวลาหรือนอกเวลา" });
+  assert.deepEqual(check({ ...ok, shift: "night" }), { ok: false, code: "shift_invalid", field: "shift", error: "เลือกในเวลาหรือนอกเวลา" });
   assert.equal(check(null).ok, false);
 });
 
 test("a department without a room that day is said, about no field the doctor can fix, or about the day", () => {
-  assert.deepEqual(check(ok, { subtype: null }), { ok: false, field: undefined, error: "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล" });
-  assert.deepEqual(check(ok, { subtype: "OBGYN" }), { ok: false, field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้" });
+  assert.deepEqual(check(ok, { subtype: null }), { ok: false, code: "no_department", field: undefined, error: "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล" });
+  assert.deepEqual(check(ok, { subtype: "OBGYN" }), { ok: false, code: "obgyn_building", field: undefined, error: "ช่วงปิดซ่อม สูติ-นรีเวชผ่าตัดที่อาคารแม่ จองที่นี่ไม่ได้" });
 });
 
 test("added cases join the board after its own, numbered per room", () => {

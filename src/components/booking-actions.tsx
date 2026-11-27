@@ -10,6 +10,7 @@ import {
   bookingState,
   editClosesOn,
   NO_OPERATION_LABEL,
+  CALENDAR_TEXT,
   NOTE_ONLY_TEXT,
   placeRoomName,
   STARTED_TEXT,
@@ -210,14 +211,15 @@ export function BookingSheet({
   }, [opened, step]);
   const settled = () => performance.now() - shownAt.current >= SETTLE_MS;
   // A step that takes the focused button away (ไม่ยกเลิก, ยืนยันยกเลิก, เลิกทำ), or a wait that disables it, leaves the
-  // focus inside the sheet: on เลิกทำ once a cancel is done (the one thing worth doing then), else on the sheet's title.
+  // focus inside the sheet: on เลิกทำ once a cancel is done (the one thing worth doing then), else on the sheet's title
+  // (a calendar booking's cancel has no เลิกทำ).
   // The confirm step's back arrow takes it itself (autoFocus); an opening sheet gets it from showModal.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog?.open || pending) return;
     const focused = document.activeElement;
     const lost = !dialog.contains(focused) || focused === titleRef.current;
-    if (step === "cancelled" && lost) restoreRef.current?.focus();
+    if (step === "cancelled" && lost && restoreRef.current) restoreRef.current.focus();
     else if (!dialog.contains(focused)) titleRef.current?.focus({ preventScroll: true });
   }, [step, pending, dialogRef]);
   // Whether the press began on the backdrop: a selection dragged out of the card ends with a click on the dialog itself.
@@ -226,6 +228,8 @@ export function BookingSheet({
 
   const state = booking ? bookingState(booking.date, own.today, own.earliest) : "past";
   const underWay = row ? UNDER_WAY.has(row.status) : false;
+  // A booking from the doctor's calendar (lib/calendar-api.ts) changes there: here it can only be cancelled for good.
+  const fromCalendar = booking?.via === "calendar";
   const room = booking ? getRoom(booking.roomId) : undefined;
   const where = booking ? bookedRoom(booking, own.periods) : null;
   // The room the case is in, and its place there: a copy in a department's other room (BoardRow.shownFrom) says its own.
@@ -363,7 +367,13 @@ export function BookingSheet({
           {step === "menu" ? (
             <>
               <p className="mt-1 text-[0.8125rem] leading-5 text-ink-3" data-testid="booking-sheet-rule">
-                {underWay ? STARTED_TEXT : state === "open" ? editDeadline(booking.date, own.today, own.holidays) : NOTE_ONLY_TEXT}
+                {underWay
+                  ? STARTED_TEXT
+                  : fromCalendar
+                    ? CALENDAR_TEXT
+                    : state === "open"
+                      ? editDeadline(booking.date, own.today, own.holidays)
+                      : NOTE_ONLY_TEXT}
               </p>
               {done ? (
                 <InlineStatus tone="success" role="status" className="mt-3">
@@ -371,7 +381,7 @@ export function BookingSheet({
                 </InlineStatus>
               ) : null}
               <ul className="booking-actions mt-3" data-testid="booking-actions">
-                {underWay ? null : (
+                {underWay || fromCalendar ? null : (
                   <>
                     <Action
                       icon="edit"
@@ -400,7 +410,13 @@ export function BookingSheet({
           ) : step === "confirm" ? (
             <>
               <p className="mt-2 text-sm leading-6 text-ink-2" data-testid="booking-confirm-note">
-                {row?.source === "matched" ? "เคสนี้อยู่ในตาราง HOSxP แล้ว แจ้งห้องผ่าตัดด้วย" : "เลิกทำได้ภายใน 10 นาที"}
+                {row?.source === "matched"
+                  ? fromCalendar
+                    ? "เคสนี้อยู่ในตาราง HOSxP แล้ว แจ้งห้องผ่าตัดด้วย · ยกเลิกแล้วเลิกทำไม่ได้"
+                    : "เคสนี้อยู่ในตาราง HOSxP แล้ว แจ้งห้องผ่าตัดด้วย"
+                  : fromCalendar
+                    ? "ยกเลิกแล้วเลิกทำไม่ได้ จองใหม่ที่ปฏิทิน"
+                    : "เลิกทำได้ภายใน 10 นาที"}
               </p>
               {error ? (
                 <InlineStatus tone="warning" role="alert" className="mt-3">
@@ -422,9 +438,11 @@ export function BookingSheet({
                   {done}
                 </InlineStatus>
               )}
-              <button ref={restoreRef} type="button" className="btn btn-secondary mt-3 w-full" onClick={restore} disabled={pending} aria-busy={pending} data-testid="booking-restore">
-                {pending ? "กำลังจองคืน…" : "เลิกทำ จองคืนคิวเดิม"}
-              </button>
+              {fromCalendar ? null : (
+                <button ref={restoreRef} type="button" className="btn btn-secondary mt-3 w-full" onClick={restore} disabled={pending} aria-busy={pending} data-testid="booking-restore">
+                  {pending ? "กำลังจองคืน…" : "เลิกทำ จองคืนคิวเดิม"}
+                </button>
+              )}
             </>
           )}
         </div>

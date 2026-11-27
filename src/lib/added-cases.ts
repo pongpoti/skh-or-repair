@@ -156,6 +156,11 @@ export type AddedCase = Omit<CaseInput, "hn" | "dressing"> & {
   bookedAt?: string;
   /** The doctor's last edit of it (cases.edited_at), an ISO time; left out when it was never edited. */
   editedAt?: string;
+  /**
+   * "calendar": the calendar API pushed it (cases.api_client; lib/calendar-api.ts). It changes at the calendar: on the
+   * board its doctor may only cancel it. Left out for a booking made on the board.
+   */
+  via?: "calendar";
 };
 
 const BOOKED_AT = new Intl.DateTimeFormat("th-TH-u-ca-buddhist", {
@@ -182,10 +187,34 @@ export function bookedAtText(iso: string): string {
 /** The form field an error is about, for the form to mark and focus. */
 export type CaseField = "date" | "time" | "hn" | "operation" | "room" | "shift" | "note";
 
+/**
+ * Why checkCase refused a booking, for a caller that is no form (the calendar API, lib/calendar-api.ts, answers with it):
+ * the day is before the earliest, too far ahead, a weekend or a holiday; the time, HN, operation, shift, room choice or
+ * note is wrong; or the doctor's department has no room that day (NoRoomReason), or only the note may change.
+ */
+export type CaseErrorCode =
+  | "date_missing"
+  | "date_too_early"
+  | "date_too_far"
+  | "weekend"
+  | "holiday"
+  | "time_invalid"
+  | "hn_invalid"
+  | "operation_invalid"
+  | "operation_too_long"
+  | "shift_invalid"
+  | "room_invalid"
+  | "obgyn_building"
+  | "no_department"
+  | "no_room"
+  | "no_dressing_room"
+  | "note_invalid"
+  | "note_only";
+
 /** `earliest` is set when the day was refused for being too soon, so the form can move its calendar on. */
 export type CheckedCase =
   | { ok: true; value: CaseInput }
-  | { ok: false; error: string; field?: CaseField; earliest?: string };
+  | { ok: false; error: string; code: CaseErrorCode; field?: CaseField; earliest?: string };
 
 /** A real day written YYYY-MM-DD. */
 export function isIsoDate(v: unknown): v is string {
@@ -309,6 +338,14 @@ export const NO_ROOM_NOTE: Readonly<Record<NoRoomReason, string>> = {
   "no-department": "ไม่ทราบสาขา",
   "no-room": "ไม่มีในวันที่เลือก",
   "no-dressing-room": "ไม่มีในวันที่เลือก",
+};
+
+/** NoRoomReason as checkCase's CaseErrorCode. */
+const NO_ROOM_CODE: Readonly<Record<NoRoomReason, CaseErrorCode>> = {
+  "obgyn-building": "obgyn_building",
+  "no-department": "no_department",
+  "no-room": "no_room",
+  "no-dressing-room": "no_dressing_room",
 };
 
 const noRoom = (reason: NoRoomReason): BookingRoom => ({ ok: false, reason, error: NO_ROOM_TEXT[reason] });
@@ -608,6 +645,12 @@ export const UNDER_WAY: ReadonlySet<CaseStatus> = new Set<CaseStatus>(["in-progr
 export const STARTED_TEXT = "เคสนี้เริ่มแล้ว แก้ไขไม่ได้";
 
 /**
+ * A booking the calendar API pushed (AddedCase.via): it is edited, moved and cancelled at the doctor's calendar, which
+ * pushes the change; on the board its doctor may only cancel it (or book again), and a cancel cannot be undone.
+ */
+export const CALENDAR_TEXT = "เคสนี้มาจากปฏิทิน แก้ไขที่ปฏิทิน";
+
+/**
  * Booking again (จองซ้ำวันอื่น) on a day this doctor has already booked the same patient into the same room: one more tap
  * on จองห้อง after a save, or the form's day left as it opened. Another room the same day is a new booking's to make.
  */
@@ -658,26 +701,32 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   // Only รพ.ท่าฉลอม's bookings carry their place; รพ.สมุทรสาคร's stay as they were.
   const at = place === "tha-chalom" ? { place } : {};
   const raw = (input ?? {}) as Record<string, unknown>;
-  const refuse = (field: CaseField | undefined, error: string, more: { earliest?: string } = {}): CheckedCase => ({ ok: false, error, field, ...more });
+  const refuse = (code: CaseErrorCode, field: CaseField | undefined, error: string, more: { earliest?: string } = {}): CheckedCase => ({
+    ok: false,
+    error,
+    code,
+    field,
+    ...more,
+  });
   const date = raw.date;
-  if (!isIsoDate(date)) return refuse("date", "เลือกวันที่ผ่าตัด");
+  if (!isIsoDate(date)) return refuse("date_missing", "date", "เลือกวันที่ผ่าตัด");
   // An edit that keeps its booking's day: the day was checked when it was booked. Its day closed meanwhile (15:00 the day
   // before passed): only the note may change, as MX has the day's list.
   const keepsDay = editing !== undefined && date === editing.date;
   const closed = keepsDay && date < earliest;
   if (!keepsDay) {
-    if (date < earliest) return refuse("date", earliestText(today, earliest, holidays), { earliest });
+    if (date < earliest) return refuse("date_too_early", "date", earliestText(today, earliest, holidays), { earliest });
     const ahead = context.ahead ?? BOOK_AHEAD_DAYS;
-    if (date > addDays(today, ahead)) return refuse("date", `จองล่วงหน้าได้ไม่เกิน ${ahead} วัน`);
-    if (workdayIndex(date) === null) return refuse("date", "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
+    if (date > addDays(today, ahead)) return refuse("date_too_far", "date", `จองล่วงหน้าได้ไม่เกิน ${ahead} วัน`);
+    if (workdayIndex(date) === null) return refuse("weekend", "date", "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
     const holiday = holidayIn(holidays, date);
-    if (holiday) return refuse("date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
+    if (holiday) return refuse("holiday", "date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
   }
 
   // The time, picked on the day view before the rest (Pong, 27 Nov 2026), is the doctor's to give or not (Pong, 27 Nov
   // 2026: "Add toggle time input : disable as default"): a booking with none takes no time from anyone.
   const time = checkTime(raw.start, raw.end);
-  if (!time.ok) return refuse("time", time.error);
+  if (!time.ok) return refuse("time_invalid", "time", time.error);
   const start = time.time?.start ?? null;
   const end = time.time?.end ?? null;
 
@@ -685,9 +734,9 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
     // Only the note: the HN, the operation and the room choice must be the booking's own, as the form leaves them (locked;
     // a booking from before they were required may have no HN or name). The room stays where the day's list has it.
     const kept = changedField(raw, editing, periods);
-    if (kept) return refuse(kept, NOTE_ONLY_TEXT);
+    if (kept) return refuse("note_only", kept, NOTE_ONLY_TEXT);
     const note = checkNote(raw.note);
-    if (!note.ok) return refuse("note", note.error);
+    if (!note.ok) return refuse("note_invalid", "note", note.error);
     const room = bookedRoom(editing, periods);
     return {
       ok: true,
@@ -708,32 +757,35 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   }
 
   const hn = checkHn(raw.hn);
-  if (!hn.ok) return refuse("hn", hn.error);
+  if (!hn.ok) return refuse("hn_invalid", "hn", hn.error);
 
   if (raw.operation !== undefined && raw.operation !== null && typeof raw.operation !== "string") {
-    return refuse("operation", "ชื่อการผ่าตัดไม่ถูกต้อง");
+    return refuse("operation_invalid", "operation", "ชื่อการผ่าตัดไม่ถูกต้อง");
   }
   const operation = cleanOperation(typeof raw.operation === "string" ? raw.operation : "");
-  if (!operation) return refuse("operation", "ใส่ชื่อการผ่าตัด");
-  if (operation.length > MAX_OPERATION) return refuse("operation", `ชื่อการผ่าตัดยาวเกิน ${MAX_OPERATION} ตัวอักษร`);
+  if (!operation) return refuse("operation_invalid", "operation", "ใส่ชื่อการผ่าตัด");
+  if (operation.length > MAX_OPERATION) return refuse("operation_too_long", "operation", `ชื่อการผ่าตัดยาวเกิน ${MAX_OPERATION} ตัวอักษร`);
 
   const shift = raw.shift ?? "in";
-  if (shift !== "in" && shift !== "out") return refuse("shift", "เลือกในเวลาหรือนอกเวลา");
+  if (shift !== "in" && shift !== "out") return refuse("shift_invalid", "shift", "เลือกในเวลาหรือนอกเวลา");
 
   const choice = raw.room ?? "dept";
-  if (choice !== "dept" && choice !== "dressing") return refuse("room", "เลือกห้องผ่าตัด");
+  if (choice !== "dept" && choice !== "dressing") return refuse("room_invalid", "room", "เลือกห้องผ่าตัด");
   let scrubDoes: boolean | null = null;
   if (choice === "dressing") {
-    if (typeof raw.scrubDoes !== "boolean") return refuse("room", `ห้องทำแผล: ตอบก่อนว่า ${SCRUB_QUESTION}`);
+    if (typeof raw.scrubDoes !== "boolean") return refuse("room_invalid", "room", `ห้องทำแผล: ตอบก่อนว่า ${SCRUB_QUESTION}`);
     scrubDoes = raw.scrubDoes;
   }
   const room = roomToBook(place, subtype, operation, date, periods, choice, keepsDay ? editing : undefined);
   // No room that day: another day may have one.
-  if (!room.ok) return refuse(room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
+  if (!room.ok) {
+    const code = NO_ROOM_CODE[room.reason];
+    return refuse(code, room.reason === "no-room" || room.reason === "no-dressing-room" ? "date" : undefined, room.error);
+  }
 
   // Last, as in the form.
   const note = checkNote(raw.note);
-  if (!note.ok) return refuse("note", note.error);
+  if (!note.ok) return refuse("note_invalid", "note", note.error);
   return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note: note.note, start, end, ...at } };
 }
 
