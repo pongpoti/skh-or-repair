@@ -25,7 +25,6 @@ import {
   DRESSING_EXAMPLES,
   LONG_OPERATION,
   practiceRoom,
-  STAFF_TUTORIAL_COOKIE,
   TUTORIAL_COOKIE,
   TUTORIAL_ME,
   TUTORIAL_NOTICE,
@@ -45,10 +44,10 @@ import {
  * day before and after MX's 16:00 upload, and is told what each icon, mark and colour means. Nothing is saved but the
  * note that the doctor has seen it (actions.ts seeTutorial), which stops the board from opening it by itself again.
  *
- * The staff's version (Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking. Always on
- * tutorial for non-DR"): RN, PN, PCA and MX, who cannot book, walk the same made-up day with no booking form and no
- * booking steps: the plan, a room's list before and after the upload, the dressing room, the real days before, and the
- * symbols. The board opens it each time they open the app (lib/tutorial.ts STAFF_TUTORIAL_COOKIE).
+ * The staff's version (Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking"): RN, PN,
+ * PCA and MX, who cannot book, walk the same made-up day with no booking form and no booking steps: the plan, a room's
+ * list before and after the upload, the dressing room and the symbols. The board opens it on their first visit, once, as
+ * a doctor's (Pong, the same evening: "Disable always-on", where it had opened on every app open).
  */
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -236,7 +235,7 @@ export function Tutorial({
   back?: "skh" | "tha-chalom";
   /** The board sent the doctor here on their first visit: the welcome offers to skip, and starting or skipping notes it. */
   first: boolean;
-  /** The doctor's users.id, for the seen cookie (null for an admin who is not a doctor); for staff, the cookie's value. */
+  /** The viewer's users.id, for the seen cookie and row (null for an admin who is not a doctor, and off a first visit). */
   seenKey: string | null;
   /** The doctor's name and the department the practice booking goes by (lib/tutorial.ts practiceSubtype). */
   doctor: { name: string; subtype: string };
@@ -387,18 +386,13 @@ export function Tutorial({
   }
 
   /**
-   * Notes the tutorial seen: a cookie at once, which the board reads, and the doctor's row for every other phone. The
-   * cookie goes before any navigation, so the board never sends the doctor back here because the row was not written
-   * yet, or could not be written at all.
+   * Notes the tutorial seen: a cookie at once, which the board reads, and the user's row for every other phone. The
+   * cookie goes before any navigation, so the board never sends anyone back here because the row was not written yet,
+   * or could not be written at all.
    */
   function seen() {
     if (!first || !seenKey) return;
     const secure = window.location.protocol === "https:" ? "; secure" : "";
-    if (staff) {
-      // No max-age: a session cookie, gone when the app is closed, so the next open starts here again.
-      document.cookie = `${STAFF_TUTORIAL_COOKIE}=${encodeURIComponent(seenKey)}; path=/; samesite=lax${secure}`;
-      return;
-    }
     document.cookie = `${TUTORIAL_COOKIE}=${encodeURIComponent(seenKey)}; path=/; max-age=31536000; samesite=lax${secure}`;
     void seeTutorial();
   }
@@ -1445,7 +1439,7 @@ function WelcomeCard({
       </div>
       {first ? (
         <p className="coach-card-note" data-testid="coach-welcome-note">
-          {staff ? "บทเรียนเปิดทุกครั้งที่เข้าแอป แตะ ข้ามไปก่อน เพื่อไปที่ตารางได้เลย" : "ดูบทเรียนอีกครั้งได้ที่เมนูรูปโปรไฟล์ › วิธีใช้งาน"}
+          ดูบทเรียนอีกครั้งได้ที่เมนูรูปโปรไฟล์ › วิธีใช้งาน
         </p>
       ) : null}
     </Card>

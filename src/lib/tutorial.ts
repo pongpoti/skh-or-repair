@@ -62,21 +62,12 @@ export function practiceSubtype(subtype: string | null | undefined, date: string
 }
 
 /**
- * The cookie the tutorial sets when a doctor starts or skips it, holding their users.id: the board reads it as well as
- * the doctor's tutorial_seen row, so a skip never comes back because the row was not written yet, or could not be.
+ * The cookie the tutorial sets when someone starts or skips it on their first visit, holding their users.id: the board
+ * reads it as well as their tutorial_seen row, so a skip never comes back because the row was not written yet, or could
+ * not be. Doctors since 19 Nov 2026; the rest of the staff (RN, PN, PCA, MX) since 27 Nov 2026, when Pong turned their
+ * tutorial from every app open to once ("Disable always-on").
  */
 export const TUTORIAL_COOKIE = "tutorial_seen";
-
-/**
- * The staff's tutorial (Pong, 27 Nov 2026: "Create tutorial for non-DR users, similar to DR except booking. Always on
- * tutorial for non-DR"): RN, PN, PCA and MX get it each time they open the app, not once. The cookie that says it was
- * started or skipped in this visit is a session cookie (no max-age): the browser drops it when the app is closed, so the
- * next open starts with the tutorial again, while moving around the board in the same visit does not.
- */
-export const STAFF_TUTORIAL_COOKIE = "staff_tutorial";
-
-/** The staff cookie's value. */
-export const STAFF_TUTORIAL_SEEN = "1";
 
 /** Who the tutorial is for: a doctor (with the practice booking) or the rest of the staff (looking only). */
 export type TutorialAudience = "doctor" | "staff";

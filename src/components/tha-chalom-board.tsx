@@ -352,6 +352,7 @@ export function ThaChalomBoard({
           doctor={adding.doctor}
           today={adding.today}
           earliest={adding.earliest}
+          admin={adding.admin}
           holidays={adding.holidays}
           unlisted={adding.unlisted}
           periods={periods}

@@ -4,8 +4,8 @@ import type { Pool, PoolClient } from "pg";
 type Q = Pool | PoolClient;
 
 /**
- * Whether a doctor (users.id) has seen the tutorial (table tutorial_seen). A failed read counts as seen: the tutorial
- * never stands between a doctor and the board.
+ * Whether a user (users.id: a doctor, or RN, PN, PCA or MX) has seen the tutorial (table tutorial_seen). A failed read
+ * counts as seen: the tutorial never stands between anyone and the board.
  */
 export async function tutorialSeen(pool: Q, userId: string): Promise<boolean> {
   try {
@@ -17,7 +17,7 @@ export async function tutorialSeen(pool: Q, userId: string): Promise<boolean> {
   }
 }
 
-/** Notes that a doctor started or skipped the tutorial, so the board no longer opens it by itself. */
+/** Notes that a user started or skipped the tutorial, so the board no longer opens it by itself. */
 export async function markTutorialSeen(pool: Q, userId: string): Promise<void> {
   await pool.query("INSERT INTO tutorial_seen (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING", [userId]);
 }

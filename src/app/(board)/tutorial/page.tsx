@@ -10,7 +10,7 @@ import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
 import { BOARD_PATH } from "@/lib/places";
 import { currentRepairPeriods } from "@/lib/repair-store";
-import { practiceSubtype, STAFF_TUTORIAL_SEEN, tutorialBack, type TutorialAudience } from "@/lib/tutorial";
+import { practiceSubtype, tutorialBack, type TutorialAudience } from "@/lib/tutorial";
 import { boardViewer } from "@/lib/roles";
 import { fullName } from "@/lib/user-list";
 
@@ -24,15 +24,17 @@ export const dynamic = "force-dynamic";
  * doctor. Nothing on this page reads or writes a real case.
  *
  * Everyone else (RN, PN, PCA and MX) gets the staff's version (Pong, 27 Nov 2026: "Create tutorial for non-DR users,
- * similar to DR except booking. Always on tutorial for non-DR"): the same day with no booking, which the board opens
- * each time they open the app (?first=1, with ?back=tha-chalom when sent from รพ.ท่าฉลอม's board). An admin sees it with
- * ?as=staff.
+ * similar to DR except booking"): the same day with no booking, which the board opens on their first visit, once, as a
+ * doctor's (?first=1, with ?back=tha-chalom when sent from รพ.ท่าฉลอม's board; the same evening Pong turned it from every
+ * app open to once: "Disable always-on"). An admin sees it with ?as=staff.
  */
 export default async function TutorialPage({ searchParams }: { searchParams: Promise<{ first?: string; back?: string; as?: string }> }) {
   const user = await requireUser();
   const params = await searchParams;
   const admin = isAdmin(user.sub);
   let doctor: { id: string; name: string; subtype: string | null } | null = null;
+  // The users.id the first visit notes as seen (lib/tutorial-store.ts), for the staff too.
+  let userId: string | null = null;
   let mx = false;
   let failed = false;
   try {
@@ -41,6 +43,7 @@ export default async function TutorialPage({ searchParams }: { searchParams: Pro
     if (found) doctor = { id: String(found.id), name: fullName(found), subtype: found.subtype };
     // MX sees every HN on the board (lib/roles.ts); an admin does too, but looks at the staff's version as RN, PN or PCA.
     mx = viewer.allHn && !admin;
+    userId = viewer.userId;
   } catch (error) {
     failed = true;
     console.error("[tutorial] doctor lookup failed:", (error as Error).message);
@@ -64,7 +67,7 @@ export default async function TutorialPage({ searchParams }: { searchParams: Pro
       mx={mx}
       back={back}
       first={audience === "staff" ? staffFirst : params.first === "1" && doctor !== null}
-      seenKey={audience === "staff" ? (staffFirst ? STAFF_TUTORIAL_SEEN : null) : (doctor?.id ?? null)}
+      seenKey={audience === "staff" ? (staffFirst ? userId : null) : (doctor?.id ?? null)}
       doctor={{ name, subtype }}
       ownSubtype={doctor?.subtype ?? null}
       profile={{ name: profile.name, role: profile.role, image: user.picture ?? null }}

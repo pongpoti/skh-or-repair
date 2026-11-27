@@ -438,8 +438,9 @@ BEGIN
   END IF;
 END $$;
 ALTER TABLE workbook_uploads ADD COLUMN IF NOT EXISTS tha_chalom boolean NOT NULL DEFAULT false;
--- Doctors who have seen the tutorial (/tutorial; Pong, 19 Nov 2026): a doctor's first visit to the board goes to it
--- once, and a row here, written when they start or skip it, stops that. The tutorial itself saves nothing.
+-- Who has seen the tutorial (/tutorial): a doctor's first visit to the board goes to it once (Pong, 19 Nov 2026), and
+-- so does RN's, PN's, PCA's and MX's (27 Nov 2026), and a row here, written when they start or skip it, stops that. The
+-- tutorial itself saves nothing.
 CREATE TABLE IF NOT EXISTS tutorial_seen (
   user_id  integer     PRIMARY KEY REFERENCES users (id),
   seen_at  timestamptz NOT NULL DEFAULT now()

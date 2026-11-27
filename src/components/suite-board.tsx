@@ -57,9 +57,11 @@ export type CaseAdding = {
   doctor: Doctor;
   /** Today in Thailand, YYYY-MM-DD. */
   today: string;
-  /** The first day the doctor can book (lib/added-cases.ts earliestBookingDay), by the server's clock. */
+  /** The first day the doctor can book (lib/added-cases.ts firstBookingDay), by the server's clock. */
   earliest: string;
-  /** The holidays from today to 60 days ahead, which the calendar closes. */
+  /** An admin, who books with no time limits: from today at any hour, a year ahead (lib/added-cases.ts bookAheadDays). */
+  admin?: boolean;
+  /** The holidays from today to 60 days ahead (a year for an admin), which the calendar closes. */
   holidays: readonly Holiday[];
   /** The years in those 60 days the BOT gave no holidays for (lib/holidays.ts), named under the calendar. */
   unlisted: readonly number[];
@@ -659,6 +661,7 @@ export function SuiteBoard({
           doctor={adding.doctor}
           today={adding.today}
           earliest={adding.earliest}
+          admin={adding.admin}
           holidays={adding.holidays}
           unlisted={adding.unlisted}
           periods={periods}

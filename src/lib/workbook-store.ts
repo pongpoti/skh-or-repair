@@ -1,6 +1,7 @@
 import "server-only";
 import type { Pool, PoolClient } from "pg";
 import type { DeptCode } from "./allocation";
+import { bangkokParts } from "./days";
 import { withTx } from "./db";
 import { normalizeHn } from "./hn";
 import type { PlaceId } from "./places";
@@ -218,7 +219,8 @@ async function insertCases(c: PoolClient, items: readonly { uploadId: string; it
 /**
  * Saves an upload and its cases (both hospitals', each case with its `place`) in one transaction, so the board never
  * sees half a file. The upload is marked as keeping รพ.ท่าฉลอม's cases (Upload.thaChalom). The same transaction deletes
- * every list of the days before this upload's cycle day, at both hospitals (deletePastLists), so patient numbers are
+ * every list of the days before this upload's cycle day (or the day it was made, if earlier), at both hospitals
+ * (deletePastLists), so patient numbers are
  * not kept longer than the boards need them: neither board shows a past day (Pong, 27 Nov 2026: "Disable past day view
  * and clear pastday data for both places"). Every HN is stored normalised; a case id seen twice keeps its first row.
  */
@@ -246,7 +248,10 @@ export async function saveUpload(pool: Pool, input: UploadInput): Promise<Upload
       c,
       cases.map((item) => ({ uploadId: upload.id, item })),
     );
-    await deletePastLists(c, input.cycleDay);
+    // The day it was made, in Bangkok: an admin's upload for a later day counts in a later cycle (app/upload/actions.ts
+    // adminCycleDay), which must not take the days in between with it.
+    const made = bangkokParts(input.uploadedAt).date;
+    await deletePastLists(c, input.cycleDay < made ? input.cycleDay : made);
     return upload;
   });
 }
