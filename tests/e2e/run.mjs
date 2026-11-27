@@ -1281,7 +1281,7 @@ async function main() {
       const tabsOf = () =>
         page.$$eval('[data-testid="place-tab"]', (els) => els.map((el) => [el.dataset.place, (el.firstElementChild ?? el).textContent.trim(), el.getAttribute("href"), el.getAttribute("aria-current")]));
       assert(
-        JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "รพ.สมุทรสาคร", null, "page"], ["tha-chalom", "รพ.ท่าฉลอม", "/tha-chalom", null]]),
+        JSON.stringify(await tabsOf()) === JSON.stringify([["skh", "สมุทรสาคร", null, "page"], ["tha-chalom", "ท่าฉลอม", "/tha-chalom", null]]),
         `the switch on รพ.สมุทรสาคร's board: ${JSON.stringify(await tabsOf())}`,
       );
       // the account menu has no way to a choice of hospital any more, and the same links on both boards
