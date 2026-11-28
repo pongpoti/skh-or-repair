@@ -146,6 +146,7 @@ export default async function PreviewPage({
         showAccount={Boolean(params.account)}
         // ?admin=1 shows the bar as an admin sees it.
         adminHref={params.admin ? "/preview/admin" : null}
+        logHref={params.admin ? "/preview/admin/bookings" : null}
         uploadHref={params.mx || params.admin ? "/upload" : null}
         place={{ current: "skh", hrefs: { skh: "/preview", "tha-chalom": "/preview/tha-chalom" } }}
       />

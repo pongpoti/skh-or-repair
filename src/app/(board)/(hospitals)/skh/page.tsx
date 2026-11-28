@@ -148,6 +148,8 @@ export default async function BoardPage({
         image={user.picture}
         // Admins are listed by LINE user id (AUTH_ADMIN_LINE_IDS), the session's sub.
         adminHref={admin ? "/admin" : null}
+        // The booking log, for admins only (Pong, 28 Nov 2026: "logged booking cases dashboard, opened from admin profile").
+        logHref={admin ? "/admin/bookings" : null}
         uploadHref={canUpload ? "/upload" : null}
         // The doctors' tutorial (Pong, 19 Nov 2026), and the staff's for everyone else (Pong, 27 Nov 2026).
         helpHref="/tutorial"

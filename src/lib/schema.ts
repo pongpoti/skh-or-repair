@@ -475,4 +475,78 @@ BEGIN
     ALTER TABLE cases ADD COLUMN diagnosis text CONSTRAINT cases_diagnosis_check CHECK (btrim(diagnosis) <> '' AND char_length(diagnosis) <= 300);
   END IF;
 END $$;
+-- The bookings' history for the admin's booking log (/admin/bookings; Pong, 28 Nov 2026: "Create logged booking cases
+-- dashboard, opened from admin profile"): one row for each thing that happened to a booking, written by the trigger
+-- below on every insert and update of cases, so no way of changing a booking can miss it. kind is book (made), edit
+-- (its HN, patient's name, diagnosis, operation, room choice, scrub answer, note or time changed), move (its day, room
+-- or hospital changed, with or without other fields), cancel (removed) or restore (booked back after a cancel). via is
+-- calendar when the calendar API made the change (lib/calendar-api.ts sets orskh.via in its transaction), board
+-- otherwise. changes holds each changed field as [before, after] for edit and move, NULL otherwise. No foreign key, so
+-- the tests' TRUNCATE of cases keeps working; a deleted case takes its history with it (the delete trigger).
+-- Bookings made before the log began get their history once from their own times: book at created_at, an edit without
+-- its details at edited_at, a cancel at removed_at.
+DO $$
+BEGIN
+  IF to_regclass('case_events') IS NULL THEN
+    CREATE TABLE case_events (
+      id       bigserial   PRIMARY KEY,
+      case_id  bigint      NOT NULL,
+      at       timestamptz NOT NULL DEFAULT now(),
+      kind     text        NOT NULL CHECK (kind IN ('book', 'edit', 'move', 'cancel', 'restore')),
+      via      text        NOT NULL DEFAULT 'board' CHECK (via IN ('board', 'calendar')),
+      changes  jsonb
+    );
+    INSERT INTO case_events (case_id, at, kind, via)
+      SELECT id, created_at, 'book', CASE WHEN api_client IS NULL THEN 'board' ELSE 'calendar' END FROM cases;
+    INSERT INTO case_events (case_id, at, kind, via)
+      SELECT id, edited_at, 'edit', CASE WHEN api_client IS NULL THEN 'board' ELSE 'calendar' END FROM cases WHERE edited_at IS NOT NULL;
+    INSERT INTO case_events (case_id, at, kind, via)
+      SELECT id, removed_at, 'cancel', 'board' FROM cases WHERE removed_at IS NOT NULL;
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS case_events_case_idx ON case_events (case_id, at);
+CREATE INDEX IF NOT EXISTS case_events_at_idx ON case_events (at DESC);
+CREATE OR REPLACE FUNCTION log_case_event() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  how text := CASE WHEN current_setting('orskh.via', true) = 'calendar' THEN 'calendar' ELSE 'board' END;
+  ch jsonb := '{}'::jsonb;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    DELETE FROM case_events WHERE case_id = OLD.id;
+    RETURN OLD;
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO case_events (case_id, kind, via) VALUES (NEW.id, 'book', how);
+    RETURN NEW;
+  END IF;
+  IF OLD.removed_at IS NULL AND NEW.removed_at IS NOT NULL THEN
+    INSERT INTO case_events (case_id, kind, via) VALUES (NEW.id, 'cancel', how);
+    RETURN NEW;
+  END IF;
+  IF OLD.removed_at IS NOT NULL AND NEW.removed_at IS NULL THEN
+    INSERT INTO case_events (case_id, kind, via) VALUES (NEW.id, 'restore', how);
+    RETURN NEW;
+  END IF;
+  IF NEW.place IS DISTINCT FROM OLD.place THEN ch := ch || jsonb_build_object('place', jsonb_build_array(OLD.place, NEW.place)); END IF;
+  IF NEW.op_date IS DISTINCT FROM OLD.op_date THEN ch := ch || jsonb_build_object('date', jsonb_build_array(OLD.op_date, NEW.op_date)); END IF;
+  IF NEW.room_id IS DISTINCT FROM OLD.room_id THEN ch := ch || jsonb_build_object('room', jsonb_build_array(OLD.room_id, NEW.room_id)); END IF;
+  IF NEW.hn IS DISTINCT FROM OLD.hn THEN ch := ch || jsonb_build_object('hn', jsonb_build_array(OLD.hn, NEW.hn)); END IF;
+  IF NEW.patient_name IS DISTINCT FROM OLD.patient_name THEN ch := ch || jsonb_build_object('patient', jsonb_build_array(OLD.patient_name, NEW.patient_name)); END IF;
+  IF NEW.diagnosis IS DISTINCT FROM OLD.diagnosis THEN ch := ch || jsonb_build_object('diagnosis', jsonb_build_array(OLD.diagnosis, NEW.diagnosis)); END IF;
+  IF NEW.operation IS DISTINCT FROM OLD.operation THEN ch := ch || jsonb_build_object('operation', jsonb_build_array(OLD.operation, NEW.operation)); END IF;
+  IF NEW.dressing IS DISTINCT FROM OLD.dressing THEN ch := ch || jsonb_build_object('dressing', jsonb_build_array(OLD.dressing, NEW.dressing)); END IF;
+  IF NEW.scrub_does IS DISTINCT FROM OLD.scrub_does THEN ch := ch || jsonb_build_object('scrub', jsonb_build_array(OLD.scrub_does, NEW.scrub_does)); END IF;
+  IF NEW.note IS DISTINCT FROM OLD.note THEN ch := ch || jsonb_build_object('note', jsonb_build_array(OLD.note, NEW.note)); END IF;
+  IF NEW.start_min IS DISTINCT FROM OLD.start_min OR NEW.end_min IS DISTINCT FROM OLD.end_min THEN
+    ch := ch || jsonb_build_object('time', jsonb_build_array(
+      CASE WHEN OLD.start_min IS NULL THEN NULL ELSE jsonb_build_array(OLD.start_min, OLD.end_min) END,
+      CASE WHEN NEW.start_min IS NULL THEN NULL ELSE jsonb_build_array(NEW.start_min, NEW.end_min) END));
+  END IF;
+  IF ch <> '{}'::jsonb THEN
+    INSERT INTO case_events (case_id, kind, via, changes)
+      VALUES (NEW.id, CASE WHEN ch ?| ARRAY['place', 'date', 'room'] THEN 'move' ELSE 'edit' END, how, ch);
+  END IF;
+  RETURN NEW;
+END $$;
+CREATE OR REPLACE TRIGGER cases_log AFTER INSERT OR UPDATE OR DELETE ON cases FOR EACH ROW EXECUTE FUNCTION log_case_event();
 `;

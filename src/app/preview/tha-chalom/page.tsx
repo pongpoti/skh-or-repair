@@ -29,6 +29,7 @@ export default async function PreviewThaChalomPage({ searchParams }: { searchPar
         image={null}
         pathname="/preview/tha-chalom"
         adminHref={params.admin ? "/preview/admin" : null}
+        logHref={params.admin ? "/preview/admin/bookings" : null}
         uploadHref={params.admin ? "/preview/upload" : null}
         datePick={datePick}
         place={{ current: "tha-chalom", hrefs: { skh: "/preview", "tha-chalom": "/preview/tha-chalom" } }}

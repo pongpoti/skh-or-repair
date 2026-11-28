@@ -133,6 +133,8 @@ export default async function ThaChalomPage({ searchParams }: { searchParams: Pr
         image={user.picture}
         pathname={THA_CHALOM_PATH}
         adminHref={admin ? "/admin" : null}
+        // The booking log, for admins only (Pong, 28 Nov 2026: "logged booking cases dashboard, opened from admin profile").
+        logHref={admin ? "/admin/bookings" : null}
         uploadHref={loaded.upload ? "/upload" : null}
         helpHref="/tutorial?back=tha-chalom"
         datePick={datePick}

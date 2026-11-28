@@ -28,6 +28,15 @@ const HELP_ICON = (
   </svg>
 );
 
+/** Lucide "history" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors): the booking log. */
+const LOG_ICON = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+    <path d="M3 3v5h5" />
+    <path d="M12 7v5l4 2" />
+  </svg>
+);
+
 /** Lucide "upload" (https://lucide.dev, ISC licence, Copyright (c) Lucide Contributors). */
 const UPLOAD_ICON = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -54,6 +63,7 @@ export function TopBar({
   pathname = BOARD_PATH,
   showAccount = true,
   adminHref = null,
+  logHref = null,
   uploadHref = null,
   helpHref = null,
   datePick = null,
@@ -75,6 +85,8 @@ export function TopBar({
   showAccount?: boolean;
   /** The admin page, shown only to admins. */
   adminHref?: string | null;
+  /** The booking log (ประวัติการจอง) in the account menu, shown only to admins (Pong, 28 Nov 2026). */
+  logHref?: string | null;
   /** The HOSxP upload page, shown only to MX and admins. */
   uploadHref?: string | null;
   /** The tutorial (วิธีใช้งาน) in the account menu: the doctors' for doctors and admins, the staff's for everyone else. */
@@ -188,6 +200,7 @@ export function TopBar({
             image={image}
             uploadHref={uploadHref}
             adminHref={adminHref}
+            logHref={logHref}
             helpHref={helpHref}
           />
         ) : (
@@ -212,6 +225,7 @@ function AccountMenu({
   image,
   uploadHref = null,
   adminHref = null,
+  logHref = null,
   helpHref = null,
 }: {
   name: string;
@@ -220,6 +234,7 @@ function AccountMenu({
   image?: string | null;
   uploadHref?: string | null;
   adminHref?: string | null;
+  logHref?: string | null;
   helpHref?: string | null;
 }) {
   const src = avatarSrc(image);
@@ -273,6 +288,12 @@ function AccountMenu({
           <Link href={adminHref} className="btn btn-ghost mb-2 w-full" data-testid="account-admin-link">
             {ADMIN_ICON}
             จัดการระบบ
+          </Link>
+        ) : null}
+        {logHref ? (
+          <Link href={logHref} className="btn btn-ghost mb-2 w-full" data-testid="account-log-link">
+            {LOG_ICON}
+            ประวัติการจอง
           </Link>
         ) : null}
         {helpHref ? (
