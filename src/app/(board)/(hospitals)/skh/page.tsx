@@ -70,8 +70,8 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
         today: day.today,
         // An admin books from today at any hour, a year ahead (Pong, 27 Nov 2026: "No restriction").
         earliest: firstBookingDay(isAdmin(user.sub), day.today, day.minutes, holidays),
-        // CVT books Sundays and holidays too, in OR 13 (Pong, 28 Nov 2026).
-        offFrom: booksOffDays(doctor.subtype, "skh") ? firstOffDay(isAdmin(user.sub), day.today, day.minutes) : null,
+        // CVT and admins book Sundays and holidays too, in OR 13 (Pong, 28 Nov 2026).
+        offFrom: booksOffDays(doctor.subtype, "skh", isAdmin(user.sub)) ? firstOffDay(isAdmin(user.sub), day.today, day.minutes) : null,
         admin: isAdmin(user.sub),
         holidays,
         unlisted,

@@ -225,8 +225,8 @@ export function AddCase({
     setMovedOn(null);
   }
   const moved = prevEarliest !== earliest ? null : movedOn;
-  // CVT at รพ.สมุทรสาคร books Sundays and holidays too, in OR 13 (lib/added-cases.ts booksOffDays): from offFrom on.
-  const offStart = offFrom !== null && booksOffDays(doctor.subtype, place) ? later(offFrom, moved) : null;
+  // CVT and admins at รพ.สมุทรสาคร book Sundays and holidays too, in OR 13 (lib/added-cases.ts booksOffDays): from offFrom on.
+  const offStart = offFrom !== null && booksOffDays(doctor.subtype, place, admin) ? later(offFrom, moved) : null;
   const workFirst = later(earliest, moved);
   // The first day that can be booked at all, and the first `day` itself can be (a workday from workFirst, a Sunday or
   // holiday from offStart).
@@ -524,6 +524,7 @@ export function AddCase({
       today,
       earliest: workFirst,
       ...(offStart ? { offFrom: offStart } : {}),
+      admin,
       periods,
       subtype: doctor.subtype,
       holidays,

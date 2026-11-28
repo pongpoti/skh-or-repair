@@ -268,12 +268,15 @@ export const OFF_DAY_DEPT = "CVT";
 /** The room such a booking goes to. */
 export const OFF_DAY_ROOM = "or-13";
 
-/** What the booking form says to a CVT doctor under the date. */
-export const OFF_DAY_RULE = "CVT จองวันอาทิตย์และวันหยุดได้ ที่ OR 13";
+/** What the booking form says under the date to someone who books Sundays and holidays (booksOffDays). */
+export const OFF_DAY_RULE = "จองวันอาทิตย์และวันหยุดได้ ที่ OR 13";
 
-/** Whether a doctor of `subtype` books Sundays and holidays at `place` (รพ.สมุทรสาคร when left out): CVT there. */
-export function booksOffDays(subtype: string | null | undefined, place?: PlaceId): boolean {
-  return subtype === OFF_DAY_DEPT && place !== "tha-chalom";
+/**
+ * Whether a doctor of `subtype` books Sundays and holidays at `place` (รพ.สมุทรสาคร when left out): CVT there, and an
+ * admin of any department (Pong, 28 Nov 2026: "Allow admin to book like cvt").
+ */
+export function booksOffDays(subtype: string | null | undefined, place?: PlaceId, admin = false): boolean {
+  return (admin || subtype === OFF_DAY_DEPT) && place !== "tha-chalom";
 }
 
 /**
@@ -480,7 +483,8 @@ export function placeBookingRoom(
   choice: RoomChoice,
   offDay = false,
 ): BookingRoom {
-  if (offDay && booksOffDays(subtype, place)) return offDayBooking(date, periods, choice);
+  // `offDay`: the caller checked the doctor books Sundays and holidays (booksOffDays) and the day is one.
+  if (offDay && place !== "tha-chalom") return offDayBooking(date, periods, choice);
   if (place !== "tha-chalom") return bookingRoom(subtype, operation, date, periods, choice);
   if (choice === "dressing") return noRoom("no-dressing-room");
   const dept = bookingDept(subtype);
@@ -797,6 +801,8 @@ export type BookingContext = {
    * รพ.สมุทรสาคร); ignored for everyone else. Left out, Sundays and holidays stay closed.
    */
   offFrom?: string;
+  /** An admin, who books Sundays and holidays too, whatever their department (booksOffDays). */
+  admin?: boolean;
   /**
    * The doctor's own booking being edited, when the input is its new state (editCase): its own day needs none of a new
    * booking's day checks, and once that day is closed (bookingState) only the note may change.
@@ -833,7 +839,7 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   // before passed): only the note may change, as MX has the day's list.
   const keepsDay = editing !== undefined && date === editing.date;
   // CVT at รพ.สมุทรสาคร books Sundays and holidays too, in OR 13 (booksOffDays).
-  const offFrom = booksOffDays(subtype, place) && context.offFrom ? context.offFrom : null;
+  const offFrom = booksOffDays(subtype, place, context.admin) && context.offFrom ? context.offFrom : null;
   const offDay = offFrom !== null && isOffDay(date, holidays);
   const closed = keepsDay && date < opensFrom(date, earliest, offFrom, holidays);
   if (!keepsDay) {
