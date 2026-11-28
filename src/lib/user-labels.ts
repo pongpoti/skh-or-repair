@@ -28,7 +28,7 @@ export function isPhoneType(v: unknown): v is PhoneUserType {
 }
 
 /** Nursing units of RN, PN and PCA users. */
-const UNIT_LABELS: Record<string, string> = { OR: "ห้องผ่าตัด", ANES: "วิสัญญี" };
+const UNIT_LABELS: Record<string, string> = { OR: "ห้องผ่าตัด", ANES: "วิสัญญี", NURSING: "กลุ่มการพยาบาล" };
 
 /** Doctor subtypes the operating-suite department list does not hold. */
 const EXTRA_SPECIALTIES: Record<string, string> = { ANES: "วิสัญญี" };

@@ -40,6 +40,7 @@ describe("user labels (lib/user-labels.ts)", () => {
     assert.equal(subtypeLabel("RN", "OR"), "ห้องผ่าตัด");
     assert.equal(subtypeLabel("PN", "ANES"), "วิสัญญี");
     assert.equal(subtypeLabel("PCA", "OR"), "ห้องผ่าตัด");
+    assert.equal(subtypeLabel("RN", "NURSING"), "กลุ่มการพยาบาล");
     assert.equal(subtypeLabel("RN", "ICU"), "ICU");
     assert.equal(subtypeLabel("RN", null), null);
     assert.equal(subtypeLabel("DR", " "), null);
@@ -54,7 +55,7 @@ describe("user labels (lib/user-labels.ts)", () => {
       assert.ok(label && label !== code && /[\u0E00-\u0E7F]/.test(label), `DR ${code}: ${label}`);
     }
     for (const type of ["RN", "PN", "PCA"]) {
-      for (const code of ["OR", "ANES"]) assert.match(subtypeLabel(type, code) ?? "", /[\u0E00-\u0E7F]/, `${type} ${code}`);
+      for (const code of ["OR", "ANES", "NURSING"]) assert.match(subtypeLabel(type, code) ?? "", /[\u0E00-\u0E7F]/, `${type} ${code}`);
     }
   });
 

@@ -37,7 +37,7 @@ describe("adding a name on /admin (lib/user-admin.ts)", () => {
     assert.equal(checkNewUser({ firstName: "x\u0007", lastName: "y", type: "RN", subtype: "OR" }).ok, false);
     assert.deepEqual(
       subtypeChoices("RN").map((c) => c.code),
-      ["OR", "ANES"],
+      ["OR", "ANES", "NURSING"],
     );
     assert.ok(subtypeChoices("DR").some((c) => c.code === "ANES" && c.name === "วิสัญญี"));
   });
