@@ -2,7 +2,7 @@ import type { DeptCode } from "./allocation.ts";
 import { checkTime, overlaps, type TimeRange } from "./booking-time.ts";
 import { addDays, thaiDate, workdayIndex } from "./days.ts";
 import { checkHn, normalizeHn } from "./hn.ts";
-import { holidayIn, nextWorkdayIn, type Holiday } from "./holidays.ts";
+import { holidayIn, isWorkday, nextWorkdayIn, type Holiday } from "./holidays.ts";
 import { candidateRooms, placeCase, roomsHeldBy, type RoomChoice } from "./placement.ts";
 import { REPAIR_LAYOUTS, repairOn, type RepairPeriods } from "./repair.ts";
 import { getRoom, roomLabel, roomUse } from "./rooms.ts";
@@ -280,11 +280,14 @@ export function bookAheadDays(admin: boolean): number {
 }
 
 /**
- * The first day someone can book: today for an admin, whatever the hour (no 15:00 cut-off, so no day from today on is
- * closed to their edits either); for everyone else earliestBookingDay.
+ * The first day someone can book, which the form starts on: for an admin today, whatever the hour (no 15:00 cut-off, so
+ * no day from today on is closed to their edits either), or the next workday when today is a weekend or holiday (Pong,
+ * 28 Nov 2026: "app automatically choose nearest วันทำการ. So there will be no holiday / special holiday selected");
+ * for everyone else earliestBookingDay.
  */
 export function firstBookingDay(admin: boolean, today: string, minutes: number, holidays: readonly Holiday[] = []): string {
-  return admin ? today : earliestBookingDay(today, minutes, holidays);
+  if (!admin) return earliestBookingDay(today, minutes, holidays);
+  return isWorkday(today, holidays) ? today : workdayAfter(today, holidays);
 }
 
 /**
