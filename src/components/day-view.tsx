@@ -1,6 +1,10 @@
 "use client";
 
-import { useRef, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useRef,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { DaySlot } from "@/lib/added-cases";
 import {
   clockText,
@@ -12,7 +16,6 @@ import {
   lanes,
   lengthText,
   rangeText,
-  type RoomTimes,
   startAt,
   startChoices,
   tapTime,
@@ -31,19 +34,27 @@ const GUTTER = "3.25rem";
 
 const top = (minute: number) => (minute - DAY_START) * PER_MINUTE;
 
-type Drag = { edge: "start" | "end" | "move"; y: number; from: TimeRange; moved: boolean };
+/** The doctor's own time among the lanes. */
+const PICK = "__pick" as const;
+
+type Drag = {
+  edge: "start" | "end" | "move";
+  y: number;
+  from: TimeRange;
+  moved: boolean;
+};
 
 /**
  * The booking form's day view (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar (just
  * like in google calendar app) then show form input"): the day from 08:30 to 15:30 in half hours, the bookings already
- * in the room (`rooms`: one room, or a department's rooms that day, where a time is free when one of them has all of it free),
- * and the doctor's time: a tap on a free half hour gives an hour from there (cut short by the next booking or 15:30),
- * and its handles, or the time itself, drag in 15-minute steps, never over a booking (Pong, 27 Nov 2026: "No, a booked
- * time is taken"). The arrow keys move a handle, or the time, by 15 minutes. Above it, เริ่ม and ถึง lists in 15-minute
- * steps set the same time without dragging (Pong, 27 Nov 2026: "it is hard to expand time range (hard to click and to
- * select)"), a taken one disabled; a new start keeps the length last given, so stepping through the starts with the
- * arrow keys past a booking does not shorten it for good. `selfId` is an edit's own booking, left out. `readOnly`: a closed day's booking, whose
- * time cannot change.
+ * in the room (`rooms`: one room, or a department's rooms that day), and the doctor's time: a tap on any half hour gives
+ * an hour from there (cut short by 15:30), and its handles, or the time itself, drag in 15-minute steps. Times overlap
+ * freely (Pong, 27 Nov 2026: "allow time of each case to be freely overlapped"): the doctor's time sits beside the
+ * bookings it overlaps, as Google Calendar sets events side by side. The arrow keys move a handle, or the time, by 15
+ * minutes. Above it, เริ่ม and ถึง lists in 15-minute steps set the same time without dragging (Pong, 27 Nov 2026: "it is
+ * hard to expand time range (hard to click and to select)"); a new start keeps the length last given, so stepping
+ * through the starts near 15:30 does not shorten it for good. `selfId` is an edit's own booking, left out. `readOnly`: a
+ * closed day's booking, whose time cannot change.
  */
 export function DayView({
   slots,
@@ -53,7 +64,6 @@ export function DayView({
   value,
   onChange,
   readOnly = false,
-  clash = false,
   invalid = false,
   describedBy,
 }: {
@@ -65,19 +75,34 @@ export function DayView({
   value: TimeRange | null;
   onChange: (time: TimeRange | null) => void;
   readOnly?: boolean;
-  /** The time overlaps a booking (kept from another day, or taken meanwhile): drawn as taken until another is picked. */
-  clash?: boolean;
   invalid?: boolean;
   describedBy?: string;
 }) {
-  const inRooms = slots.filter((slot) => rooms.includes(slot.roomId) && slot.id !== selfId);
-  const timed = inRooms.filter((slot): slot is DaySlot & TimeRange => slot.start !== null && slot.end !== null);
+  const inRooms = slots.filter(
+    (slot) => rooms.includes(slot.roomId) && slot.id !== selfId,
+  );
+  const timed = inRooms.filter(
+    (slot): slot is DaySlot & TimeRange =>
+      slot.start !== null && slot.end !== null,
+  );
   const untimed = inRooms.length - timed.length;
-  const busy: RoomTimes = rooms.map((room) => timed.filter((slot) => slot.roomId === room));
   const several = rooms.length > 1;
+  // The bookings and the doctor's time in lanes together, so a time that overlaps sits beside the bookings, never on them.
+  type Laid =
+    | (DaySlot & TimeRange)
+    | { id: typeof PICK; start: number; end: number };
+  const laid = lanes<Laid>(
+    value
+      ? [...timed, { id: PICK, start: value.start, end: value.end }]
+      : timed,
+  );
+  const pickLane = laid.find(({ item }) => item.id === PICK) ?? {
+    lane: 0,
+    of: 1,
+  };
   const drag = useRef<Drag | null>(null);
   // The length a new start keeps: the time's length before a run of start picks, so stepping through the starts with the
-  // arrow keys past a booking does not leave it cut short. Kept with the time the last pick gave, and used only while the
+  // arrow keys near 15:30 does not leave it cut short. Kept with the time the last pick gave, and used only while the
   // time is still that one: a tap, a drag, the ถึง list or a time the form puts in (another booking) starts afresh.
   const wanted = useRef<{ length: number; after: TimeRange } | null>(null);
   const give = (next: TimeRange | null) => {
@@ -86,9 +111,17 @@ export function DayView({
   };
   function pickStart(start: number) {
     const run = wanted.current;
-    const same = run !== null && value !== null && run.after.start === value.start && run.after.end === value.end;
-    const length = value ? (same ? run.length : value.end - value.start) : DEFAULT_LENGTH;
-    const next = startAt(value, start, busy, length);
+    const same =
+      run !== null &&
+      value !== null &&
+      run.after.start === value.start &&
+      run.after.end === value.end;
+    const length = value
+      ? same
+        ? run.length
+        : value.end - value.start
+      : DEFAULT_LENGTH;
+    const next = startAt(value, start, length);
     wanted.current = { length, after: next };
     onChange(next);
   }
@@ -105,20 +138,27 @@ export function DayView({
     if (!now) return;
     const delta = (event.clientY - now.y) / PER_MINUTE;
     if (Math.abs(delta) >= TIME_STEP / 2) now.moved = true;
-    const next = dragTime(now.from, now.edge, delta, busy);
-    if (!value || next.start !== value.start || next.end !== value.end) give(next);
+    const next = dragTime(now.from, now.edge, delta);
+    if (!value || next.start !== value.start || next.end !== value.end)
+      give(next);
   }
   function end(event: ReactPointerEvent<HTMLElement>) {
     if (!drag.current) return;
     drag.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
   }
   function nudge(edge: Drag["edge"], event: KeyboardEvent<HTMLElement>) {
     if (!value || readOnly) return;
-    const step = event.key === "ArrowUp" ? -TIME_STEP : event.key === "ArrowDown" ? TIME_STEP : 0;
+    const step =
+      event.key === "ArrowUp"
+        ? -TIME_STEP
+        : event.key === "ArrowDown"
+          ? TIME_STEP
+          : 0;
     if (!step) return;
     event.preventDefault();
-    give(dragTime(value, edge, step, busy));
+    give(dragTime(value, edge, step));
   }
 
   const label = (roomId: string) => {
@@ -127,11 +167,20 @@ export function DayView({
   };
 
   return (
-    <div data-testid="day-view" data-loading={loading || undefined} aria-busy={loading}>
+    <div
+      data-testid="day-view"
+      data-loading={loading || undefined}
+      aria-busy={loading}
+    >
       {readOnly ? null : (
-        <div className="mb-2 grid grid-cols-2 gap-2" data-testid="day-time-fields">
+        <div
+          className="mb-2 grid grid-cols-2 gap-2"
+          data-testid="day-time-fields"
+        >
           <label className="min-w-0">
-            <span className="mb-1 block text-xs font-semibold text-ink-2">เริ่ม</span>
+            <span className="mb-1 block text-xs font-semibold text-ink-2">
+              เริ่ม
+            </span>
             <select
               className="field tabular-nums"
               value={value?.start ?? ""}
@@ -146,35 +195,37 @@ export function DayView({
                   เลือก
                 </option>
               )}
-              {startChoices(busy).map((choice) => (
-                <option key={choice.minute} value={choice.minute} disabled={!choice.free}>
-                  {clockText(choice.minute)}
-                  {choice.free ? "" : " จองแล้ว"}
+              {startChoices().map((minute) => (
+                <option key={minute} value={minute}>
+                  {clockText(minute)}
                 </option>
               ))}
             </select>
           </label>
           <label className="min-w-0">
-            <span className="mb-1 block text-xs font-semibold text-ink-2">ถึง</span>
+            <span className="mb-1 block text-xs font-semibold text-ink-2">
+              ถึง
+            </span>
             <select
               className="field tabular-nums"
               value={value?.end ?? ""}
               disabled={loading || !value}
-              onChange={(event) => value && give({ start: value.start, end: Number(event.target.value) })}
+              onChange={(event) =>
+                value &&
+                give({ start: value.start, end: Number(event.target.value) })
+              }
               aria-invalid={invalid || undefined}
               aria-describedby={describedBy}
               data-testid="day-end"
             >
               {value ? (
-                // Up to the next booking or 15:30; a time kept from another day keeps its own end in the list.
-                endChoices(value.start, busy)
-                  .filter((choice) => choice.free || choice.minute === value.end)
-                  .map((choice) => (
-                    <option key={choice.minute} value={choice.minute} disabled={!choice.free}>
-                      {clockText(choice.minute)} ({lengthText({ start: value.start, end: choice.minute })})
-                      {choice.free ? "" : " จองแล้ว"}
-                    </option>
-                  ))
+                // Up to 15:30, whatever is booked.
+                endChoices(value.start).map((minute) => (
+                  <option key={minute} value={minute}>
+                    {clockText(minute)} (
+                    {lengthText({ start: value.start, end: minute })})
+                  </option>
+                ))
               ) : (
                 <option value="">--:--</option>
               )}
@@ -183,20 +234,34 @@ export function DayView({
         </div>
       )}
       {untimed > 0 ? (
-        <p className="mb-2 rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-ink-2" data-testid="day-untimed">
-          จองไว้ไม่ระบุเวลา <span className="font-semibold tabular-nums">{untimed}</span> เคส
+        <p
+          className="mb-2 rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-ink-2"
+          data-testid="day-untimed"
+        >
+          จองไว้ไม่ระบุเวลา{" "}
+          <span className="font-semibold tabular-nums">{untimed}</span> เคส
         </p>
       ) : null}
       <div
         className={`day-grid relative rounded-xl border bg-white ${invalid ? "border-[var(--stop)]" : "border-line"}`}
-        style={{ height: HEIGHT + 24, "--half-hour": `${HALF_HOUR}px`, "--gutter": GUTTER } as React.CSSProperties}
+        style={
+          {
+            height: HEIGHT + 24,
+            "--half-hour": `${HALF_HOUR}px`,
+            "--gutter": GUTTER,
+          } as React.CSSProperties
+        }
         aria-describedby={describedBy}
       >
         {/* The half hours, each a tap target; the hours named on the left as Google Calendar's, and 08:30 where the day starts. */}
-        <ol className="absolute inset-x-0 top-3" style={{ height: HEIGHT }} aria-label="ช่วงเวลา">
+        <ol
+          className="absolute inset-x-0 top-3"
+          style={{ height: HEIGHT }}
+          aria-label="ช่วงเวลา"
+        >
           {Array.from({ length: SLOTS }, (_, index) => {
             const start = DAY_START + index * 30;
-            const free = tapTime(start, busy);
+            const picked = tapTime(start);
             return (
               <li
                 key={start}
@@ -212,61 +277,96 @@ export function DayView({
                 <button
                   type="button"
                   className="day-slot-button"
-                  disabled={readOnly || loading || free === null}
-                  onClick={() => give(free)}
-                  aria-label={free ? `เลือก ${rangeText(free)}` : `${clockText(start)} มีการจองแล้ว`}
+                  disabled={readOnly || loading}
+                  onClick={() => give(picked)}
+                  aria-label={`เลือก ${rangeText(picked)}`}
                   data-testid="day-slot"
                   data-time={start}
                 />
               </li>
             );
           })}
-          <li className="day-slot day-slot-last absolute inset-x-0" style={{ top: HEIGHT, height: 0 }} aria-hidden="true">
+          <li
+            className="day-slot day-slot-last absolute inset-x-0"
+            style={{ top: HEIGHT, height: 0 }}
+            aria-hidden="true"
+          >
             <span className="day-hour">{clockText(DAY_END)}</span>
           </li>
         </ol>
 
-        {/* The bookings already there, side by side where they overlap (a department's two rooms). */}
-        <div className="pointer-events-none absolute top-3 right-1.5" style={{ left: GUTTER, height: HEIGHT }}>
-          {lanes(timed).map(({ item, lane, of }) => {
-            const height = (item.end - item.start) * PER_MINUTE - 2;
-            return (
-              <div
-                key={item.id}
-                className={`day-booking${item.own ? " is-own" : ""}`}
-                style={{ top: top(item.start) + 1, height, left: `${(lane / of) * 100}%`, width: `calc(${100 / of}% - 2px)` }}
-                data-testid="day-booking"
-                data-id={item.id}
-                data-own={item.own || undefined}
-                data-start={item.start}
-                data-end={item.end}
-              >
-                <p className="truncate text-xs font-semibold tabular-nums">
-                  {rangeText(item)}
-                  {several ? ` · ${label(item.roomId)}` : null}
-                  {height < 36 ? <span className="font-normal"> {item.operation}</span> : null}
-                </p>
-                {height >= 36 ? <p className="truncate text-xs">{item.operation}</p> : null}
-                {height >= 52 ? <p className="truncate text-[0.6875rem] opacity-80">{item.own ? "ของคุณ" : item.surgeon}</p> : null}
-              </div>
-            );
-          })}
+        {/* The bookings already there, side by side where they overlap, the doctor's time among them. */}
+        <div
+          className="pointer-events-none absolute top-3 right-1.5"
+          style={{ left: GUTTER, height: HEIGHT }}
+        >
+          {laid
+            .filter(
+              (
+                entry,
+              ): entry is {
+                item: DaySlot & TimeRange;
+                lane: number;
+                of: number;
+              } => entry.item.id !== PICK,
+            )
+            .map(({ item, lane, of }) => {
+              const height = (item.end - item.start) * PER_MINUTE - 2;
+              return (
+                <div
+                  key={item.id}
+                  className={`day-booking${item.own ? " is-own" : ""}`}
+                  style={{
+                    top: top(item.start) + 1,
+                    height,
+                    left: `${(lane / of) * 100}%`,
+                    width: `calc(${100 / of}% - 2px)`,
+                  }}
+                  data-testid="day-booking"
+                  data-id={item.id}
+                  data-own={item.own || undefined}
+                  data-start={item.start}
+                  data-end={item.end}
+                >
+                  <p className="truncate text-xs font-semibold tabular-nums">
+                    {rangeText(item)}
+                    {several ? ` · ${label(item.roomId)}` : null}
+                    {height < 36 ? (
+                      <span className="font-normal"> {item.operation}</span>
+                    ) : null}
+                  </p>
+                  {height >= 36 ? (
+                    <p className="truncate text-xs">{item.operation}</p>
+                  ) : null}
+                  {height >= 52 ? (
+                    <p className="truncate text-[0.6875rem] opacity-80">
+                      {item.own ? "ของคุณ" : item.surgeon}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
         </div>
 
-        {/* The doctor's time: dragged by its handles or itself. */}
+        {/* The doctor's time: dragged by its handles or itself, in its lane beside the bookings it overlaps. */}
         {value ? (
           <div
-            className={`day-pick${readOnly ? " is-fixed" : ""}${clash ? " is-clash" : ""}`}
-            style={{ top: top(value.start) + 12 + 1, height: (value.end - value.start) * PER_MINUTE - 2, left: GUTTER }}
+            className={`day-pick${readOnly ? " is-fixed" : ""}`}
+            style={{
+              top: top(value.start) + 12 + 1,
+              height: (value.end - value.start) * PER_MINUTE - 2,
+              left: `calc(${GUTTER} + (100% - ${GUTTER} - 0.375rem) * ${pickLane.lane / pickLane.of})`,
+              width: `calc((100% - ${GUTTER} - 0.375rem) / ${pickLane.of} - ${pickLane.of > 1 ? 2 : 0}px)`,
+            }}
             data-testid="day-pick"
             data-start={value.start}
             data-end={value.end}
-            data-clash={clash || undefined}
+            data-overlap={pickLane.of > 1 || undefined}
           >
             <div
               role="button"
               tabIndex={readOnly ? -1 : 0}
-              aria-label={`เวลาที่เลือก ${rangeText(value)}${clash ? " มีการจองแล้ว" : ""} ลูกศรขึ้นลงเพื่อเลื่อน`}
+              aria-label={`เวลาที่เลือก ${rangeText(value)} ลูกศรขึ้นลงเพื่อเลื่อน`}
               className="day-pick-body"
               onPointerDown={(event) => begin("move", event)}
               onPointerMove={move}
@@ -274,10 +374,15 @@ export function DayView({
               onPointerCancel={end}
               onKeyDown={(event) => nudge("move", event)}
             >
-              <p className="text-sm font-bold tabular-nums" data-testid="day-pick-time">
+              <p
+                className="text-sm font-bold tabular-nums"
+                data-testid="day-pick-time"
+              >
                 {rangeText(value)}
               </p>
-              {value.end - value.start >= 30 ? <p className="text-xs opacity-90">{lengthText(value)}</p> : null}
+              {value.end - value.start >= 30 ? (
+                <p className="text-xs opacity-90">{lengthText(value)}</p>
+              ) : null}
             </div>
             {readOnly ? null : (
               <>

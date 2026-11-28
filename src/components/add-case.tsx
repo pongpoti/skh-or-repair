@@ -47,7 +47,7 @@ import {
   type DaySlot,
   type RoomChoice,
 } from "@/lib/added-cases";
-import { isFree, lengthText, rangeText, type RoomTimes, TIME_MISSING_TEXT, TIME_TAKEN_TEXT, type TimeRange } from "@/lib/booking-time";
+import { lengthText, rangeText, TIME_MISSING_TEXT, type TimeRange } from "@/lib/booking-time";
 import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate } from "@/lib/days";
 import { displayHn, normalizeHn } from "@/lib/hn";
@@ -114,8 +114,8 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
 /**
  * The doctor's booking of a room for one patient, in a dialog, in two steps (Pong, 27 Nov 2026: "select time (time range
  * 8.30 to 15.30) on day view of calendar (just like in google calendar app) then show form input"): first the day and the
- * time on a day view (components/day-view.tsx) that shows the bookings already in the room, a booked time being taken
- * (Pong's pick, 27 Nov 2026); then ต่อไป shows the rest, under the day and time with เปลี่ยน to go back. The time is
+ * time on a day view (components/day-view.tsx) that shows the bookings already in the room, whose times may overlap
+ * freely (Pong, 27 Nov 2026: "allow time of each case to be freely overlapped"); then ต่อไป shows the rest, under the day and time with เปลี่ยน to go back. The time is
  * optional, behind a ระบุเวลา switch that starts off (Pong, 27 Nov 2026: "Add toggle time input : disable as default").
  *
  * The rest (Pong, 15 Nov 2026): the day, in Thai with a calendar
@@ -328,7 +328,7 @@ export function AddCase({
     setNote(from?.note ?? "");
     setChoice(picked);
     setScrubDoes(picked === "dressing" && typeof from?.scrubDoes === "boolean" ? from.scrubDoes : null);
-    // An edit keeps its time; booking again tries the same time on the other day (the day view drops it if taken).
+    // An edit keeps its time; booking again keeps the same time on the other day.
     setTime(from ? timeOf(from) : null);
     setTimed(from ? timeOf(from) !== null : false);
     setTimeKept(null);
@@ -502,11 +502,6 @@ export function AddCase({
       refuse(SAME_DAY_TEXT, "date");
       return;
     }
-    // Taken in the room picked (the other room's day may differ from the day view's): back to the day view.
-    if (time && !locked && !isFree(time, busy)) {
-      refuse(TIME_TAKEN_TEXT, "time");
-      return;
-    }
     setInvalid(null);
     startTransition(async () => {
       try {
@@ -514,7 +509,7 @@ export function AddCase({
         // room itself, from the doctor's choice and their department as the database has it.
         const result = edit ? await onEdit(edit.id, input) : await onAdd(input);
         if (!result.ok && result.field === "time") {
-          // Another doctor took the time meanwhile: the day view reads the day again and shows it taken.
+          // The server refused the time: the day view reads the day again.
           setVersion((current) => current + 1);
           refuse(result.error, "time", true);
           if (result.mine) setMine(result.mine);
@@ -591,10 +586,6 @@ export function AddCase({
     // Turned on, the time is wanted.
     if (timed && !time && timeOpen) {
       refuse(TIME_MISSING_TEXT, "time");
-      return;
-    }
-    if (time && !locked && !isFree(time, busy)) {
-      refuse(TIME_TAKEN_TEXT, "time");
       return;
     }
     if (invalid === "date" || invalid === "time" || about === "save") {
@@ -674,15 +665,6 @@ export function AddCase({
   const loading = !read || read.version !== version;
   const slots = read?.slots ?? [];
   const selfId = mode === "edit" && editing ? editing.id : null;
-  const busy: RoomTimes = shownRooms.map((roomId) =>
-    slots
-      .filter((slot) => slot.roomId === roomId && slot.id !== selfId)
-      .map(timeOf)
-      .filter((item): item is TimeRange => item !== null),
-  );
-  const timeFree = time === null || isFree(time, busy);
-  // A time another booking has (kept from another day, or taken meanwhile) shows as taken until another is picked.
-  const clash = !loading && !locked && !timeFree;
   // Whether a time can be given at all: not on a closed day, nor at รพ.ท่าฉลอม on a day without the department's room
   // (it lends none, and has no dressing room to fall back on).
   const timeOpen = !locked && !(tc && !room.ok);
@@ -910,7 +892,6 @@ export function AddCase({
                   edited("time");
                 }}
                 readOnly={!timeOpen}
-                clash={clash}
                 invalid={invalid === "time"}
                 describedBy={describe("time")}
               />
@@ -1071,15 +1052,6 @@ export function AddCase({
                 <span className="text-sm font-semibold text-[var(--stop)]" data-testid="case-room-why">
                   {room.error}
                 </span>
-              ) : clash ? (
-                <>
-                  <span className="text-sm font-semibold text-[var(--stop)]" data-testid="case-room-why">
-                    {TIME_TAKEN_TEXT}
-                  </span>
-                  <button type="button" className="btn btn-ghost min-h-11 px-2 text-sm" onClick={showTime} data-testid="case-time-change">
-                    เปลี่ยนเวลา
-                  </button>
-                </>
               ) : choice === "dressing" && scrubDoes !== null ? (
                 <>
                   <span className="text-xs text-muted" data-testid="case-room-why">
@@ -1160,10 +1132,6 @@ export function AddCase({
               ) : about === "save" && done ? (
                 <InlineStatus tone="success" role="status">
                   {done}
-                </InlineStatus>
-              ) : clash ? (
-                <InlineStatus tone="warning" testId="case-time-taken">
-                  {TIME_TAKEN_TEXT}
                 </InlineStatus>
               ) : (
                 <p className="text-sm leading-5 tabular-nums" data-testid="case-time-text" aria-live="polite">

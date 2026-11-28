@@ -7,12 +7,9 @@ import {
   checkCase,
   daySlots,
   editedMessage,
-  timeClash,
-  timeOf,
   type AddedCase,
   type BookingContext,
 } from "@/lib/added-cases";
-import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { SAMPLE_DOCTOR_ID, sampleCases } from "./sample";
 
 /**
@@ -54,9 +51,6 @@ export async function previewAddCase(context: PreviewContext, input: unknown): P
   const checked = checkCase(input, context);
   if (!checked.ok) return { ok: false, error: checked.error, field: checked.field, earliest: checked.earliest, mine: [...kept] };
   const value = checked.value;
-  if (timeClash(timeOf(value), value.roomId, value.date, dayOf(context, value.date), context.periods)) {
-    return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: [...kept] };
-  }
   const id = String(Date.now());
   seen.add(id);
   kept.push({ ...value, id, surgeonId: SAMPLE_DOCTOR_ID, surgeon: context.name, subtype: context.subtype, bookedAt: new Date().toISOString() });
@@ -72,9 +66,6 @@ export async function previewEditCase(context: PreviewContext, id: string, input
   const checked = checkCase(input, { ...context, editing: { ...before, subtype: context.subtype } });
   if (!checked.ok) return { ok: false, error: checked.error, field: checked.field, earliest: checked.earliest };
   const value = checked.value;
-  if (timeClash(timeOf(value), value.roomId, value.date, dayOf(context, value.date), context.periods, id)) {
-    return { ok: false, error: TIME_TAKEN_TEXT, field: "time", mine: [...kept] };
-  }
   const change = bookingChange({ ...before, subtype: context.subtype }, value, context.periods);
   if (!change.changed) return { ok: true, mine: [...kept], message: "ไม่มีอะไรเปลี่ยน" };
   const now = new Date().toISOString();

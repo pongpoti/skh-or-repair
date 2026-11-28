@@ -10,10 +10,9 @@ import { NoTableIcon } from "@/components/no-table-icon";
 import { Mascot, talkFor, type MascotMood } from "@/components/mascot";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
-import { bookedMessage, bookingChange, checkCase, daySlots, editedMessage, timeClash, timeOf, type AddedCase } from "@/lib/added-cases";
+import { bookedMessage, bookingChange, checkCase, daySlots, editedMessage, type AddedCase } from "@/lib/added-cases";
 import { allocationFor, DEPARTMENTS, INSTRUMENT_ROOM, readableTextOn, RECOVERY_ROOM, type Department } from "@/lib/allocation";
 import { boardNotices } from "@/lib/board-notices";
-import { TIME_TAKEN_TEXT } from "@/lib/booking-time";
 import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
 import { isDressingCase } from "@/lib/placement";
@@ -278,7 +277,7 @@ export function Tutorial({
     [phase, day],
   );
 
-  // The made-up bookings of the day, whose times the practice booking cannot take.
+  // The made-up bookings of the day, shown on the practice booking's day view (its time may overlap them).
   const made = useMemo(() => tutorialCases({ date: day, today, periods, doctor, mine: null }).bookings, [day, today, periods, doctor]);
   const madeOn = useCallback((date: string) => (date === day ? made : []), [day, made]);
 
@@ -289,9 +288,6 @@ export function Tutorial({
       await new Promise((resolve) => setTimeout(resolve, 450));
       if (!checked.ok) return { ok: false, error: checked.error, field: checked.field };
       const { value } = checked;
-      if (timeClash(timeOf(value), value.roomId, value.date, madeOn(value.date), periods)) {
-        return { ok: false, error: TIME_TAKEN_TEXT, field: "time" };
-      }
       const booking: AddedCase = {
         ...value,
         id: TUTORIAL_ME,
@@ -303,7 +299,7 @@ export function Tutorial({
       setMine(booking);
       return { ok: true, mine: [booking], message: bookedMessage(value) };
     },
-    [today, day, periods, doctor, holidays, madeOn],
+    [today, day, periods, doctor, holidays],
   );
   // The row's จัดการ edits it the same way; the coach never sends the doctor there, so these only stand in.
   const onEdit = useCallback(
@@ -313,9 +309,6 @@ export function Tutorial({
       const checked = checkCase(input, { today, earliest: day, periods, subtype: doctor.subtype, holidays, editing });
       await new Promise((resolve) => setTimeout(resolve, 450));
       if (!checked.ok) return { ok: false, error: checked.error, field: checked.field };
-      if (timeClash(timeOf(checked.value), checked.value.roomId, checked.value.date, madeOn(checked.value.date), periods, id)) {
-        return { ok: false, error: TIME_TAKEN_TEXT, field: "time" };
-      }
       const change = bookingChange(editing, checked.value, periods);
       if (!change.changed) return { ok: true, mine: [mine], message: "ไม่มีอะไรเปลี่ยน" };
       const now = new Date().toISOString();
@@ -323,7 +316,7 @@ export function Tutorial({
       setMine(booking);
       return { ok: true, mine: [booking], message: editedMessage(checked.value, mine, change) };
     },
-    [mine, today, day, periods, doctor, holidays, madeOn],
+    [mine, today, day, periods, doctor, holidays],
   );
   const cancelled = useRef<AddedCase | null>(null);
   const onRemove = useCallback(async (): Promise<CaseResult> => {
@@ -487,7 +480,7 @@ function buildSteps({
     closeRoom();
     openForm();
   };
-  // The practice booking's time: the ระบุเวลา switch on (it starts off), then the first free half hour.
+  // The practice booking's time: the ระบุเวลา switch on (it starts off), then the first half hour.
   const pickTime = () => {
     const toggle = find("[data-testid=case-time-toggle]");
     if (toggle && toggle.getAttribute("aria-checked") !== "true") toggle.click();
@@ -495,7 +488,7 @@ function buildSteps({
       if (!find("[data-testid=day-pick]")) find("[data-testid=day-slot]:enabled")?.click();
     }, 120);
   };
-  // The rest of the form, after the day view: a time (the first free one) and ต่อไป, once the form is open.
+  // The rest of the form, after the day view: a time (the first half hour) and ต่อไป, once the form is open.
   const details = () => {
     closeRoom();
     if (!dialogOpen("add-case-dialog")) {
@@ -584,7 +577,7 @@ function buildSteps({
       id: "form-time",
       chapter: 1,
       title: "เลือกเวลา",
-      body: "เปิด ระบุเวลา แล้วเลือกเวลาเริ่มและถึง หรือแตะเวลาที่ว่าง ช่องที่มีชื่อคือเวลาที่มีคนจองแล้ว ตอนจองจริงไม่ระบุเวลาก็ได้",
+      body: "เปิด ระบุเวลา แล้วเลือกเวลาเริ่มและถึง หรือแตะช่องเวลา ช่องที่มีชื่อคือเคสที่จองไว้ เวลาซ้อนกันได้ ตอนจองจริงไม่ระบุเวลาก็ได้",
       target: () => find("[data-testid=case-time-section]"),
       mode: "do",
       done: () => find("[data-testid=day-pick]") !== null,

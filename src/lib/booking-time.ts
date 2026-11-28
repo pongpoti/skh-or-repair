@@ -38,8 +38,6 @@ export function lengthText(time: TimeRange): string {
 
 export const TIME_MISSING_TEXT = "เลือกเวลาผ่าตัด";
 const TIME_WRONG_TEXT = "เวลาไม่ถูกต้อง เลือกใหม่";
-/** A time another booking in the same room already has. */
-export const TIME_TAKEN_TEXT = "เวลานี้มีการจองแล้ว เลือกเวลาอื่น";
 
 const isStep = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value % TIME_STEP === 0 && value >= DAY_START && value <= DAY_END;
@@ -61,100 +59,58 @@ export function overlaps(a: TimeRange, b: TimeRange): boolean {
   return a.start < b.end && b.start < a.end;
 }
 
-/**
- * The bookings already in the rooms the day view shows, each room's as its times: one room, or a department's rooms that
- * day, when the server still picks one of them. A time is free when one of the rooms has all of it free (a department
- * with two rooms can still take a case while one of them is free, but not one that needs a bit of each).
- */
-export type RoomTimes = readonly (readonly TimeRange[])[];
-
-/** Whether `time` fits whole in one of the rooms (with no room to look at, every time does). */
-export function isFree(time: TimeRange, rooms: RoomTimes): boolean {
-  return rooms.length === 0 || rooms.some((times) => !times.some((range) => overlaps(range, time)));
-}
-
-/**
- * The free stretch around `time`: from the end of the booking before it (or 08:30) to the start of the next (or 15:30),
- * in each room that has `time` free, joined (each of them can take any time within its own stretch). A time no room has
- * free (kept from another day) looks at every room, past the bookings it overlaps.
- */
-function stretch(time: TimeRange, rooms: RoomTimes): TimeRange {
-  const all: RoomTimes = rooms.length === 0 ? [[]] : rooms;
-  const fits = all.filter((times) => !times.some((range) => overlaps(range, time)));
-  let out: TimeRange | null = null;
-  for (const times of fits.length > 0 ? fits : all) {
-    const before = times.filter((range) => range.end <= time.start).reduce((max, range) => Math.max(max, range.end), DAY_START);
-    const after = times.filter((range) => range.start >= time.end).reduce((min, range) => Math.min(min, range.start), DAY_END);
-    out = out ? { start: Math.min(out.start, before), end: Math.max(out.end, after) } : { start: before, end: after };
-  }
-  return out ?? { start: DAY_START, end: DAY_END };
-}
-
-/**
- * The time a tap at `minute` gives (Google Calendar's new event): from that 30-minute slot, or from its second half when
- * the first is taken, lasting DEFAULT_LENGTH or up to the next booking or 15:30. Null when nothing from there is free.
- */
-export function tapTime(minute: number, rooms: RoomTimes, length = DEFAULT_LENGTH): TimeRange | null {
-  const slot = DAY_START + Math.floor((minute - DAY_START) / 30) * 30;
-  for (const start of [slot, slot + TIME_STEP]) {
-    if (start < DAY_START || start >= DAY_END) continue;
-    const first = { start, end: start + TIME_STEP };
-    if (!isFree(first, rooms)) continue;
-    return { start, end: Math.min(start + length, stretch(first, rooms).end) };
-  }
-  return null;
-}
-
 const snap = (minute: number) => Math.round(minute / TIME_STEP) * TIME_STEP;
+
+/*
+ * Times overlap freely (Pong, 27 Nov 2026: "For time booking, allow time of each case to be freely overlapped"): the
+ * bookings already in the room are shown on the day view, but none of them keeps a time from anyone. So the helpers
+ * below only keep a time within 08:30 to 15:30 on the 15-minute steps.
+ */
+
+/**
+ * The time a tap at `minute` gives (Google Calendar's new event): from that 30-minute slot, lasting DEFAULT_LENGTH or up
+ * to 15:30.
+ */
+export function tapTime(minute: number, length = DEFAULT_LENGTH): TimeRange {
+  const start = Math.min(Math.max(DAY_START + Math.floor((minute - DAY_START) / 30) * 30, DAY_START), DAY_END - TIME_STEP);
+  return { start, end: Math.min(start + length, DAY_END) };
+}
 
 /**
  * A picked time with one edge, or the whole of it, dragged by `delta` minutes (snapped to TIME_STEP), kept within 08:30
- * to 15:30, at least TIME_STEP long, and clear of the bookings on either side (a drag never jumps over a booking).
+ * to 15:30 and at least TIME_STEP long.
  */
-export function dragTime(time: TimeRange, edge: "start" | "end" | "move", delta: number, rooms: RoomTimes): TimeRange {
-  const free = stretch(time, rooms);
+export function dragTime(time: TimeRange, edge: "start" | "end" | "move", delta: number): TimeRange {
   const moved = snap(delta);
-  if (edge === "start") return { start: Math.min(Math.max(time.start + moved, free.start), time.end - TIME_STEP), end: time.end };
-  if (edge === "end") return { start: time.start, end: Math.max(Math.min(time.end + moved, free.end), time.start + TIME_STEP) };
+  if (edge === "start") return { start: Math.min(Math.max(time.start + moved, DAY_START), time.end - TIME_STEP), end: time.end };
+  if (edge === "end") return { start: time.start, end: Math.max(Math.min(time.end + moved, DAY_END), time.start + TIME_STEP) };
   const length = time.end - time.start;
-  const start = Math.min(Math.max(time.start + moved, free.start), free.end - length);
+  const start = Math.min(Math.max(time.start + moved, DAY_START), DAY_END - length);
   return { start, end: start + length };
 }
 
 /**
  * The start and end lists above the day view (Pong, 27 Nov 2026: "it is hard to expand time range (hard to click and to
- * select)"): every 15 minutes from 08:30, a start being free when its first quarter hour is, an end when the whole time
- * from the start is. A taken one stays in the list, disabled, so a time kept from another day still shows.
+ * select)"): every 15 minutes from 08:30, the ends after the start up to 15:30.
  */
-export function startChoices(rooms: RoomTimes): { minute: number; free: boolean }[] {
-  const out: { minute: number; free: boolean }[] = [];
-  for (let minute = DAY_START; minute < DAY_END; minute += TIME_STEP) {
-    out.push({ minute, free: isFree({ start: minute, end: minute + TIME_STEP }, rooms) });
-  }
+export function startChoices(): number[] {
+  const out: number[] = [];
+  for (let minute = DAY_START; minute < DAY_END; minute += TIME_STEP) out.push(minute);
   return out;
 }
 
-export function endChoices(start: number, rooms: RoomTimes): { minute: number; free: boolean }[] {
-  const out: { minute: number; free: boolean }[] = [];
-  for (let minute = start + TIME_STEP; minute <= DAY_END; minute += TIME_STEP) {
-    out.push({ minute, free: isFree({ start, end: minute }, rooms) });
-  }
+export function endChoices(start: number): number[] {
+  const out: number[] = [];
+  for (let minute = start + TIME_STEP; minute <= DAY_END; minute += TIME_STEP) out.push(minute);
   return out;
 }
 
 /**
  * The time a new start in the list gives: `length` long (the time's own length by default, an hour when nothing was
- * picked), cut short by the next booking or 15:30; a quarter hour when the start itself is taken.
+ * picked), cut short by 15:30.
  */
-export function startAt(
-  time: TimeRange | null,
-  start: number,
-  rooms: RoomTimes,
-  length = time ? time.end - time.start : DEFAULT_LENGTH,
-): TimeRange {
-  const first = { start, end: start + TIME_STEP };
-  if (!isFree(first, rooms)) return first;
-  return { start, end: Math.max(first.end, Math.min(start + length, stretch(first, rooms).end)) };
+export function startAt(time: TimeRange | null, start: number, length = time ? time.end - time.start : DEFAULT_LENGTH): TimeRange {
+  return { start, end: Math.max(start + TIME_STEP, Math.min(start + length, DAY_END)) };
 }
 
 /**

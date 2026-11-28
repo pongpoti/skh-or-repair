@@ -2348,10 +2348,6 @@ a.place-tab:has(.place-tab-label[data-pending]) {
   box-shadow: 0 6px 16px rgb(41 29 20 / 0.28);
 }
 .day-pick.is-fixed { background: var(--brand-top); box-shadow: none; }
-/* A time another booking has: striped in the warning colour until another is picked. */
-.day-pick.is-clash {
-  background: repeating-linear-gradient(135deg, var(--late) 0 8px, color-mix(in srgb, var(--late) 82%, #000) 8px 16px);
-}
 .day-pick-body {
   height: 100%;
   overflow: hidden;
