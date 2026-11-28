@@ -250,3 +250,14 @@ test("an admin's upload for any day counts in the cycle that shows it (Pong, 27 
   assert.equal(adminCycleDay("2026-12-02", at("2026-12-02T17:00:00"), HOLIDAYS), "2026-12-02");
   assert.ok(!cycleShows("2026-12-02", "2026-12-02", HOLIDAYS));
 });
+
+test("a Sunday or holiday CVT booked is offered on the board (openDays), no other", () => {
+  const today = "2026-11-20";
+  assert.equal(pickedDay("2026-11-22", today, REPAIR, []), null, "a Sunday: closed");
+  assert.equal(pickedDay("2026-11-22", today, REPAIR, [], ["2026-11-22"]), "2026-11-22", "booked by CVT");
+  assert.equal(pickedDay("2026-11-29", today, REPAIR, [], ["2026-11-22"]), null);
+  const range = { min: today, max: "2026-12-31", holidays: [], openDays: ["2026-11-22"] };
+  assert.equal(stepDay("2026-11-20", 1, range), "2026-11-22", "the swipe stops on it");
+  assert.equal(stepDay("2026-11-22", 1, range), "2026-11-23");
+  assert.equal(stepDay("2026-11-23", -1, { ...range, openDays: [] }), "2026-11-20");
+});

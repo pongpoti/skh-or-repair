@@ -3,13 +3,13 @@ import { redirect } from "next/navigation";
 import { BoardRefresh } from "@/components/board-refresh";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
-import { addDays, bookAheadDays, firstBookingDay } from "@/lib/added-cases";
+import { addDays, bookAheadDays, booksOffDays, firstBookingDay, firstOffDay, isOffDay } from "@/lib/added-cases";
 import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requestPath, requireUser } from "@/lib/auth/server";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickedDay, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
 import { buildBoardRows } from "@/lib/board-rows";
-import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
+import { bookedDaysBetween, doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
 import { db } from "@/lib/db";
 import { holidaysBetween } from "@/lib/holidays";
@@ -70,6 +70,8 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
         today: day.today,
         // An admin books from today at any hour, a year ahead (Pong, 27 Nov 2026: "No restriction").
         earliest: firstBookingDay(isAdmin(user.sub), day.today, day.minutes, holidays),
+        // CVT books Sundays and holidays too, in OR 13 (Pong, 28 Nov 2026).
+        offFrom: booksOffDays(doctor.subtype, "skh") ? firstOffDay(isAdmin(user.sub), day.today, day.minutes) : null,
         admin: isAdmin(user.sub),
         holidays,
         unlisted,
@@ -88,6 +90,16 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
   } catch (error) {
     console.error("[board] cases unavailable:", (error as Error).message);
     return null;
+  }
+}
+
+/** The days that hold a booking at รพ.สมุทรสาคร from `from` to `to`; none when the database cannot say (the board then fails on its own read). */
+async function bookedDays(from: string, to: string): Promise<string[]> {
+  try {
+    return await bookedDaysBetween(await db(), from, to, "skh");
+  } catch (error) {
+    console.error("[board] booked days unavailable:", (error as Error).message);
+    return [];
   }
 }
 
@@ -115,10 +127,12 @@ export default async function BoardPage({
   // The days the date picker offers (1 Jan 2026, the first half's first day, to the repair's last day), with the
   // holidays it closes: the address of a picked day is checked against them.
   const range = pickRange(day.today, periods);
-  const { holidays: closed, unlisted } = await holidaysBetween(range.min, range.max);
+  const [{ holidays: closed, unlisted }, booked] = await Promise.all([holidaysBetween(range.min, range.max), bookedDays(range.min, range.max)]);
+  // The Sundays and holidays CVT booked (OR 13, Pong, 28 Nov 2026): the picker offers them too.
+  const openDays = booked.filter((iso) => isOffDay(iso, closed));
   // Another day picked on the board (?date=YYYY-MM-DD, Pong, 15 Nov 2026), when it is one the picker offers; else the
   // board's own day. Picking the board's own day is the same as picking none.
-  const picked = pickedDay(params.date, day.today, periods, closed);
+  const picked = pickedDay(params.date, day.today, periods, closed, openDays);
   const admin = isAdmin(user.sub);
   const view: BoardDay =
     picked && picked !== day.boardDate ? { ...day, boardDate: picked, relation: relationTo(picked, day.today) } : day;
@@ -132,7 +146,7 @@ export default async function BoardPage({
   if (loaded.tutorialDue) redirect("/tutorial?first=1");
   const { board, adding, canUpload } = loaded;
   // The days the top bar's calendar offers, which a swipe across the plan moves between too.
-  const datePick = { today: day.today, current: day.boardDate, ...range, holidays: closed, unlisted };
+  const datePick = { today: day.today, current: day.boardDate, ...range, holidays: closed, unlisted, openDays };
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">

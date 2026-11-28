@@ -120,6 +120,16 @@ export async function listCasesOn(pool: Q, date: string, place: PlaceId = "skh")
   return rows.map(toCase);
 }
 
+/** The days from `from` to `to` (YYYY-MM-DD) that hold a live booking at `place`, in order. */
+export async function bookedDaysBetween(pool: Q, from: string, to: string, place: PlaceId = "skh"): Promise<string[]> {
+  const { rows } = await pool.query<{ date: string }>(
+    `SELECT DISTINCT to_char(op_date, 'YYYY-MM-DD') AS date FROM cases
+     WHERE op_date BETWEEN $1 AND $2 AND place = $3 AND removed_at IS NULL ORDER BY 1`,
+    [from, to, place],
+  );
+  return rows.map((row) => row.date);
+}
+
 /** One doctor's cases at one hospital (รพ.สมุทรสาคร unless `place` says otherwise) from `from` (YYYY-MM-DD) on, by day, then in queue order. */
 export async function listCasesBy(pool: Q, surgeonId: string, from: string, place: PlaceId = "skh"): Promise<AddedCase[]> {
   const { rows } = await pool.query<CaseRow>(

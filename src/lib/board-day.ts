@@ -103,13 +103,13 @@ export function pickRange(today: string, periods: RepairPeriods): { min: string;
 export function stepDay(
   from: string,
   step: -1 | 1,
-  range: { min: string; max: string; holidays: readonly Holiday[] },
+  range: { min: string; max: string; holidays: readonly Holiday[]; openDays?: readonly string[] },
 ): string | null {
   // A range holds a little over a year, so a walk this long has left it whatever `from` is.
   for (let walked = 1; walked <= 800; walked += 1) {
     const day = addDays(from, step * walked);
     if (step > 0 ? day > range.max : day < range.min) return null;
-    if (day >= range.min && day <= range.max && isWorkday(day, range.holidays)) return day;
+    if (day >= range.min && day <= range.max && (isWorkday(day, range.holidays) || range.openDays?.includes(day))) return day;
   }
   return null;
 }
@@ -118,13 +118,20 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * The day picked in the board's address (?date=YYYY-MM-DD), or null when none is given or it cannot be shown: not a
- * real day, outside pickRange, or a weekend or holiday (the suite runs no list then, and the calendar never offers one).
+ * real day, outside pickRange, or a weekend or holiday (the suite runs no list then, and the calendar never offers one),
+ * unless it is one of `openDays`: a Sunday or holiday that CVT booked (lib/added-cases.ts booksOffDays).
  */
-export function pickedDay(value: unknown, today: string, periods: RepairPeriods, holidays: readonly Holiday[]): string | null {
+export function pickedDay(
+  value: unknown,
+  today: string,
+  periods: RepairPeriods,
+  holidays: readonly Holiday[],
+  openDays: readonly string[] = [],
+): string | null {
   if (typeof value !== "string" || !ISO_DAY.test(value) || addDays(value, 0) !== value) return null;
   const { min, max } = pickRange(today, periods);
   if (value < min || value > max) return null;
-  return isWorkday(value, holidays) ? value : null;
+  return isWorkday(value, holidays) || openDays.includes(value) ? value : null;
 }
 
 /** Inside MX's upload window: Bangkok 15:00:00 ≤ t < 16:00:00, every day. Admins may upload at any time. */

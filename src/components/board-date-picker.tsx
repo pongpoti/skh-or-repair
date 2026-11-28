@@ -20,6 +20,8 @@ export type DatePick = {
   holidays: readonly Holiday[];
   /** The years from min to max the BOT gave no holidays for (lib/holidays.ts), named under their months. */
   unlisted: readonly number[];
+  /** Sundays and holidays from min to max that CVT booked (lib/added-cases.ts booksOffDays): open in the calendar. */
+  openDays?: readonly string[];
 };
 
 /**
@@ -87,7 +89,7 @@ export function BoardDatePicker({
   }
 
   const dayState = (iso: string): DayState => {
-    const note = closedDayNote(iso, pick.holidays);
+    const note = pick.openDays?.includes(iso) ? null : closedDayNote(iso, pick.holidays);
     return note ? { disabled: true, note } : { disabled: false };
   };
 

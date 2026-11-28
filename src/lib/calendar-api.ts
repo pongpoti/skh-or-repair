@@ -10,8 +10,12 @@ import {
   bookingState,
   checkCase,
   deptRooms,
+  booksOffDays,
   firstBookingDay,
+  firstOffDay,
   isIsoDate,
+  isOffDay,
+  opensFrom,
   placeRoomName,
   roomAmong,
   timeOf,
@@ -361,14 +365,22 @@ const warningsOf = (warning: TimeWarning | null) => (warning ? { warnings: [{ co
 // ---------------------------------------------------------------------------------------------------------------------
 // The rules' clock
 
-type Rules = { today: string; earliest: string; periods: RepairPeriods; holidays: Awaited<ReturnType<typeof holidaysBetween>>["holidays"]; ahead: number };
+type Rules = {
+  today: string;
+  earliest: string;
+  /** The first Sunday or holiday that can be booked: CVT books them too, in OR 13 (lib/added-cases.ts booksOffDays). */
+  offFrom: string;
+  periods: RepairPeriods;
+  holidays: Awaited<ReturnType<typeof holidaysBetween>>["holidays"];
+  ahead: number;
+};
 
 /** Today, the first day that can be booked, the repair's dates and the holidays, as a doctor's booking has them (no admin). */
 async function rulesNow(pool: Pool): Promise<Rules> {
   const ahead = bookAheadDays(false);
   const { date: today, minutes } = bangkokParts(now());
   const [periods, { holidays }] = await Promise.all([getRepairPeriods(pool), holidaysBetween(today, addDays(today, ahead))]);
-  return { today, earliest: firstBookingDay(false, today, minutes, holidays), periods, holidays, ahead };
+  return { today, earliest: firstBookingDay(false, today, minutes, holidays), offFrom: firstOffDay(false, today, minutes), periods, holidays, ahead };
 }
 
 /** The input checkCase reads, from a record: the department's room, in hours, no note (a calendar's note is not shown). */
@@ -389,9 +401,17 @@ async function lockRecord(client: PoolClient, externalId: string): Promise<void>
 }
 
 /** In a department with several rooms that day: the doctor's own room there, else the emptier one (as a new booking). */
-function pickRoom(value: CaseInput, doctor: Doctor, day: readonly AddedCase[], periods: RepairPeriods): void {
+function pickRoom(value: CaseInput, doctor: Doctor, day: readonly AddedCase[], rules: Rules): void {
+  // A Sunday or holiday has one room for CVT, OR 13 (checkCase gave it).
+  if (onOffDay(value, doctor, rules)) return;
+  const periods = rules.periods;
   const rooms = deptRooms(doctor.subtype, value.operation, value.date, periods);
   if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods, timeOf(value));
+}
+
+/** Whether `value` is a Sunday or holiday booking of a doctor who books them (CVT, in OR 13). */
+function onOffDay(value: CaseInput, doctor: Doctor, rules: Rules): boolean {
+  return booksOffDays(doctor.subtype) && isOffDay(value.date, rules.holidays);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -473,7 +493,7 @@ async function create(pool: Pool, externalId: string, record: CalendarRecord, do
     if (booked && !booked.cancelledAt) return "exists" as const;
     const day = await listCasesOn(client, value.date, "skh");
     if (sameDay(day, doctor, value.hn, null)) return "already" as const;
-    pickRoom(value, doctor, day, rules.periods);
+    pickRoom(value, doctor, day, rules);
     await insertCase(client, doctor.id, LINE_SUB, value, { client: CALENDAR_CLIENT, externalId });
     return "saved" as const;
   });
@@ -510,7 +530,9 @@ async function change(pool: Pool, current: CalendarCase, record: CalendarRecord,
   const context = { ...rules, subtype: doctor.subtype, place: "skh" as const, ...(sameDoctor ? { editing } : {}) };
   // A booking that can no longer change (its day gone, under way today, or its day closed): the same record again is
   // no change, and anything else is refused below.
-  if (sameDoctor && booking.date < rules.earliest) {
+  // A Sunday or holiday booking (CVT, OR 13) closes at 15:00 the day before it (lib/added-cases.ts firstOffDay).
+  const closesFrom = opensFrom(booking.date, rules.earliest, booksOffDays(doctor.subtype) ? rules.offFrom : null, rules.holidays);
+  if (sameDoctor && booking.date < closesFrom) {
     const kept = keptAsIs(record, editing, context);
     if (kept !== false) return saved(200, "unchanged", current, rules.periods, { requeued: false, ...warningsOf(kept) });
   }
@@ -532,8 +554,8 @@ async function change(pool: Pool, current: CalendarCase, record: CalendarRecord,
     const day = (await listCasesOn(client, value.date, "skh")).filter((item) => item.id !== booking.id);
     if (sameDay(day, doctor, value.hn, booking.id)) return "already" as const;
     if (!sameDoctor) {
-      pickRoom(value, doctor, day, rules.periods);
-    } else {
+      pickRoom(value, doctor, day, rules);
+    } else if (!onOffDay(value, doctor, rules)) {
       const sameRoom = value.date === booking.date && bookedChoice(editing, rules.periods) === "dept";
       const rooms = deptRooms(doctor.subtype, value.operation, value.date, rules.periods);
       if (sameRoom && rooms.includes(bookedRoom(editing, rules.periods).roomId)) value.roomId = bookedRoom(editing, rules.periods).roomId;
