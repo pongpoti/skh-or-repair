@@ -114,6 +114,8 @@ function booking(
     date,
     roomId: room.roomId,
     hn,
+    patientName: "",
+    diagnosis: "",
     operation,
     shift: "in",
     dressing,
@@ -158,8 +160,8 @@ function hosxp(position: number, hn: string, operation: string, who: { name: str
  *   by itself (the doctor's portrait). Both in hours: MX's upload drops out-of-hours cases, so the real board never
  *   shows one.
  * - The made-up doctors booked the day before `today` (the real one), before the doctor's own practice booking.
- * - The doctor's own practice booking (`mine`), once made; HOSxP lists it under the HN they typed, with a made-up
- *   patient's name only they see.
+ * - The doctor's own practice booking (`mine`), once made; HOSxP lists it under the HN they typed, with the patient's
+ *   name they typed (a made-up one when they gave none), which only they see, as the diagnosis they gave.
  */
 export function tutorialCases({
   date,
@@ -216,7 +218,8 @@ export function tutorialCases({
   ];
   if (mine?.hn) {
     workbook.unshift(
-      hosxp(0, mine.hn, mine.operation, { name: doctor.name, title: "" }, dept, { surgeon: doctor.name, patientName: "ตัวอย่าง ผู้ป่วย" }),
+      // HOSxP's name wins on the board; the made-up list takes the one the doctor typed, if any.
+      hosxp(0, mine.hn, mine.operation, { name: doctor.name, title: "" }, dept, { surgeon: doctor.name, patientName: mine.patientName || "ตัวอย่าง ผู้ป่วย" }),
     );
   }
   return { bookings, workbook };

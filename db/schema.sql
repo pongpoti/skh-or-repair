@@ -460,3 +460,16 @@ BEGIN
   END IF;
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS cases_api_key ON cases (api_client, external_id) WHERE removed_at IS NULL AND api_client IS NOT NULL;
+-- The patient's name and the diagnosis on a booking (Pong, 28 Nov 2026: "add form input diagnosis and patient name, both
+-- are not required"): each optional, NULL when there is none, never an empty string; one line of at most 100 and 300
+-- characters (lib/added-cases.ts MAX_PATIENT_NAME, MAX_DIAGNOSIS). Shown under the HN's rule, only to the doctor who
+-- booked the case, MX and admins (lib/board-rows.ts). Applied to existing databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'patient_name' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN patient_name text CONSTRAINT cases_patient_name_check CHECK (btrim(patient_name) <> '' AND char_length(patient_name) <= 100);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'cases'::regclass AND attname = 'diagnosis' AND NOT attisdropped) THEN
+    ALTER TABLE cases ADD COLUMN diagnosis text CONSTRAINT cases_diagnosis_check CHECK (btrim(diagnosis) <> '' AND char_length(diagnosis) <= 300);
+  END IF;
+END $$;

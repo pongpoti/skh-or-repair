@@ -241,6 +241,8 @@ export function demoSchedule(date: string, periods: RepairPeriods): { workbook: 
           date,
           roomId: room.id,
           hn,
+          patientName: "",
+          diagnosis: "",
           operation: item.operation,
           shift,
           dressing,

@@ -250,6 +250,8 @@ test("a booking's room follows the repair: own department's room, else the mixed
 
 test("an added case in a room not operating that day stays off the board", () => {
   const added = (id: string, roomId: string): AddedCase => ({
+    patientName: "",
+    diagnosis: "",
     id,
     date: SECOND_DAY,
     start: null,

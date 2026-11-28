@@ -544,8 +544,11 @@ async function change(pool: Pool, current: CalendarCase, record: CalendarRecord,
       await insertCase(client, doctor.id, LINE_SUB, value, { client: CALENDAR_CLIENT, externalId });
       return { changed: true, requeue: true };
     }
-    // The note is the board's (the API sets none): the booking keeps whatever it has.
+    // The note, the patient's name and the diagnosis are the board's (the API sets none; it never reads the record's):
+    // the booking keeps whatever it has.
     value.note = booking.note;
+    value.patientName = booking.patientName;
+    value.diagnosis = booking.diagnosis;
     const what = bookingChange(editing, value, rules.periods);
     if (!what.changed) return { changed: false, requeue: false };
     if (!(await updateCase(client, booking.id, booking.surgeonId, value, what.requeue))) return "gone" as const;

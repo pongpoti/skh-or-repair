@@ -3419,11 +3419,13 @@ async function main() {
       const scrubDialog = '[data-testid="scrub-dialog"]';
       const alertText = () => textOf(page, '[data-testid="case-save-status"]');
       const choiceOf = (page) => page.getAttribute('[data-testid="case-room"]', "data-choice");
-      const fillCase = async (page, { date, hn, operation, note = null, start = undefined }) => {
+      const fillCase = async (page, { date, hn, operation, note = null, start = undefined, patientName = null, diagnosis = null }) => {
         await toDayView(page);
         if ((await dateValue(page, "case-date")) !== date) await pickDate(page, "case-date", date);
         await toDetails(page, start);
         await page.fill(`${dialog} input[data-testid="case-hn"]`, hn);
+        if (patientName !== null) await page.fill('[data-testid="case-patient"]', patientName);
+        if (diagnosis !== null) await page.fill('[data-testid="case-diagnosis"]', diagnosis);
         await page.fill('[data-testid="case-operation"]', operation);
         if (note !== null) await page.fill('[data-testid="case-note"]', note);
         // OR X, the department's room, is picked to start with, whatever the name (Pong, 15 Nov 2026: the surgeon decides)
@@ -3635,6 +3637,20 @@ async function main() {
       assert((await page.getAttribute('[data-testid="case-operation"]', "aria-invalid")) === "true", "the operation box is marked");
       await ownerShot(page, "booking-error-operation.png");
 
+      // the patient's name and the diagnosis (Pong, 28 Nov 2026: "add form input diagnosis and patient name, both are not
+      // required"): under the HN, before the operation, empty to start with (nothing typed above saved without them), and
+      // saying who sees them
+      assert((await page.inputValue('[data-testid="case-patient"]')) === "" && (await page.inputValue('[data-testid="case-diagnosis"]')) === "", "no name or diagnosis to start with");
+      assert((await textOf(page, 'label[for="case-patient"]')) === "ชื่อผู้ป่วย (ถ้ามี)", `the name's label: ${await textOf(page, 'label[for="case-patient"]')}`);
+      assert((await textOf(page, 'label[for="case-diagnosis"]')) === "การวินิจฉัย (ถ้ามี)", `the diagnosis's label: ${await textOf(page, 'label[for="case-diagnosis"]')}`);
+      assert((await textOf(page, '[data-testid="case-patient-hint"]')) === "ชื่อและการวินิจฉัย เห็นเฉพาะคุณ MX และผู้ดูแลระบบ เหมือน HN", "the hint says who sees them");
+      assert((await page.getAttribute('[data-testid="case-patient"]', "maxlength")) === "100" && (await page.getAttribute('[data-testid="case-diagnosis"]', "maxlength")) === "300", "at most 100 and 300 characters");
+      for (const id of ["case-patient", "case-diagnosis"]) {
+        assert((await page.getAttribute(`[data-testid="${id}"]`, "aria-describedby")) === "case-patient-hint", `${id}: the hint describes it`);
+        assert((await page.getAttribute(`[data-testid="${id}"]`, "required")) === null, `${id}: not required`);
+      }
+      const fieldOrder = await page.$$eval(`${dialog} input[data-testid="case-hn"], ${dialog} [data-testid="case-patient"], ${dialog} [data-testid="case-diagnosis"], ${dialog} [data-testid="case-operation"]`, (els) => els.map((e) => e.dataset.testid));
+      assert(JSON.stringify(fieldOrder) === JSON.stringify(["case-hn", "case-patient", "case-diagnosis", "case-operation"]), `under the HN, before the operation: ${JSON.stringify(fieldOrder)}`);
       // the note (หมายเหตุ; Pong, 17 Nov 2026): optional, last, saying everyone sees it; saved cleaned, line breaks kept
       assert((await page.inputValue('[data-testid="case-note"]')) === "", "no note to start with");
       assert((await textOf(page, 'label[for="case-note"]')) === "หมายเหตุ (ถ้ามี)", "the note's label");
@@ -3646,16 +3662,26 @@ async function main() {
       await book(page, {
         date: "2026-11-16",
         hn: HN_TODAY,
+        patientName: "  นาย ทดสอบ   จองเอง ",
+        diagnosis: " ESRD ",
         operation: "Perm cath insertion",
         note: NOTE_TYPED,
         room: "or-11",
         shot: async () => {
+          await page.locator('[data-testid="case-patient-fields"]').scrollIntoViewIfNeeded();
+          await ownerShot(page, "booking-patient.png");
           await page.locator('[data-testid="case-note"]').scrollIntoViewIfNeeded();
           await ownerShot(page, "booking-note.png");
         },
       });
       await toDetails(page);
       assert((await page.inputValue('[data-testid="case-note"]')) === "", "the note is cleared for the next patient");
+      assert((await page.inputValue('[data-testid="case-patient"]')) === "" && (await page.inputValue('[data-testid="case-diagnosis"]')) === "", "so are the name and the diagnosis");
+      const savedPatient = (await db.query("SELECT patient_name, diagnosis FROM cases WHERE hn = $1", [HN_TODAY])).rows[0];
+      assert(savedPatient?.patient_name === "นาย ทดสอบ จองเอง" && savedPatient?.diagnosis === "ESRD", `the name and the diagnosis as saved: ${JSON.stringify(savedPatient)}`);
+      // the doctor's own list shows them under the HN
+      assert((await textOf(page, '[data-testid="my-case-patient"]')) === "นาย ทดสอบ จองเอง", "the name in the doctor's list");
+      assert((await textOf(page, '[data-testid="my-case-diagnosis"]')) === "Dx ESRD", "the diagnosis in the doctor's list");
       assert((await db.query("SELECT note FROM cases WHERE hn = $1", [HN_TODAY])).rows[0]?.note === NOTE_SAVED, "the note as saved");
       // the doctor's own list shows it under the operation, line breaks kept
       assert(
@@ -3922,6 +3948,10 @@ async function main() {
       const details = await board.$$eval('[data-testid="case-note-details"] > *', (els) => els.map((e) => e.textContent.trim()));
       assert(details.slice(0, 2).join("|") === "การผ่าตัด|Perm cath insertion" && details.includes("ศัลยแพทย์") && details.includes("จองคิว"), `the case: ${JSON.stringify(details)}`);
       assert(!details.includes("HN") && !details.join(" ").includes(HN_TODAY), "no HN for the nurse");
+      // nor the patient's name or the diagnosis (Pong, 28 Nov 2026), on the row or in the dialog
+      assert(!details.includes("ผู้ป่วย") && !details.includes("การวินิจฉัย") && !details.join(" ").includes("ESRD"), `no name or diagnosis for the nurse: ${JSON.stringify(details)}`);
+      assert((await board.locator('.case-row [data-testid="row-patient"], .case-row [data-testid="row-diagnosis"]').count()) === 0, "no name or diagnosis line for the nurse");
+      assert(!(await board.content()).includes("ESRD") && !(await board.content()).includes("ทดสอบ จองเอง"), "nor anywhere in the nurse's page");
       const lines = await board.locator('[data-testid="case-note-text"]').evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)));
       assert(lines >= 3, `the note keeps its lines: about ${lines}`);
       await ownerShot(board, "room-note-dialog.png");
@@ -3947,6 +3977,29 @@ async function main() {
       await board.click('[data-testid="case-note-close"]');
       await board.waitForSelector('[data-testid="case-note-dialog"]:not([open])', { state: "attached" });
       assert(!(await noteDialog.evaluate((el) => el.open)), "ปิด closes it");
+      // the doctor who booked it sees the patient's name and the diagnosis on the row, as the HN (Pong, 28 Nov 2026), and
+      // in the note's dialog
+      {
+        const own = await contextAs(RP.drX);
+        const mineBoard = await own.newPage();
+        mineBoard.on("pageerror", (e) => errors.push(e.message));
+        await mineBoard.goto(`${APP}/skh?room=or-11`, { waitUntil: "networkidle" });
+        await mineBoard.waitForSelector(".case-row");
+        const lines = await mineBoard.$$eval(".case-row", (rows) => rows.map((row) => [...row.querySelectorAll(":scope > div > p")].map((line) => line.dataset.testid ?? "?")));
+        assert(
+          JSON.stringify(lines) === JSON.stringify([["row-op", "row-patient", "row-hn", "row-diagnosis", "row-surgeon", "row-time", "row-booked-at"]]),
+          `the doctor's own row: ${JSON.stringify(lines)}`,
+        );
+        assert((await textOf(mineBoard, '.case-row [data-testid="row-patient"]')) === "นาย ทดสอบ จองเอง", "the name the doctor gave");
+        assert((await textOf(mineBoard, '.case-row [data-testid="row-diagnosis"]')) === "Dx ESRD", "the diagnosis the doctor gave");
+        await ownerShot(mineBoard, "room-patient-diagnosis.png");
+        await mineBoard.click('.case-row [data-testid="row-note"]');
+        await mineBoard.waitForSelector('[data-testid="case-note-dialog"][open]');
+        const mineDetails = await mineBoard.$$eval('[data-testid="case-note-details"] > *', (els) => els.map((e) => e.textContent.trim()));
+        assert(mineDetails.join("|").includes(`ผู้ป่วย|นาย ทดสอบ จองเอง|HN|${HN_TODAY}|การวินิจฉัย|ESRD`), `the doctor's note dialog: ${JSON.stringify(mineDetails)}`);
+        await ownerShot(mineBoard, "room-note-dialog-patient.png");
+        await own.close();
+      }
       // the dressing room shows who does the dressing instead (Pong, 15 Nov 2026): doctor X said the scrub does, for
       // Tuesday, before Tuesday's upload
       await board.goto(`${APP}/skh?date=2026-11-17&room=or-10`, { waitUntil: "networkidle" });

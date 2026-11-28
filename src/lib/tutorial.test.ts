@@ -11,6 +11,8 @@ const DOCTOR = { name: "ทดลอง ใช้งาน", subtype: "GENSX" };
 const TODAY = "2026-11-19"; // the Thursday before: the made-up doctors booked on Wednesday
 
 const mine = (more: Partial<AddedCase> = {}): AddedCase => ({
+  patientName: "",
+  diagnosis: "",
   id: TUTORIAL_ME,
   date: DAY,
   start: null,
