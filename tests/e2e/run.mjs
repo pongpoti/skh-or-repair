@@ -4212,6 +4212,7 @@ async function main() {
       await ownerShot(dr, "booking-admin-today.png");
       // The booking log (Pong, 28 Nov 2026): the admin opens it from the account menu and finds the booking just made,
       // which the trigger logged as booked on the board; the search narrows the list to it
+      await dr.goto(`${APP}/skh`, { waitUntil: "networkidle" });
       await dr.click('[data-testid="user-menu"]');
       await dr.click('[data-testid="account-log-link"]');
       await dr.waitForURL(`${APP}/admin/bookings`);
