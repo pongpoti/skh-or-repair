@@ -836,6 +836,11 @@ test("an admin books with no time limits: today at any hour, a year ahead (Pong,
   // Monday 16 Nov 2026 at 15:30: a doctor's first day is Wednesday; an admin's is today itself.
   assert.equal(firstBookingDay(false, "2026-11-16", at(15, 30)), "2026-11-18");
   assert.equal(firstBookingDay(true, "2026-11-16", at(15, 30)), "2026-11-16");
+  // an admin on a weekend or holiday starts on the nearest workday (Pong, 28 Nov 2026), whatever the hour
+  assert.equal(firstBookingDay(true, "2026-11-28", at(8, 19)), "2026-11-30", "Saturday: Monday");
+  assert.equal(firstBookingDay(true, "2026-11-29", at(16)), "2026-11-30", "Sunday after 15:00: still Monday");
+  const special = [{ date: "2026-12-16", name: "วันหยุดกรณีพิเศษ" }];
+  assert.equal(firstBookingDay(true, "2026-12-16", at(9), special), "2026-12-17", "the hospital's special holiday: the day after");
   assert.equal(bookAheadDays(false), BOOK_AHEAD_DAYS);
   assert.equal(bookAheadDays(true), ADMIN_BOOK_AHEAD_DAYS);
   // Today, and beyond the doctors' 60 days, with the admin's window; the doctors' window still refuses both.
