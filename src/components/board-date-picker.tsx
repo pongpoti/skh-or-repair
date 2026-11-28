@@ -20,7 +20,7 @@ export type DatePick = {
   holidays: readonly Holiday[];
   /** The years from min to max the BOT gave no holidays for (lib/holidays.ts), named under their months. */
   unlisted: readonly number[];
-  /** Sundays and holidays from min to max that CVT booked (lib/added-cases.ts booksOffDays): open in the calendar. */
+  /** weekends and holidays from min to max that CVT booked (lib/added-cases.ts booksOffDays): open in the calendar. */
   openDays?: readonly string[];
 };
 

@@ -178,7 +178,7 @@ export function AddCase({
   /** The first day that can be booked, by the server's clock (lib/added-cases.ts firstBookingDay). */
   earliest: string;
   /**
-   * The first Sunday or holiday that can be booked (lib/added-cases.ts firstOffDay), for CVT at รพ.สมุทรสาคร, who books
+   * The first weekend day or holiday that can be booked (lib/added-cases.ts firstOffDay), for CVT at รพ.สมุทรสาคร, who books
    * them in OR 13 (Pong, 28 Nov 2026); null for everyone else.
    */
   offFrom?: string | null;
@@ -225,7 +225,7 @@ export function AddCase({
     setMovedOn(null);
   }
   const moved = prevEarliest !== earliest ? null : movedOn;
-  // CVT and admins at รพ.สมุทรสาคร book Sundays and holidays too, in OR 13 (lib/added-cases.ts booksOffDays): from offFrom on.
+  // CVT and admins at รพ.สมุทรสาคร book weekends and holidays too, in OR 13 (lib/added-cases.ts booksOffDays): from offFrom on.
   const offStart = offFrom !== null && booksOffDays(doctor.subtype, place, admin) ? later(offFrom, moved) : null;
   const workFirst = later(earliest, moved);
   // The first day that can be booked at all, and the first `day` itself can be (a workday from workFirst, a Sunday or
@@ -678,7 +678,7 @@ export function AddCase({
     // A workday before the first one, after a Sunday CVT can still book (Friday from 15:00: Sunday, then Tuesday).
     return iso >= first && iso < opens(iso) ? { disabled: true, note: "ปิดรับจองแล้ว" } : { disabled: false };
   };
-  // A Sunday or holiday CVT books: OR 13, whatever the day's plan (lib/added-cases.ts offDayRoom).
+  // A weekend day or holiday CVT books: OR 13, whatever the day's plan (lib/added-cases.ts offDayRoom).
   const offDay = offStart !== null && isOffDay(date, holidays);
   // The two rooms the doctor can pick that day, worked out again on each render from the day (and the name, which sends
   // a general surgeon's endoscopy to the SCOPE room, OR 3, in the weekly schedule).
@@ -903,6 +903,7 @@ export function AddCase({
                     ))}
               </span>{" "}
               <span className="block">{bookableFrom(first)}</span>
+              {offStart !== null ? " " : null}
               {offStart !== null ? (
                 <span className="block" data-testid="case-off-day-rule">
                   {OFF_DAY_RULE}

@@ -4194,7 +4194,7 @@ async function main() {
       await dr.waitForSelector(`${FORM}[open]`);
       assert((await dateValue(dr, "case-date")) === "2026-11-17", `the form starts today: ${await dateValue(dr, "case-date")}`);
       assert(
-        (await textOf(dr, '[data-testid="case-date-hint"]')) === "ผู้ดูแลระบบ จองได้ทุกเวลา จองได้ตั้งแต่ วันอังคารที่ 17 พ.ย. 2569",
+        (await textOf(dr, '[data-testid="case-date-hint"]')) === "ผู้ดูแลระบบ จองได้ทุกเวลา จองได้ตั้งแต่ วันอังคารที่ 17 พ.ย. 2569 จองวันเสาร์-อาทิตย์และวันหยุดได้ ที่ OR 13",
         `the admin's line in place of the 15:00 rule: ${await textOf(dr, '[data-testid="case-date-hint"]')}`,
       );
       // a year ahead in the calendar: 20 Jan 2027 is beyond the doctors' 60 days

@@ -8,6 +8,7 @@ import { DELETE as cancelRoute, GET as getRoute, PUT as updateRoute } from "@/ap
 import { isCalendarApiPath } from "@/lib/calendar-api-path";
 import { CALENDAR_DAILY_LIMIT, calendarId, doctorNameOf, readDateTime, readRecord } from "@/lib/calendar-api";
 import { addedToday, listCasesBy, ownCase } from "@/lib/cases";
+import { forgetHolidayFeeds } from "@/lib/holidays";
 import { createPool, ensureSchema } from "@/lib/db";
 import { calendarApiKeyHashes, ConfigError } from "@/lib/env";
 import { TEST_DB } from "./_setup";
@@ -264,8 +265,8 @@ describe("calendar API (database)", () => {
     const reply = await post(SAMPLE);
     assert.equal(reply.status, 422);
     assert.equal(reply.body.error, "date_too_early");
-    // Friday 10:00: CVT may book Sunday too (Pong, 28 Nov 2026), so the first day is Sunday 29 Nov, not Monday.
-    assert.equal(reply.body.earliest, "2026-11-29");
+    // Friday 10:00: CVT may book weekends too (Pong, 28 Nov 2026), so the first day is Saturday 28 Nov, not Monday.
+    assert.equal(reply.body.earliest, "2026-11-28");
     assert.equal(reply.body.field, "operationStart");
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM cases")).rows[0].n, 0);
   });
@@ -324,8 +325,7 @@ describe("calendar API (database)", () => {
     assert.equal(await refused(at("2026-11-30T13:00:00", null, { id: 400, doctorName: "นพ.ปกรณ์" })), "doctor_not_found", "a first name alone");
     assert.equal(await refused(at("2026-11-30T13:00:00", null, { id: 400, doctorName: "สมหญิง รักงาน" })), "doctor_not_found", "a nurse");
     assert.equal(await refused(at("2026-12-01T13:00:00", null, { id: 400 })), "no_room", "Tuesday: CVT has no room");
-    assert.equal(await refused(at("2026-11-28T13:00:00", null, { id: 400 })), "date_too_early");
-    assert.equal(await refused(at("2026-12-05T13:00:00", null, { id: 400 })), "weekend");
+    assert.equal(await refused(at("2026-11-27T13:00:00", null, { id: 400 })), "date_too_early");
     assert.equal(await refused(at("2027-03-01T13:00:00", null, { id: 400 })), "date_too_far");
     assert.equal(await refused(at("2026-11-30T13:00:00", null, { id: 400, hn: "12345" })), "hn_invalid");
     assert.equal(await refused(at("2026-11-30T13:00:00", null, { id: 400, hn: 7300375 })), "hn_invalid", "an HN must be text");
@@ -420,7 +420,7 @@ describe("calendar API (database)", () => {
     assert.equal(rows[0].n, 1, "one live booking per calendar id");
   });
 
-  test("CVT books Sundays and holidays in OR 13; Saturdays stay closed; such a day closes at 15:00 the day before", async () => {
+  test("CVT books weekends and holidays in OR 13; such a day closes at 15:00 the day before", async () => {
     const sunday = await post(at("2026-11-29T09:00:00", "2026-11-29T11:00:00", { id: 700, hn: "7300380" }));
     assert.equal(sunday.status, 201);
     assert.deepEqual([caseOf(sunday).date, caseOf(sunday).room, caseOf(sunday).start], ["2026-11-29", "OR 13", "09:00"]);
@@ -428,7 +428,7 @@ describe("calendar API (database)", () => {
     const holiday = await post(at("2026-12-16T13:00:00", null, { id: 701, hn: "7300381" }));
     assert.deepEqual([holiday.status, caseOf(holiday).room], [201, "OR 13"]);
     const saturday = await post(at("2026-12-05T13:00:00", null, { id: 702, hn: "7300382" }));
-    assert.deepEqual([saturday.status, saturday.body.error], [422, "weekend"]);
+    assert.deepEqual([saturday.status, caseOf(saturday).room], [201, "OR 13"], "a Saturday too (Pong: \"Sat is considered holiday\")");
     assert.equal(caseOf(await get("700")).room, "OR 13", "read back in OR 13");
     process.env.APP_FAKE_NOW = "2026-11-28T15:30:00+07:00";
     try {
@@ -439,7 +439,42 @@ describe("calendar API (database)", () => {
     } finally {
       process.env.APP_FAKE_NOW = "2026-11-27T10:00:00+07:00";
     }
-    for (const id of ["700", "701"]) assert.equal((await del(id)).status, 200);
+    for (const id of ["700", "701", "702"]) assert.equal((await del(id)).status, 200);
+  });
+
+  test("BOT holidays and special holidays: the same URL and request book OR 13 (Pong: no change to the endpoint or request)", async (t) => {
+    const saved = { token: process.env.BOT_API_TOKEN, url: process.env.BOT_HOLIDAYS_URL };
+    t.after(() => {
+      for (const [name, value] of [["BOT_API_TOKEN", saved.token], ["BOT_HOLIDAYS_URL", saved.url]] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      forgetHolidayFeeds();
+    });
+    // The BOT feed: Constitution Day (Thu 10 Dec) and a special holiday announced at short notice (Mon 7 Dec, invented).
+    const bot = [
+      { Date: "2026-12-07", HolidayDescriptionThai: "วันหยุดพิเศษ (เพิ่มเติม)" },
+      { Date: "2026-12-10", HolidayDescriptionThai: "วันรัฐธรรมนูญ" },
+    ];
+    t.mock.method(globalThis, "fetch", async (url: string) => {
+      const year = new URL(url).searchParams.get("year");
+      return new Response(JSON.stringify({ result: { data: bot.filter((item) => item.Date.startsWith(`${year}-`)) } }));
+    });
+    process.env.BOT_API_TOKEN = "token";
+    delete process.env.BOT_HOLIDAYS_URL;
+    forgetHolidayFeeds();
+
+    const workday = await post(at("2026-12-09T13:00:00", null, { id: 710, hn: "7300390" }));
+    assert.equal(workday.status, 201);
+    assert.notEqual(caseOf(workday).room, "OR 13", "a workday keeps CVT's room of the day");
+    const special = await post(at("2026-12-07T09:00:00", "2026-12-07T11:00:00", { id: 711, hn: "7300391" }));
+    assert.deepEqual([special.status, caseOf(special).date, caseOf(special).room], [201, "2026-12-07", "OR 13"], "a BOT special holiday");
+    const constitution = await post(at("2026-12-10T13:00:00", null, { id: 712, hn: "7300392" }));
+    assert.deepEqual([constitution.status, caseOf(constitution).room], [201, "OR 13"], "a BOT public holiday");
+    // Moving a booking from a workday onto a holiday is the same PUT, and it lands in OR 13.
+    const moved = await put("710", at("2026-12-10T09:00:00", null, { id: 710, hn: "7300390" }));
+    assert.deepEqual([moved.status, caseOf(moved).room], [200, "OR 13"]);
+    for (const id of ["710", "711", "712"]) assert.equal((await del(id)).status, 200);
   });
 
   test("once the day is closed (15:00 the workday before) the booking can move or be cancelled, not change", async () => {

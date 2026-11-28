@@ -133,7 +133,7 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
     // each), the operation, the room choice, the scrub answer and the note (cleanNote, at most MAX_NOTE characters);
     // the room itself is worked out from the doctor's own department as the database has it (never from the form).
     const earliest = firstBookingDay(admin, today, minutes, holidays);
-    // CVT also books Sundays and holidays, in OR 13 (checkCase reads it only for them).
+    // CVT also books weekends and holidays, in OR 13 (checkCase reads it only for them).
     const offFrom = firstOffDay(admin, today, minutes);
     const checked = checkCase(input, { today, earliest, offFrom, admin, periods, subtype: doctor.subtype, holidays, place, ahead });
     if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };

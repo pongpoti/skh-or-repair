@@ -368,7 +368,7 @@ const warningsOf = (warning: TimeWarning | null) => (warning ? { warnings: [{ co
 type Rules = {
   today: string;
   earliest: string;
-  /** The first Sunday or holiday that can be booked: CVT books them too, in OR 13 (lib/added-cases.ts booksOffDays). */
+  /** The first weekend day or holiday that can be booked: CVT books them too, in OR 13 (lib/added-cases.ts booksOffDays). */
   offFrom: string;
   periods: RepairPeriods;
   holidays: Awaited<ReturnType<typeof holidaysBetween>>["holidays"];
@@ -407,14 +407,14 @@ async function lockRecord(client: PoolClient, externalId: string): Promise<void>
 
 /** In a department with several rooms that day: the doctor's own room there, else the emptier one (as a new booking). */
 function pickRoom(value: CaseInput, doctor: Doctor, day: readonly AddedCase[], rules: Rules): void {
-  // A Sunday or holiday has one room for CVT, OR 13 (checkCase gave it).
+  // A weekend day or holiday has one room for CVT, OR 13 (checkCase gave it).
   if (onOffDay(value, doctor, rules)) return;
   const periods = rules.periods;
   const rooms = deptRooms(doctor.subtype, value.operation, value.date, periods);
   if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods, timeOf(value));
 }
 
-/** Whether `value` is a Sunday or holiday booking of a doctor who books them (CVT, in OR 13). */
+/** Whether `value` is a weekend day or holiday booking of a doctor who books them (CVT, in OR 13). */
 function onOffDay(value: CaseInput, doctor: Doctor, rules: Rules): boolean {
   return booksOffDays(doctor.subtype) && isOffDay(value.date, rules.holidays);
 }
@@ -535,7 +535,7 @@ async function change(pool: Pool, current: CalendarCase, record: CalendarRecord,
   const context = { ...rules, subtype: doctor.subtype, place: "skh" as const, ...(sameDoctor ? { editing } : {}) };
   // A booking that can no longer change (its day gone, under way today, or its day closed): the same record again is
   // no change, and anything else is refused below.
-  // A Sunday or holiday booking (CVT, OR 13) closes at 15:00 the day before it (lib/added-cases.ts firstOffDay).
+  // A weekend day or holiday booking (CVT, OR 13) closes at 15:00 the day before it (lib/added-cases.ts firstOffDay).
   const closesFrom = opensFrom(booking.date, rules.earliest, booksOffDays(doctor.subtype) ? rules.offFrom : null, rules.holidays);
   if (sameDoctor && booking.date < closesFrom) {
     const kept = keptAsIs(record, editing, context);
