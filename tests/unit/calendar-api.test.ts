@@ -264,7 +264,8 @@ describe("calendar API (database)", () => {
     const reply = await post(SAMPLE);
     assert.equal(reply.status, 422);
     assert.equal(reply.body.error, "date_too_early");
-    assert.equal(reply.body.earliest, "2026-11-30");
+    // Friday 10:00: CVT may book Sunday too (Pong, 28 Nov 2026), so the first day is Sunday 29 Nov, not Monday.
+    assert.equal(reply.body.earliest, "2026-11-29");
     assert.equal(reply.body.field, "operationStart");
     assert.equal((await pool.query("SELECT count(*)::int AS n FROM cases")).rows[0].n, 0);
   });
@@ -417,6 +418,28 @@ describe("calendar API (database)", () => {
     assert.equal(caseOf(moved).doctorName, "หัวใจ ใหม่");
     const { rows } = await pool.query("SELECT count(*)::int AS n FROM cases WHERE external_id = 380 AND removed_at IS NULL");
     assert.equal(rows[0].n, 1, "one live booking per calendar id");
+  });
+
+  test("CVT books Sundays and holidays in OR 13; Saturdays stay closed; such a day closes at 15:00 the day before", async () => {
+    const sunday = await post(at("2026-11-29T09:00:00", "2026-11-29T11:00:00", { id: 700, hn: "7300380" }));
+    assert.equal(sunday.status, 201);
+    assert.deepEqual([caseOf(sunday).date, caseOf(sunday).room, caseOf(sunday).start], ["2026-11-29", "OR 13", "09:00"]);
+    // 16 Dec 2026, a Wednesday the hospital closes (HOSPITAL_HOLIDAYS): OR 13 too, not CVT's room of the day.
+    const holiday = await post(at("2026-12-16T13:00:00", null, { id: 701, hn: "7300381" }));
+    assert.deepEqual([holiday.status, caseOf(holiday).room], [201, "OR 13"]);
+    const saturday = await post(at("2026-12-05T13:00:00", null, { id: 702, hn: "7300382" }));
+    assert.deepEqual([saturday.status, saturday.body.error], [422, "weekend"]);
+    assert.equal(caseOf(await get("700")).room, "OR 13", "read back in OR 13");
+    process.env.APP_FAKE_NOW = "2026-11-28T15:30:00+07:00";
+    try {
+      const closed = await put("700", at("2026-11-29T13:00:00", "2026-11-29T15:00:00", { id: 700, hn: "7300380" }));
+      assert.deepEqual([closed.status, closed.body.error], [409, "day_closed"], "Saturday 15:00 closes Sunday");
+      const late = await post(at("2026-11-29T13:00:00", null, { id: 703, hn: "7300383" }));
+      assert.deepEqual([late.status, late.body.error], [422, "date_too_early"]);
+    } finally {
+      process.env.APP_FAKE_NOW = "2026-11-27T10:00:00+07:00";
+    }
+    for (const id of ["700", "701"]) assert.equal((await del(id)).status, 200);
   });
 
   test("once the day is closed (15:00 the workday before) the booking can move or be cancelled, not change", async () => {

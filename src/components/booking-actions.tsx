@@ -8,7 +8,9 @@ import {
   atThaChalom,
   bookedRoom,
   bookingState,
+  booksOffDays,
   editClosesOn,
+  opensFrom,
   NO_OPERATION_LABEL,
   CALENDAR_TEXT,
   NOTE_ONLY_TEXT,
@@ -34,6 +36,8 @@ export type OwnBookings = {
   today: string;
   /** The first day that can be booked (lib/added-cases.ts earliestBookingDay): a day before it is closed for edits. */
   earliest: string;
+  /** The first Sunday or holiday that can be booked, for CVT (lib/added-cases.ts firstOffDay); null for everyone else. */
+  offFrom?: string | null;
   /** The holidays the 15:00 cut-off steps over, for when a booking closes (editClosesOn). */
   holidays: readonly Holiday[];
   periods: RepairPeriods;
@@ -141,12 +145,21 @@ function Action({
 }
 
 /**
+ * Where the doctor's own booking stands (lib/added-cases.ts bookingState): a CVT booking of a Sunday or holiday closes at
+ * 15:00 the day before it (opensFrom), any other at the 15:00 cut-off.
+ */
+export function ownState(booking: Pick<AddedCase, "date" | "subtype" | "place">, own: Pick<OwnBookings, "today" | "earliest" | "offFrom" | "holidays">) {
+  const offFrom = own.offFrom != null && booksOffDays(booking.subtype, booking.place) ? own.offFrom : null;
+  return bookingState(booking.date, own.today, opensFrom(booking.date, own.earliest, offFrom, own.holidays));
+}
+
+/**
  * Until when an open booking's details can change, as the sheet says it: 15:00 on the day the booking cut-off passes its
  * day (lib/added-cases.ts editClosesOn; the day before, or the workday before for a Monday), when MX makes the HOSxP
  * list. A move to an open day and a cancel stay open after it.
  */
-export function editDeadline(date: string, today: string, holidays: readonly Holiday[] = []): string {
-  const day = editClosesOn(date, today, holidays);
+export function editDeadline(date: string, today: string, holidays: readonly Holiday[] = [], offDays = false): string {
+  const day = editClosesOn(date, today, holidays, offDays);
   return day ? `แก้ไขได้ถึง 15.00 น. ${thaiDate(day, "short")}` : NOTE_ONLY_TEXT;
 }
 
@@ -226,7 +239,7 @@ export function BookingSheet({
   const pressedOutside = useRef(false);
   const close = () => dialogRef.current?.close();
 
-  const state = booking ? bookingState(booking.date, own.today, own.earliest) : "past";
+  const state = booking ? ownState(booking, own) : "past";
   const underWay = row ? UNDER_WAY.has(row.status) : false;
   // A booking from the doctor's calendar (lib/calendar-api.ts) changes there: here it can only be cancelled for good.
   const fromCalendar = booking?.via === "calendar";
@@ -372,7 +385,7 @@ export function BookingSheet({
                   : fromCalendar
                     ? CALENDAR_TEXT
                     : state === "open"
-                      ? editDeadline(booking.date, own.today, own.holidays)
+                      ? editDeadline(booking.date, own.today, own.holidays, own.offFrom != null && booksOffDays(booking.subtype, booking.place))
                       : NOTE_ONLY_TEXT}
               </p>
               {done ? (

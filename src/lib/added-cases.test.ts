@@ -13,6 +13,7 @@ import {
   bookingChange,
   bookingRoom,
   bookingState,
+  booksOffDays,
   checkCase,
   cleanNote,
   cleanOperation,
@@ -24,6 +25,12 @@ import {
   editedMessage,
   editRequeues,
   firstBookingDay,
+  firstOffDay,
+  firstOpenDay,
+  isOffDay,
+  OFF_DAY_RULE,
+  offDayRoom,
+  opensFrom,
   bookableFrom,
   BOOKING_CUTOFF_RULE,
   MAX_DIAGNOSIS,
@@ -929,4 +936,103 @@ test("an admin books with no time limits: today at any hour, a year ahead (Pong,
   assert.ok(!check({ ...ok, date: "2026-12-10" }, { ...admin, holidays: DECEMBER }).ok, "a holiday");
   // An admin's booking from today on is never closed to edits (bookingState with the admin's first day).
   assert.equal(bookingState(TODAY, TODAY, firstBookingDay(true, TODAY, at(16))), "open");
+});
+
+// Pong, 28 Nov 2026: "There is room booking exception for CVT. They can book on sunday and special holiday. The app
+// automatically assign to OR13."
+test("CVT books Sundays and holidays (not Saturdays) at รพ.สมุทรสาคร, in OR 13", () => {
+  assert.ok(booksOffDays("CVT") && booksOffDays("CVT", "skh"));
+  assert.ok(!booksOffDays("CVT", "tha-chalom") && !booksOffDays("GENSX") && !booksOffDays(null));
+  assert.ok(isOffDay("2026-11-22", []), "a Sunday");
+  assert.ok(!isOffDay("2026-11-21", []), "a Saturday");
+  assert.ok(!isOffDay("2026-12-05", [{ date: "2026-12-05", name: "วันพ่อแห่งชาติ" }]), "a Saturday holiday stays closed");
+  assert.ok(isOffDay("2026-12-10", DECEMBER) && isOffDay("2026-12-07", DECEMBER), "weekday holidays");
+  assert.ok(!isOffDay("2026-12-11", DECEMBER), "a workday");
+
+  // OR 13 when it is open: the repair's first half, and the weekly schedule; in the second half (OR 7 to 13 closed) the
+  // half's CVT emergency room, OR 2.
+  assert.equal(offDayRoom("2026-11-22", REPAIR), "or-13");
+  assert.equal(offDayRoom("2026-11-22", DEFAULT_REPAIR_PERIODS), "or-13", "before the repair: the weekly schedule");
+  assert.equal(offDayRoom("2027-01-31", REPAIR), "or-2", "the second half");
+
+  // Sundays and holidays close at 15:00 the day before; an admin books from today.
+  assert.equal(firstOffDay(false, "2026-11-20", at(14)), "2026-11-21");
+  assert.equal(firstOffDay(false, "2026-11-21", at(15)), "2026-11-23");
+  assert.equal(firstOffDay(true, "2026-11-22", at(20)), "2026-11-22");
+  // Friday 14:00: the Sunday, then Monday; Friday 15:30: Sunday, then (Monday closed) Tuesday.
+  assert.equal(firstOpenDay("2026-11-23", "2026-11-21", []), "2026-11-22");
+  assert.equal(firstOpenDay("2026-11-24", "2026-11-22", []), "2026-11-22");
+  assert.equal(firstOpenDay("2026-11-24", null, []), "2026-11-24", "anyone else: the first workday");
+  assert.equal(opensFrom("2026-11-22", "2026-11-24", "2026-11-22", []), "2026-11-22");
+  assert.equal(opensFrom("2026-11-23", "2026-11-24", "2026-11-22", []), "2026-11-24", "Monday keeps the 15:00 rule");
+  assert.equal(opensFrom("2026-11-22", "2026-11-24", null, []), "2026-11-24");
+
+  // The calendar: Sundays and holidays open for CVT, Saturdays closed.
+  assert.equal(closedDayNote("2026-11-22", [], true), null);
+  assert.equal(closedDayNote("2026-12-10", DECEMBER, true), null);
+  assert.equal(closedDayNote("2026-11-21", [], true), "วันเสาร์");
+  assert.equal(closedDayNote("2026-11-22", []), "วันเสาร์-อาทิตย์", "anyone else");
+  assert.match(OFF_DAY_RULE, /OR 13/);
+});
+
+test("checkCase: a CVT booking of a Sunday or holiday goes to OR 13; everyone else's is refused", () => {
+  // Friday 20 Nov 2026 at 15:30: Sunday 22 Nov can be booked, Monday 23 cannot (15:00 passed), Tuesday 24 can.
+  const cvt = { today: "2026-11-20", earliest: "2026-11-24", offFrom: "2026-11-22", subtype: "CVT", holidays: DECEMBER };
+  const sunday = check({ ...ok, date: "2026-11-22" }, cvt);
+  assert.ok(sunday.ok);
+  assert.deepEqual([sunday.value.roomId, sunday.value.dressing], ["or-13", false]);
+  const monday = check({ ...ok, date: "2026-11-23" }, cvt);
+  assert.ok(!monday.ok);
+  assert.deepEqual([monday.code, monday.earliest], ["date_too_early", "2026-11-24"], "the next open day after it");
+  const tuesday = check({ ...ok, date: "2026-11-24" }, cvt);
+  assert.ok(tuesday.ok);
+  assert.equal(tuesday.value.roomId, "or-11", "a workday: CVT's room of the day");
+  const holiday = check({ ...ok, date: "2026-12-10" }, cvt);
+  assert.ok(holiday.ok);
+  assert.equal(holiday.value.roomId, "or-13", "a weekday holiday: OR 13, not the mixed room");
+  const saturday = check({ ...ok, date: "2026-11-28" }, cvt);
+  assert.ok(!saturday.ok);
+  assert.equal(saturday.code, "weekend");
+  const dressing = check({ ...ok, date: "2026-11-22", room: "dressing", scrubDoes: true }, cvt);
+  assert.ok(!dressing.ok);
+  assert.equal(dressing.code, "no_dressing_room", "no dressing room on a Sunday");
+  // Saturday 15:30: Sunday has closed.
+  const late = check({ ...ok, date: "2026-11-22" }, { ...cvt, today: "2026-11-21", offFrom: "2026-11-23" });
+  assert.ok(!late.ok);
+  assert.equal(late.code, "date_too_early");
+  // Without offFrom (no doctor's page gave it), and for any other department, Sundays stay closed.
+  assert.equal(check({ ...ok, date: "2026-11-29" }, { ...cvt, offFrom: undefined }).ok, false);
+  const gensx = check({ ...ok, date: "2026-11-29" }, { ...cvt, subtype: "GENSX" });
+  assert.ok(!gensx.ok);
+  assert.equal(gensx.code, "weekend");
+  assert.equal(check({ ...ok, date: "2026-12-10" }, { ...cvt, subtype: "GENSX" }).ok, false);
+  assert.equal(check({ ...ok, date: "2026-11-29" }, { ...cvt, place: "tha-chalom" }).ok, false, "not at รพ.ท่าฉลอม");
+});
+
+test("a saved CVT Sunday or holiday booking stays in OR 13, and closes for edits at 15:00 the day before", () => {
+  const booking: AddedCase = {
+    patientName: "",
+    diagnosis: "",
+    id: "9",
+    date: "2026-12-10",
+    start: null,
+    end: null,
+    roomId: "or-13",
+    hn: "7300375",
+    operation: "CABG",
+    shift: "in",
+    dressing: false,
+    scrubDoes: null,
+    note: "",
+    surgeonId: "7",
+    surgeon: "x",
+    subtype: "CVT",
+  };
+  assert.deepEqual(bookedRoom(booking, REPAIR), { roomId: "or-13", dressing: false }, "a weekday holiday: kept in OR 13");
+  assert.deepEqual(bookedRoom({ ...booking, date: "2026-11-22" }, REPAIR), { roomId: "or-13", dressing: false }, "a Sunday");
+  assert.deepEqual(bookedRoom({ ...booking, roomId: "or-11" }, REPAIR), { roomId: "or-11", dressing: false }, "a workday booking stays put");
+  assert.equal(editClosesOn("2026-11-22", "2026-11-18", [], true), "2026-11-21", "Sunday: Saturday 15:00");
+  assert.equal(editClosesOn("2026-12-10", "2026-12-01", DECEMBER, true), "2026-12-09");
+  assert.equal(editClosesOn("2026-11-22", "2026-11-22", [], true), null);
+  assert.equal(editClosesOn("2026-11-23", "2026-11-18", [], true), "2026-11-20", "a Monday still closes Friday 15:00");
 });

@@ -14,7 +14,11 @@ import {
   daySlots,
   deptRooms,
   editedMessage,
+  booksOffDays,
   firstBookingDay,
+  firstOffDay,
+  isOffDay,
+  opensFrom,
   roomAmong,
   STARTED_TEXT,
   timeOf,
@@ -129,7 +133,9 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
     // each), the operation, the room choice, the scrub answer and the note (cleanNote, at most MAX_NOTE characters);
     // the room itself is worked out from the doctor's own department as the database has it (never from the form).
     const earliest = firstBookingDay(admin, today, minutes, holidays);
-    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, place, ahead });
+    // CVT also books Sundays and holidays, in OR 13 (checkCase reads it only for them).
+    const offFrom = firstOffDay(admin, today, minutes);
+    const checked = checkCase(input, { today, earliest, offFrom, periods, subtype: doctor.subtype, holidays, place, ahead });
     if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
     const value = checked.value;
 
@@ -143,7 +149,8 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
       const day = await listCasesOn(client, value.date, place);
       // A department with several rooms that day: the room of the doctor's own booking there, else the emptier one,
       // the one free at that time first. รพ.ท่าฉลอม gives a department one room a day.
-      const rooms = value.dressing || place !== "skh" ? [] : deptRooms(doctor.subtype, value.operation, value.date, periods);
+      const offDay = booksOffDays(doctor.subtype, place) && isOffDay(value.date, holidays);
+      const rooms = value.dressing || place !== "skh" || offDay ? [] : deptRooms(doctor.subtype, value.operation, value.date, periods);
       if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods, timeOf(value));
       await insertCase(client, doctor.id, user.sub, value);
     });
@@ -196,15 +203,17 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
     // The calendar's booking changes at the calendar (lib/calendar-api.ts), whose next push would undo an edit here.
     if (booking.via === "calendar") return { ok: false, error: CALENDAR_TEXT, mine: await mine() };
     const earliest = firstBookingDay(admin, today, minutes, holidays);
+    const offFrom = firstOffDay(admin, today, minutes);
     if (bookingState(booking.date, today, earliest) === "past") return { ok: false, error: PAST, mine: await mine() };
     if (await startedToday(pool, booking, today, doctor.id, periods)) return { ok: false, error: STARTED_TEXT, mine: await mine() };
     const editing = { ...booking, subtype: doctor.subtype };
-    const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, editing, ahead });
+    const checked = checkCase(input, { today, earliest, offFrom, periods, subtype: doctor.subtype, holidays, editing, ahead });
     if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
     const value = checked.value;
 
     // A closed day: only the note, saved alone (checkCase made sure nothing else changed).
-    if (value.date === booking.date && value.date < earliest) {
+    const offFromHere = booksOffDays(doctor.subtype, place) ? offFrom : null;
+    if (value.date === booking.date && value.date < opensFrom(value.date, earliest, offFromHere, holidays)) {
       if (value.note === booking.note) return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
       if (!(await updateNote(pool, id, doctor.id, value.note))) return { ok: false, error: GONE, mine: await mine() };
       refreshBoards();
@@ -214,7 +223,7 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
     const saved = await withDayLock(pool, value.date, async (client): Promise<"same" | "gone" | { requeue: boolean; moved: boolean }> => {
       // Among the day's other bookings: this one does not hold a room or a time for itself.
       const day = (await listCasesOn(client, value.date, place)).filter((item) => item.id !== booking.id);
-      if (!value.dressing && place === "skh") {
+      if (!value.dressing && place === "skh" && !(offFromHere !== null && isOffDay(value.date, holidays))) {
         const sameRoom = value.date === booking.date && bookedChoice(editing, periods) === "dept";
         const rooms = deptRooms(doctor.subtype, value.operation, value.date, periods);
         if (sameRoom && rooms.includes(bookedRoom(editing, periods).roomId)) value.roomId = bookedRoom(editing, periods).roomId;

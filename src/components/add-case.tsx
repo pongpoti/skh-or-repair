@@ -19,6 +19,7 @@ import {
   bookedAlready,
   bookedChoice,
   bookedRoom,
+  booksOffDays,
   checkCase,
   cleanOperation,
   closedDayNote,
@@ -26,6 +27,8 @@ import {
   DRESSING_ROOM_NAME,
   earliestText,
   editRequeues,
+  firstOpenDay,
+  isOffDay,
   MAX_DIAGNOSIS,
   MAX_NOTE,
   MAX_OPERATION,
@@ -33,6 +36,8 @@ import {
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
   NOTE_ONLY_TEXT,
+  OFF_DAY_RULE,
+  opensFrom,
   placeBookingRoom,
   placeRoomName,
   POOLED_ROOM_NOTE,
@@ -50,7 +55,7 @@ import {
   type RoomChoice,
 } from "@/lib/added-cases";
 import { lengthText, rangeText, TIME_MISSING_TEXT, type TimeRange } from "@/lib/booking-time";
-import { allocationFor, readableTextOn, type Department } from "@/lib/allocation";
+import { allocationFor, DEPARTMENTS, readableTextOn, type Department } from "@/lib/allocation";
 import { thaiDate } from "@/lib/days";
 import { displayHn, normalizeHn } from "@/lib/hn";
 import type { Holiday } from "@/lib/holidays";
@@ -152,6 +157,7 @@ export function AddCase({
   doctor,
   today,
   earliest,
+  offFrom = null,
   admin = false,
   holidays,
   unlisted,
@@ -171,6 +177,11 @@ export function AddCase({
   today: string;
   /** The first day that can be booked, by the server's clock (lib/added-cases.ts firstBookingDay). */
   earliest: string;
+  /**
+   * The first Sunday or holiday that can be booked (lib/added-cases.ts firstOffDay), for CVT at รพ.สมุทรสาคร, who books
+   * them in OR 13 (Pong, 28 Nov 2026); null for everyone else.
+   */
+  offFrom?: string | null;
   /** An admin: no 15:00 cut-off (earliest is today) and a year ahead (lib/added-cases.ts bookAheadDays). */
   admin?: boolean;
   /** The holidays from today to 60 days ahead, closed in the calendar as on the server. */
@@ -213,7 +224,14 @@ export function AddCase({
     setPrevEarliest(earliest);
     setMovedOn(null);
   }
-  const first = later(earliest, prevEarliest !== earliest ? null : movedOn);
+  const moved = prevEarliest !== earliest ? null : movedOn;
+  // CVT at รพ.สมุทรสาคร books Sundays and holidays too, in OR 13 (lib/added-cases.ts booksOffDays): from offFrom on.
+  const offStart = offFrom !== null && booksOffDays(doctor.subtype, place) ? later(offFrom, moved) : null;
+  const workFirst = later(earliest, moved);
+  // The first day that can be booked at all, and the first `day` itself can be (a workday from workFirst, a Sunday or
+  // holiday from offStart).
+  const first = firstOpenDay(workFirst, offStart, holidays);
+  const opens = (day: string) => later(first, opensFrom(day, workFirst, offStart, holidays));
   const [date, setDate] = useState(first);
   const [hn, setHn] = useState("");
   const [patientName, setPatientName] = useState("");
@@ -264,7 +282,7 @@ export function AddCase({
 
   // An edit's own day, which needs no day checks and may be closed already (only the note changes there then).
   const keepsDay = mode === "edit" && editing !== null && date === editing.date;
-  const locked = keepsDay && date < first;
+  const locked = keepsDay && date < opens(date);
   // Back on its closed day after picking another, or closed by 15:00 while open: the locked fields show the booking's
   // own again, and 15:00 says so when it took back what the doctor had typed.
   const [prevLocked, setPrevLocked] = useState(locked);
@@ -308,7 +326,7 @@ export function AddCase({
   const [prevFirst, setPrevFirst] = useState(first);
   if (prevFirst !== first) {
     setPrevFirst(first);
-    if (date < first && !keepsDay) {
+    if (date < opens(date) && !keepsDay) {
       setDate(first);
       setAbout("save");
       setInvalid("date");
@@ -334,7 +352,7 @@ export function AddCase({
     if (next.mode === "again" && next.booking.date === first) {
       const end = addDays(today, ahead);
       do start = addDays(start, 1);
-      while (start < end && closedDayNote(start, holidays));
+      while (start < end && (closedDayNote(start, holidays, offStart !== null) || start < opens(start)));
     }
     setDate(next.mode === "edit" ? next.booking.date : start);
     setHn(from?.hn ? displayHn(from.hn) : "");
@@ -504,7 +522,8 @@ export function AddCase({
     const edit = mode === "edit" ? editing : null;
     const checked = checkCase(input, {
       today,
-      earliest: first,
+      earliest: workFirst,
+      ...(offStart ? { offFrom: offStart } : {}),
       periods,
       subtype: doctor.subtype,
       holidays,
@@ -627,7 +646,7 @@ export function AddCase({
       day = addDays(day, direction);
       if (day < from || day > last) return null;
       if (editing && day === editing.date) return day;
-      if (day >= first && !closedDayNote(day, holidays)) return day;
+      if (day >= opens(day) && !closedDayNote(day, holidays, offStart !== null)) return day;
     }
     return null;
   }
@@ -653,16 +672,20 @@ export function AddCase({
   const specialty = subtypeLabel("DR", doctor.subtype);
   const last = addDays(today, ahead);
   const dayState = (iso: string): DayState => {
-    const note = closedDayNote(iso, holidays);
-    return note ? { disabled: true, note } : { disabled: false };
+    const note = closedDayNote(iso, holidays, offStart !== null);
+    if (note) return { disabled: true, note };
+    // A workday before the first one, after a Sunday CVT can still book (Friday from 15:00: Sunday, then Tuesday).
+    return iso >= first && iso < opens(iso) ? { disabled: true, note: "ปิดรับจองแล้ว" } : { disabled: false };
   };
+  // A Sunday or holiday CVT books: OR 13, whatever the day's plan (lib/added-cases.ts offDayRoom).
+  const offDay = offStart !== null && isOffDay(date, holidays);
   // The two rooms the doctor can pick that day, worked out again on each render from the day (and the name, which sends
   // a general surgeon's endoscopy to the SCOPE room, OR 3, in the weekly schedule).
   const name = cleanOperation(operation);
   // A department with several rooms that day keeps a surgeon's list in one (lib/added-cases.ts roomAmong): the room of
   // the doctor's own booking there; with none yet, the server gives the one with fewer bookings, so the card names both.
   // รพ.ท่าฉลอม gives a department one room a day and lends none.
-  const pooled = tc ? [] : deptRooms(doctor.subtype, name, date, periods);
+  const pooled = tc || offDay ? [] : deptRooms(doctor.subtype, name, date, periods);
   const ownRoom =
     pooled.length > 1
       ? (mine
@@ -671,12 +694,27 @@ export function AddCase({
           .find((item) => !item.dressing && pooled.includes(item.roomId))?.roomId ?? null)
       : null;
   // An edit on its own day keeps a room borrowed before 27 Nov 2026 (lib/added-cases.ts roomToBook), as the server does.
-  const deptPlaced = roomToBook(place, doctor.subtype, name, date, periods, "dept", keepsDay && editing ? { ...editing, subtype: doctor.subtype } : undefined);
+  const deptPlaced = roomToBook(
+    place,
+    doctor.subtype,
+    name,
+    date,
+    periods,
+    "dept",
+    keepsDay && editing ? { ...editing, subtype: doctor.subtype } : undefined,
+    offDay,
+  );
   const deptRoom = deptPlaced.ok && ownRoom ? { ...deptPlaced, roomId: ownRoom } : deptPlaced;
   const deptChoices = pooled.length > 1 && !ownRoom ? pooled : null;
-  const dressingRoom = placeBookingRoom(place, doctor.subtype, name, date, periods, "dressing");
+  const dressingRoom = placeBookingRoom(place, doctor.subtype, name, date, periods, "dressing", offDay);
   const room = choice === "dressing" ? dressingRoom : deptRoom;
-  const allocation = deptRoom.ok ? (tc ? thaChalomAllocation(deptRoom.roomId, date) : allocationFor(deptRoom.roomId, date, periods)) : null;
+  const allocation = !deptRoom.ok
+    ? null
+    : offDay
+      ? { am: DEPARTMENTS.CVT, pm: DEPARTMENTS.CVT, split: false }
+      : tc
+        ? thaChalomAllocation(deptRoom.roomId, date)
+        : allocationFor(deptRoom.roomId, date, periods);
   const label = (roomId: string) => placeRoomName(roomId, place);
   // The day view: the bookings in the room the doctor's choice gives (a department's rooms that day, when the server
   // still picks one of them), the doctor's own edited booking left out.
@@ -864,6 +902,11 @@ export function AddCase({
                     ))}
               </span>{" "}
               <span className="block">{bookableFrom(first)}</span>
+              {offStart !== null ? (
+                <span className="block" data-testid="case-off-day-rule">
+                  {OFF_DAY_RULE}
+                </span>
+              ) : null}
             </p>
             {/* An edit's own day once 15:00 the day before passed: the fields below wait for another day. */}
             {locked ? lockedNote : null}

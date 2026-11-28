@@ -59,6 +59,11 @@ export type CaseAdding = {
   today: string;
   /** The first day the doctor can book (lib/added-cases.ts firstBookingDay), by the server's clock. */
   earliest: string;
+  /**
+   * The first Sunday or holiday the doctor can book (lib/added-cases.ts firstOffDay), for CVT at รพ.สมุทรสาคร, who books
+   * them in OR 13; null or left out for everyone else.
+   */
+  offFrom?: string | null;
   /** An admin, who books with no time limits: from today at any hour, a year ahead (lib/added-cases.ts bookAheadDays). */
   admin?: boolean;
   /** The holidays from today to 60 days ahead (a year for an admin), which the calendar closes. */
@@ -485,6 +490,7 @@ export function SuiteBoard({
             mine: adding.mine,
             today: adding.today,
             earliest: adding.earliest,
+            offFrom: adding.offFrom ?? null,
             holidays: adding.holidays,
             periods,
             onEdit: (booking, focus, back) => setAddRequest({ mode: "edit", booking, focus, back }),
@@ -661,6 +667,7 @@ export function SuiteBoard({
           doctor={adding.doctor}
           today={adding.today}
           earliest={adding.earliest}
+          offFrom={adding.offFrom ?? null}
           admin={adding.admin}
           holidays={adding.holidays}
           unlisted={adding.unlisted}
