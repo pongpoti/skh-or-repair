@@ -8,9 +8,8 @@ import type { DeptCode } from "./allocation.ts";
  * one schedule (ScheduleMode, repairOn).
  *
  * - First half: OR 9 emergencies, OR 10 dressing, OR 11 mixed departments, OR 12 GENSX, OR 13 ORTHO, OR 7 and 8
- *   recovery; OR 1 to 6 and RR 1 (the lower recovery room) are closed, inside the repair zone. RR 2 is a recovery
- *   room as usual, cut out of the zone (Pong, 27 Nov 2026: "always mark lower RR room as repair zone", the first half
- *   like the second).
+ *   recovery; OR 1 to 6 and the recovery area (RR 1 and 2) are closed, inside the repair zone (Pong, 28 Nov 2026: "For
+ *   OR layout first half : dark upper RR room", undoing the 27 Nov mint RR 2).
  * - Second half: OR 1 dressing, OR 2 ORTHO, OR 3 emergencies, OR 4 mixed departments, OR 5 GENSX, OR 6 the instrument
  *   room; OR 7 to 13 and RR 1 are closed. RR 2 is a recovery room as usual.
  *
@@ -51,9 +50,8 @@ export const REPAIR_LAYOUTS: Readonly<Record<1 | 2, RepairLayout>> = {
       "or-13": "ORTHO",
     },
     emergencyRooms: ["or-12", "or-13"],
-    closedRecovery: ["r-1"],
-    // RR 2 is cut out of the zone (the second subpath, drawn even-odd): it stays a recovery room, as in the second half.
-    zone: "M20 20L1187 20L1187 700L400 700L400 590L20 590Z M393 348L815 348L815 532L393 532Z",
+    closedRecovery: ["r-1", "r-2"],
+    zone: "M20 20L1187 20L1187 700L400 700L400 590L20 590Z",
   },
   2: {
     half: 2,

@@ -32,11 +32,9 @@ export const MISMATCH_LABEL = "ข้อมูลไม่ตรงกับก�
  * tag never hides what it explains. Large, as on the repair plan images (Pong, 15 Nov 2026), so the closed area reads
  * at a glance; a label it would cover moves below it (`RecoveryAreaLabel`).
  */
-const ZONE_TAG: Record<1 | 2, { x: number; y: number; scale: number }> = {
-  // First half: smaller, in the corridor between OR 2 to 4 and RR 2, which stays a recovery room outside the zone
-  // (Pong, 27 Nov 2026), so the tag hides neither RR 2 nor the rooms' ปิด.
-  1: { x: 603.5, y: 301, scale: 0.6 },
-  2: { x: 603.5, y: 1275, scale: 1 },
+const ZONE_TAG: Record<1 | 2, { x: number; y: number }> = {
+  1: { x: 603.5, y: 360 },
+  2: { x: 603.5, y: 1275 },
 };
 const ZONE_TAG_WIDTH = 700;
 const ZONE_TAG_HEIGHT = 150;
@@ -204,19 +202,17 @@ function RepairZoneFill({ d }: { d: string }) {
 }
 
 function RepairZone({ half, d }: { half: 1 | 2; d: string }) {
-  const { x, y, scale } = ZONE_TAG[half];
+  const { x, y } = ZONE_TAG[half];
   const text = "พื้นที่ปิดซ่อม";
   const width = ZONE_TAG_WIDTH;
   const height = ZONE_TAG_HEIGHT;
   return (
     <g className="fp-zone" pointerEvents="none" aria-hidden="true" data-testid="repair-zone" data-half={half}>
       <path className="fp-zone-edge" d={d} />
-      <g transform={`translate(${x} ${y}) scale(${scale})`}>
-        <rect className="fp-zone-tag" x={-width / 2} y={-height / 2} width={width} height={height} rx={height / 2} />
-        <text className="fp-zone-text" x={0} y={0} dy="0.36em">
-          {text}
-        </text>
-      </g>
+      <rect className="fp-zone-tag" x={x - width / 2} y={y - height / 2} width={width} height={height} rx={height / 2} />
+      <text className="fp-zone-text" x={x} y={y} dy="0.36em">
+        {text}
+      </text>
     </g>
   );
 }
@@ -244,12 +240,10 @@ function RecoveryAreaLabel({
   half: 1 | 2;
 }) {
   const tag = ZONE_TAG[half];
-  const halfWidth = ((ZONE_TAG_WIDTH + ZONE_TAG_OUTLINE) / 2) * tag.scale;
-  const halfHeight = ((ZONE_TAG_HEIGHT + ZONE_TAG_OUTLINE) / 2) * tag.scale;
-  const tagLeft = tag.x - halfWidth;
-  const tagRight = tag.x + halfWidth;
-  const tagTop = tag.y - halfHeight;
-  const tagBottom = tag.y + halfHeight;
+  const tagLeft = tag.x - ZONE_TAG_WIDTH / 2 - ZONE_TAG_OUTLINE / 2;
+  const tagRight = tag.x + ZONE_TAG_WIDTH / 2 + ZONE_TAG_OUTLINE / 2;
+  const tagTop = tag.y - ZONE_TAG_HEIGHT / 2 - ZONE_TAG_OUTLINE / 2;
+  const tagBottom = tag.y + ZONE_TAG_HEIGHT / 2 + ZONE_TAG_OUTLINE / 2;
   // The label's glyphs reach about 0.85em above and 0.35em below its middle (Thai vowels sit high).
   const above = DEPT_SIZE * 0.85;
   const below = DEPT_SIZE * 0.35;
