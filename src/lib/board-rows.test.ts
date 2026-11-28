@@ -43,6 +43,8 @@ function wb(more: Partial<WorkbookCase>): WorkbookCase {
 function booking(more: Partial<AddedCase>): AddedCase {
   next += 1;
   return {
+    patientName: "",
+    diagnosis: "",
     id: String(next),
     date: DAY,
     start: null,
@@ -442,6 +444,47 @@ test("the patient's name follows the HN: MX and admins on every row, the doctor 
   const sent = [...anyone.rows, ...anyone.unmatched];
   assert.ok(sent.every((row) => !("patientName" in row)), "no patientName key at all");
   assert.doesNotMatch(JSON.stringify(sent), /ผู้ป่วย/, "no name anywhere in what the client gets");
+});
+
+test("the booking's patient's name and diagnosis follow the HN too: HOSxP's name wins, the booking's stands in for it, the diagnosis is the booking's", () => {
+  // Pong, 28 Nov 2026: "add form input diagnosis and patient name, both are not required"
+  const named = booking({ hn: "601", surgeonId: "7", patientName: "นาย จองไว้", diagnosis: "Gallstone" });
+  const hosxpNamed = booking({ hn: "602", surgeonId: "7", patientName: "นาย สะกดผิด", diagnosis: "Hernia, right" });
+  const theirs = booking({ hn: "603", surgeonId: "8", patientName: "นาง ของคนอื่น", diagnosis: "Appendicitis" });
+  const alone = booking({ hn: "604", surgeonId: "7", patientName: "น.ส. ยังไม่มีใน HOSxP", diagnosis: "Lipoma" });
+  const bare = booking({ hn: "605", surgeonId: "7" });
+  const bookings = [named, hosxpNamed, theirs, alone, bare];
+  const workbook = [wb({ hn: "601", patientName: null }), wb({ hn: "602", patientName: "นาย สะกดถูก" }), wb({ hn: "603", patientName: "นาง ของคนอื่น" }), wb({ hn: "605" })];
+  const patient = (rows: BoardRows) =>
+    Object.fromEntries([...rows.rows, ...rows.unmatched].filter((row) => row.bookedBy).map((row) => [row.id, [row.patientName ?? null, row.diagnosis ?? null]]));
+  const doctor = { allHn: false, userId: "7" };
+  assert.deepEqual(patient(build(workbook, bookings, doctor)), {
+    // HOSxP has no name: the booking's
+    [`mt-${named.id}`]: ["นาย จองไว้", "Gallstone"],
+    // HOSxP's name is the hospital's own spelling
+    [`mt-${hosxpNamed.id}`]: ["นาย สะกดถูก", "Hernia, right"],
+    [`mt-${theirs.id}`]: [null, null],
+    [`mt-${bare.id}`]: [null, null],
+    // HOSxP does not list it: off the board (only MX's summary lists it), with its own
+    [`bk-${alone.id}`]: ["น.ส. ยังไม่มีใน HOSxP", "Lipoma"],
+  });
+  // before an upload, the booking's own, to its doctor; MX and admins see every booking's
+  assert.deepEqual(patient(build(null, bookings, doctor)), {
+    [`bk-${named.id}`]: ["นาย จองไว้", "Gallstone"],
+    [`bk-${hosxpNamed.id}`]: ["นาย สะกดผิด", "Hernia, right"],
+    [`bk-${theirs.id}`]: [null, null],
+    [`bk-${alone.id}`]: ["น.ส. ยังไม่มีใน HOSxP", "Lipoma"],
+    [`bk-${bare.id}`]: [null, null],
+  });
+  assert.deepEqual(patient(build(null, [theirs], MX)), { [`bk-${theirs.id}`]: ["นาง ของคนอื่น", "Appendicitis"] });
+  // anyone else (a nurse, another doctor): no key at all, before or after the upload
+  for (const rows of [build(workbook, bookings, NOBODY), build(null, bookings, NOBODY), build(workbook, bookings, { allHn: false, userId: "9" })]) {
+    const sent = [...rows.rows, ...rows.unmatched];
+    assert.ok(sent.every((row) => !("patientName" in row) && !("diagnosis" in row)), "no patientName or diagnosis key");
+    assert.doesNotMatch(JSON.stringify(sent), /Gallstone|Hernia|Appendicitis|Lipoma|นาย|นาง|น\.ส\./, "no name or diagnosis anywhere in what the client gets");
+  }
+  // a HOSxP case nobody booked has no diagnosis: the workbook's is never read
+  assert.ok(build(workbook, [], MX).rows.every((row) => !("diagnosis" in row)));
 });
 
 test("a booking's note reaches every viewer on its row, matched or not; rows without one have no note key", () => {

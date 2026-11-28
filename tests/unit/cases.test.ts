@@ -46,9 +46,9 @@ describe("added cases (database)", () => {
   });
 
   test("cases list by day and by surgeon, with the HN and the surgeon's id; only the surgeon removes them", async () => {
-    const a = await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-04", roomId: "or-2", hn: "12345", operation: "ORIF", shift: "in", dressing: false, scrubDoes: null, note: "" });
-    const b = await insertCase(pool, other, "U3", { start: null, end: null, date: "2026-11-04", roomId: "or-2", hn: "A7", operation: "Hernia", shift: "out", dressing: false, scrubDoes: null, note: "" });
-    await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-05", roomId: "or-5", hn: "9", operation: "TKA", shift: "in", dressing: false, scrubDoes: null, note: "" });
+    const a = await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-04", roomId: "or-2", hn: "12345", operation: "ORIF", shift: "in", dressing: false, scrubDoes: null, note: "" });
+    const b = await insertCase(pool, other, "U3", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-04", roomId: "or-2", hn: "A7", operation: "Hernia", shift: "out", dressing: false, scrubDoes: null, note: "" });
+    await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-05", roomId: "or-5", hn: "9", operation: "TKA", shift: "in", dressing: false, scrubDoes: null, note: "" });
 
     const day = await listCasesOn(pool, "2026-11-04");
     assert.deepEqual(
@@ -73,15 +73,15 @@ describe("added cases (database)", () => {
   });
 
   test("a booking without an operation name stores NULL and reads back as an empty name", async () => {
-    const id = await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-20", roomId: "or-12", hn: "77", operation: "", shift: "in", dressing: false, scrubDoes: null, note: "" });
+    const id = await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-20", roomId: "or-12", hn: "77", operation: "", shift: "in", dressing: false, scrubDoes: null, note: "" });
     assert.equal((await pool.query("SELECT operation FROM cases WHERE id = $1", [id])).rows[0].operation, null);
     const [item] = await listCasesOn(pool, "2026-11-20");
     assert.deepEqual([item.id, item.operation, item.hn], [id, "", "77"]);
   });
 
   test("a booking's note is kept with its line breaks; none is stored as NULL and reads back as an empty note", async () => {
-    const noted = await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-24", roomId: "or-12", hn: "91", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null, note: "ขอ C-arm\nเตรียมเลือด 2 unit" });
-    const plain = await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-24", roomId: "or-12", hn: "92", operation: "Hernia", shift: "in", dressing: false, scrubDoes: null, note: "" });
+    const noted = await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-24", roomId: "or-12", hn: "91", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null, note: "ขอ C-arm\nเตรียมเลือด 2 unit" });
+    const plain = await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-24", roomId: "or-12", hn: "92", operation: "Hernia", shift: "in", dressing: false, scrubDoes: null, note: "" });
     const stored = await pool.query<{ id: string; note: string | null }>("SELECT id::text AS id, note FROM cases WHERE id = ANY($1::bigint[]) ORDER BY id", [[noted, plain]]);
     assert.deepEqual(stored.rows.map((row) => row.note), ["ขอ C-arm\nเตรียมเลือด 2 unit", null]);
     assert.deepEqual((await listCasesOn(pool, "2026-11-24")).map((item) => [item.id, item.note]), [[noted, "ขอ C-arm\nเตรียมเลือด 2 unit"], [plain, ""]]);
@@ -104,10 +104,10 @@ describe("added cases (database)", () => {
   });
 
   test("the doctor's room choice and scrub answer are kept with the booking", async () => {
-    const yes = await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-23", roomId: "or-10", hn: "81", operation: "I&D", shift: "in", dressing: true, scrubDoes: true, note: "" });
-    const no = await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-23", roomId: "or-10", hn: "82", operation: "D/S", shift: "in", dressing: true, scrubDoes: false, note: "" });
+    const yes = await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-23", roomId: "or-10", hn: "81", operation: "I&D", shift: "in", dressing: true, scrubDoes: true, note: "" });
+    const no = await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-23", roomId: "or-10", hn: "82", operation: "D/S", shift: "in", dressing: true, scrubDoes: false, note: "" });
     // a scrub answer sent with the department's room is not kept
-    const dept = await insertCase(pool, doctor, "U1", { start: null, end: null, date: "2026-11-23", roomId: "or-13", hn: "83", operation: "ORIF", shift: "in", dressing: false, scrubDoes: true, note: "" });
+    const dept = await insertCase(pool, doctor, "U1", { start: null, end: null, patientName: "", diagnosis: "", date: "2026-11-23", roomId: "or-13", hn: "83", operation: "ORIF", shift: "in", dressing: false, scrubDoes: true, note: "" });
     const listed = await listCasesOn(pool, "2026-11-23");
     assert.deepEqual(
       listed.map((item) => [item.id, item.roomId, item.dressing, item.scrubDoes]),
@@ -147,7 +147,7 @@ describe("added cases (database)", () => {
 
   // Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete and other functions".
   test("a doctor's edit of their own booking is saved in place; a new day, room or patient takes the back of the queue", async () => {
-    const base = { start: null, end: null, date: "2026-12-01", roomId: "or-12", hn: "11", operation: "Lap chole", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const base = { start: null, end: null, patientName: "", diagnosis: "", date: "2026-12-01", roomId: "or-12", hn: "11", operation: "Lap chole", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
     const first = await insertCase(pool, other, "U3", { ...base, hn: "21" });
     const mine = await insertCase(pool, doctor, "U1", { ...base, hn: "22", note: "ขอ C-arm" });
     const last = await insertCase(pool, other, "U3", { ...base, hn: "23" });
@@ -202,6 +202,51 @@ describe("added cases (database)", () => {
     assert.equal(await ownCase(pool, mine, doctor), null, "a cancelled booking is no longer theirs to edit");
   });
 
+  // Pong, 28 Nov 2026: "add form input diagnosis and patient name, both are not required".
+  test("a booking's patient's name and diagnosis are saved, read back, edited and cleared (NULL when none); the table refuses blanks and long ones", async () => {
+    const base = { start: null, end: null, date: "2026-12-04", roomId: "or-12", hn: "61", operation: "Lap chole", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const id = await insertCase(pool, doctor, "U1", { ...base, patientName: "นาย ตัวอย่าง", diagnosis: "Symptomatic gallstone" });
+    const read = (await ownCase(pool, id, doctor))!;
+    assert.deepEqual([read.patientName, read.diagnosis], ["นาย ตัวอย่าง", "Symptomatic gallstone"]);
+    assert.deepEqual(
+      (await listCasesOn(pool, "2026-12-04")).filter((item) => item.id === id).map((item) => [item.patientName, item.diagnosis]),
+      [["นาย ตัวอย่าง", "Symptomatic gallstone"]],
+      "the day's list carries them (the board hands them on only to who may see the HN)",
+    );
+    const queued = read.bookedAt;
+    // changed, then taken away: NULL in the table, "" in the app; the place in the queue kept
+    assert.equal(await updateCase(pool, id, doctor, { ...base, patientName: "นาง อื่น", diagnosis: "Cholecystitis" }, false), true);
+    assert.deepEqual([(await ownCase(pool, id, doctor))!.patientName, (await ownCase(pool, id, doctor))!.diagnosis], ["นาง อื่น", "Cholecystitis"]);
+    assert.equal(await updateCase(pool, id, doctor, { ...base, patientName: "", diagnosis: "" }, false), true);
+    const cleared = (await ownCase(pool, id, doctor))!;
+    assert.deepEqual([cleared.patientName, cleared.diagnosis, cleared.bookedAt], ["", "", queued]);
+    const stored = await pool.query("SELECT patient_name, diagnosis FROM cases WHERE id = $1", [id]);
+    assert.deepEqual(stored.rows[0], { patient_name: null, diagnosis: null }, "none is NULL, never an empty string");
+    // a closed day's note edit leaves them as they are
+    assert.equal(await updateCase(pool, id, doctor, { ...base, patientName: "นาย ตัวอย่าง", diagnosis: "Gallstone" }, false), true);
+    assert.equal(await updateNote(pool, id, doctor, "NPO"), true);
+    const noted = (await ownCase(pool, id, doctor))!;
+    assert.deepEqual([noted.patientName, noted.diagnosis, noted.note], ["นาย ตัวอย่าง", "Gallstone", "NPO"]);
+    // the table's own checks: no blank, at most 100 and 300 characters
+    for (const [column, value] of [
+      ["patient_name", " "],
+      ["patient_name", "ก".repeat(101)],
+      ["diagnosis", ""],
+      ["diagnosis", "x".repeat(301)],
+    ] as const) {
+      await assert.rejects(
+        pool.query(`INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub, ${column}) VALUES ('2026-12-04', 'or-12', 'x', $1, 'U1', $2)`, [doctor, value]),
+        (e: { code?: string }) => e.code === "23514",
+        `${column}: ${value.length} characters`,
+      );
+    }
+    await pool.query("INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub, patient_name, diagnosis) VALUES ('2026-12-04', 'or-12', 'x', $1, 'U1', $2, $3)", [
+      doctor,
+      "ก".repeat(100),
+      "x".repeat(300),
+    ]);
+  });
+
   test("a closed day's edit saves the note alone: a booking from before the room choice keeps its NULL choice and its place", async () => {
     const { rows } = await pool.query<{ id: string }>(
       "INSERT INTO cases (op_date, room_id, operation, surgeon_id, line_sub) VALUES ('2026-12-05', 'or-10', 'D/S', $1, 'U1') RETURNING id::text AS id",
@@ -220,7 +265,7 @@ describe("added cases (database)", () => {
   });
 
   test("a cancel can be undone for a few minutes, in its old place in the queue, while its day has not gone", async () => {
-    const base = { start: null, end: null, date: "2026-12-03", roomId: "or-12", hn: "31", operation: "Hernia", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const base = { start: null, end: null, patientName: "", diagnosis: "", date: "2026-12-03", roomId: "or-12", hn: "31", operation: "Hernia", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
     const a = await insertCase(pool, doctor, "U1", base);
     const b = await insertCase(pool, other, "U3", { ...base, hn: "32" });
     await pool.query("UPDATE cases SET queued_at = created_at - interval '5 minutes' WHERE id = $1", [a]);
@@ -267,7 +312,7 @@ describe("added cases (database)", () => {
 
   // Pong, 27 Nov 2026: "Add booking btn on ท่าฉลอม also".
   test("each hospital's bookings are its own: listed apart, and only in that hospital's rooms", async () => {
-    const base = { start: null, end: null, date: "2026-12-08", hn: "5101", operation: "TKA", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const base = { start: null, end: null, patientName: "", diagnosis: "", date: "2026-12-08", hn: "5101", operation: "TKA", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
     const skh = await insertCase(pool, doctor, "U1", { ...base, roomId: "or-1" });
     const tc = await insertCase(pool, doctor, "U1", { ...base, roomId: "or-1", hn: "5102", place: "tha-chalom" });
     const scope = await insertCase(pool, doctor, "U1", { ...base, roomId: "scope", hn: "5103", place: "tha-chalom" });
@@ -290,7 +335,7 @@ describe("added cases (database)", () => {
   });
 
   test("a booking keeps its time; the table takes only 15-minute steps from 08:30 to 15:30, or none", async () => {
-    const base = { date: "2026-12-07", roomId: "or-12", hn: "41", operation: "Lap chole", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
+    const base = { patientName: "", diagnosis: "", date: "2026-12-07", roomId: "or-12", hn: "41", operation: "Lap chole", shift: "in" as const, dressing: false, scrubDoes: null, note: "" };
     const timed = await insertCase(pool, doctor, "U1", { ...base, start: 540, end: 600 });
     const untimed = await insertCase(pool, doctor, "U1", { ...base, hn: "42", start: null, end: null });
     const day = await listCasesOn(pool, "2026-12-07");
@@ -334,7 +379,7 @@ describe("added cases (database)", () => {
     await Promise.all([first, second]);
     assert.deepEqual(order, ["first in", "other day", "first out", "second in"]);
 
-    const base = { date: "2026-12-08", roomId: "or-12", hn: "51", operation: "Hernia", shift: "in" as const, dressing: false, scrubDoes: null, note: "", start: 540, end: 600 };
+    const base = { patientName: "", diagnosis: "", date: "2026-12-08", roomId: "or-12", hn: "51", operation: "Hernia", shift: "in" as const, dressing: false, scrubDoes: null, note: "", start: 540, end: 600 };
     await assert.rejects(
       withDayLock(pool, "2026-12-08", async (client) => {
         await insertCase(client, doctor, "U1", base);

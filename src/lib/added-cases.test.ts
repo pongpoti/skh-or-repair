@@ -26,8 +26,10 @@ import {
   firstBookingDay,
   bookableFrom,
   BOOKING_CUTOFF_RULE,
+  MAX_DIAGNOSIS,
   MAX_NOTE,
   MAX_OPERATION,
+  MAX_PATIENT_NAME,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
   NOTE_ONLY_TEXT,
@@ -169,7 +171,7 @@ test("a good booking passes, cleaned, in the room of the doctor's choice; a room
   const checked = check({ ...ok, operation: "  Lap \u200bchole\n  ", roomId: "or-2" });
   assert.deepEqual(checked, {
     ok: true,
-    value: { date: "2026-11-16", start: 540, end: 600, roomId: "or-12", hn: "12345", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null, note: "" },
+    value: { date: "2026-11-16", start: 540, end: 600, roomId: "or-12", hn: "12345", patientName: "", diagnosis: "", operation: "Lap chole", shift: "in", dressing: false, scrubDoes: null, note: "" },
   });
   assert.equal(cleanOperation("a\t b"), "a b");
   // the department's room unless the doctor picks the dressing room, whatever the name
@@ -229,8 +231,42 @@ test("the room choice is checked: only OR X or ห้องทำแผล, and 
   assert.equal(check({ ...ok, room: "dept" }, { subtype: null }).ok, false, "but needed for OR X");
 });
 
+test("the patient's name and the diagnosis are optional, one line each, cleaned, and at most 100 and 300 characters", () => {
+  // Pong, 28 Nov 2026: "add form input diagnosis and patient name, both are not required"
+  assert.equal(MAX_PATIENT_NAME, 100);
+  assert.equal(MAX_DIAGNOSIS, 300);
+  const field = (key: "patientName" | "diagnosis", value: unknown) => {
+    const checked = check({ ...ok, [key]: value });
+    return checked.ok ? checked.value[key] : [checked.field, checked.code, checked.error];
+  };
+  for (const key of ["patientName", "diagnosis"] as const) {
+    for (const value of [undefined, null, "", "   ", "\n\t", "\u200b"]) assert.equal(field(key, value), "", `${key}: ${JSON.stringify(value)}`);
+  }
+  // one line: spaces single, line breaks and invisible characters gone, NFC
+  assert.equal(field("patientName", "  นาย  สมชาย\n ใจดี\u200b "), "นาย สมชาย ใจดี");
+  assert.equal(field("diagnosis", "Symptomatic\r\n gallstone"), "Symptomatic gallstone");
+  assert.equal(field("patientName", "ก".repeat(MAX_PATIENT_NAME)), "ก".repeat(MAX_PATIENT_NAME));
+  assert.deepEqual(field("patientName", "ก".repeat(MAX_PATIENT_NAME + 1)), ["patientName", "patient_name_invalid", "ชื่อผู้ป่วยยาวเกิน 100 ตัวอักษร"]);
+  assert.deepEqual(field("diagnosis", "x".repeat(MAX_DIAGNOSIS + 1)), ["diagnosis", "diagnosis_invalid", "การวินิจฉัยยาวเกิน 300 ตัวอักษร"]);
+  // the length counts what is saved: spaces that cleaning drops do not count
+  assert.equal(field("diagnosis", ` ${"x".repeat(MAX_DIAGNOSIS)}   `), "x".repeat(MAX_DIAGNOSIS));
+  assert.deepEqual(field("patientName", 5), ["patientName", "patient_name_invalid", "ชื่อผู้ป่วยไม่ถูกต้อง"]);
+  assert.deepEqual(field("diagnosis", { a: 1 }), ["diagnosis", "diagnosis_invalid", "การวินิจฉัยไม่ถูกต้อง"]);
+  // checked in the form's order: after the HN, before the operation
+  const both = check({ ...ok, hn: "1", patientName: 5 });
+  assert.equal(both.ok ? null : both.field, "hn");
+  const beforeOperation = check({ ...ok, diagnosis: 5, operation: "" });
+  assert.equal(beforeOperation.ok ? null : beforeOperation.field, "diagnosis");
+  // kept with the rest of the booking
+  const given = check({ ...ok, patientName: "นาง ตัวอย่าง", diagnosis: "Fx neck of femur, left" });
+  assert.ok(given.ok);
+  assert.deepEqual([given.value.patientName, given.value.diagnosis, given.value.operation], ["นาง ตัวอย่าง", "Fx neck of femur, left", "Lap chole"]);
+});
+
 test("a saved booking: the doctor's choice, or for one saved before the form asked, the room it was saved in", () => {
   const saved = (more: Partial<AddedCase>): AddedCase => ({
+    patientName: "",
+    diagnosis: "",
     id: "1",
     date: "2026-11-16",
     start: null,
@@ -344,7 +380,7 @@ test("added cases join the board after its own, numbered per room", () => {
       { id: "a", roomId: "or-12", order: 1, procedure: "EGD", surgeon: "x", specialty: null, status: "scheduled", shift: "in" },
     ],
   };
-  const base = { start: null, end: null, operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, note: "", hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
+  const base = { start: null, end: null, patientName: "", diagnosis: "", operation: "Op", shift: "in" as const, dressing: null, scrubDoes: null, note: "", hn: "1", surgeonId: "7", surgeon: "สมชาย ใจดี", subtype: "ORTHO" };
   const added: AddedCase[] = [
     { ...base, id: "1", date: TODAY, roomId: "or-12" },
     { ...base, id: "2", date: TODAY, roomId: "or-11", shift: "out" },
@@ -391,6 +427,8 @@ test("a department with two rooms: a doctor's bookings stay in one, the first ta
   assert.equal(POOLED_ROOM_NOTE, "ห้องที่จองน้อยกว่า");
 
   const made = (surgeonId: string, roomId: string, more: Partial<AddedCase> = {}): AddedCase => ({
+    patientName: "",
+    diagnosis: "",
     id: `${surgeonId}-${roomId}`,
     date: MONDAY,
     start: null,
@@ -435,6 +473,8 @@ test("a department with no room that day books none (Pong, 27 Nov 2026: in place
   assert.deepEqual(bookingRoom("VASCULAR", "EVLA", "2026-12-14", P, "dept"), { ok: true, roomId: "or-11", dressing: false }, "the repair's mixed room");
   // A booking saved in a borrowed room before stays there (bookedRoom keeps the saved room when none can be worked out).
   const saved: AddedCase = {
+    patientName: "",
+    diagnosis: "",
     id: "9",
     date: TUESDAY,
     start: null,
@@ -465,6 +505,8 @@ test("a department with no room that day books none (Pong, 27 Nov 2026: in place
 
 // Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete and other functions".
 const own = (more: Partial<AddedCase> = {}): AddedCase => ({
+  patientName: "",
+  diagnosis: "",
   id: "41",
   date: "2026-11-17",
   start: null,
@@ -487,6 +529,8 @@ const asInput = (booking: AddedCase) => ({
   start: booking.start,
   end: booking.end,
   hn: booking.hn ? displayHn(booking.hn) : "",
+  patientName: booking.patientName,
+  diagnosis: booking.diagnosis,
   operation: booking.operation,
   room: bookedChoice(booking, REPAIR),
   scrubDoes: booking.scrubDoes,
@@ -509,7 +553,7 @@ test("an edit on its own open day: every field as a new booking, without the day
   const edited = check({ ...asInput(booking), hn: "0099999", operation: "Hernia", note: "" }, context);
   assert.deepEqual(edited, {
     ok: true,
-    value: { date: "2026-11-17", start: null, end: null, roomId: "or-12", hn: "99999", operation: "Hernia", shift: "in", dressing: false, scrubDoes: null, note: "" },
+    value: { date: "2026-11-17", start: null, end: null, roomId: "or-12", hn: "99999", patientName: "", diagnosis: "", operation: "Hernia", shift: "in", dressing: false, scrubDoes: null, note: "" },
   });
   // the fields are still required there
   const blank = check({ ...asInput(booking), operation: " " }, context);
@@ -552,7 +596,7 @@ test("an edit on its own closed day changes only the note: the HN, the name and 
   const noted = check({ ...asInput(booking), note: "  NPO หลังเที่ยงคืน " }, context);
   assert.deepEqual(noted, {
     ok: true,
-    value: { date: "2026-11-17", start: null, end: null, roomId: "or-10", hn: "12345", operation: "Lap chole", shift: "in", dressing: true, scrubDoes: true, note: "NPO หลังเที่ยงคืน" },
+    value: { date: "2026-11-17", start: null, end: null, roomId: "or-10", hn: "12345", patientName: "", diagnosis: "", operation: "Lap chole", shift: "in", dressing: true, scrubDoes: true, note: "NPO หลังเที่ยงคืน" },
   });
   const refused = (input: Record<string, unknown>) => {
     const checked = check({ ...asInput(booking), ...input }, context);
@@ -564,6 +608,20 @@ test("an edit on its own closed day changes only the note: the HN, the name and 
   assert.deepEqual(refused({ room: "dept", scrubDoes: null }), ["room", NOTE_ONLY_TEXT]);
   assert.deepEqual(refused({ scrubDoes: false }), ["room", NOTE_ONLY_TEXT]);
   assert.deepEqual(refused({ hn: "0012345", operation: " Lap  chole " }), "ok", "the same HN and name, as typed");
+  // the patient's name and the diagnosis are locked as the HN (Pong, 28 Nov 2026), and kept as they were
+  const named = own({ date: "2026-11-17", patientName: "นาย ตัวอย่าง", diagnosis: "Gallstone" });
+  const namedCheck = (input: Record<string, unknown>) => check({ ...asInput(named), ...input }, { ...context, editing: named });
+  const lockedField = (input: Record<string, unknown>) => {
+    const checked = namedCheck(input);
+    return checked.ok ? "ok" : [checked.field, checked.error];
+  };
+  assert.deepEqual(lockedField({ patientName: "นาง อื่น" }), ["patientName", NOTE_ONLY_TEXT]);
+  assert.deepEqual(lockedField({ patientName: "" }), ["patientName", NOTE_ONLY_TEXT]);
+  assert.deepEqual(lockedField({ diagnosis: "Cholecystitis" }), ["diagnosis", NOTE_ONLY_TEXT]);
+  assert.deepEqual(lockedField({ diagnosis: undefined }), ["diagnosis", NOTE_ONLY_TEXT], "left out is no diagnosis");
+  const namedNoted = namedCheck({ patientName: " นาย  ตัวอย่าง ", note: "NPO" });
+  assert.ok(namedNoted.ok, "the same name, as typed");
+  assert.deepEqual([namedNoted.value.patientName, namedNoted.value.diagnosis, namedNoted.value.note], ["นาย ตัวอย่าง", "Gallstone", "NPO"]);
   assert.deepEqual(refused({ note: "ก".repeat(MAX_NOTE + 1) }), ["note", "หมายเหตุยาวเกิน 500 ตัวอักษร"]);
   assert.deepEqual(refused({ note: 5 }), ["note", "หมายเหตุไม่ถูกต้อง"]);
   // a booking from before the HN and the name were required keeps them missing, and its note changes
@@ -571,7 +629,7 @@ test("an edit on its own closed day changes only the note: the HN, the name and 
   const oldNoted = check({ ...asInput(old), note: "ขอเตียง ICU" }, { ...context, editing: old });
   assert.deepEqual(oldNoted, {
     ok: true,
-    value: { date: "2026-11-17", start: null, end: null, roomId: "or-12", hn: "", operation: "", shift: "in", dressing: false, scrubDoes: null, note: "ขอเตียง ICU" },
+    value: { date: "2026-11-17", start: null, end: null, roomId: "or-12", hn: "", patientName: "", diagnosis: "", operation: "", shift: "in", dressing: false, scrubDoes: null, note: "ขอเตียง ICU" },
   });
   // on an open day it needs them, as a new booking does
   const opened = check({ ...asInput(old), note: "x" }, { today: "2026-11-16", earliest: "2026-11-17", editing: old });
@@ -606,6 +664,16 @@ test("what an edit changes: a new day, room or patient goes to the back of the q
   assert.deepEqual(input({ note: "NPO" }), { changed: true, requeue: false, moved: false });
   assert.deepEqual(input({ note: "" }), { changed: true, requeue: false, moved: false });
   assert.deepEqual(input({ operation: "Lap chole + IOC" }), { changed: true, requeue: false, moved: false });
+  // the patient's name and the diagnosis (Pong, 28 Nov 2026) keep the place, given, changed or taken away
+  assert.deepEqual(input({ patientName: "นาย ตัวอย่าง" }), { changed: true, requeue: false, moved: false });
+  assert.deepEqual(input({ diagnosis: "Gallstone" }), { changed: true, requeue: false, moved: false });
+  const named = own({ patientName: "นาย ตัวอย่าง", diagnosis: "Gallstone" });
+  const unnamed = check({ ...asInput(named), patientName: "", diagnosis: " " }, { today: "2026-11-16", earliest: "2026-11-17", editing: named });
+  assert.ok(unnamed.ok);
+  assert.deepEqual(bookingChange(named, unnamed.value, REPAIR), { changed: true, requeue: false, moved: false });
+  const sameNamed = check({ ...asInput(named), patientName: " นาย  ตัวอย่าง " }, { today: "2026-11-16", earliest: "2026-11-17", editing: named });
+  assert.ok(sameNamed.ok);
+  assert.deepEqual(bookingChange(named, sameNamed.value, REPAIR), { changed: false, requeue: false, moved: false }, "the same name, as typed");
   assert.deepEqual(input({ hn: "0099999" }), { changed: true, requeue: true, moved: false });
   assert.deepEqual(input({ date: "2026-11-18" }), { changed: true, requeue: true, moved: true });
   assert.deepEqual(input({ room: "dressing", scrubDoes: true }), { changed: true, requeue: true, moved: true });
@@ -666,6 +734,8 @@ test("the sheet names the next 15:00 that closes a booking, as the booking cut-o
 
 test("booking again refuses a day that already has the patient in that room choice; another room or day is a new booking", () => {
   const mine = (more: Partial<AddedCase>): AddedCase => ({
+    patientName: "",
+    diagnosis: "",
     id: "1",
     date: "2026-11-16",
     start: null,
@@ -730,6 +800,8 @@ test("a time clashes with another booking's in the same room that day, never wit
   const MONDAY = "2026-11-23";
   const P = DEFAULT_REPAIR_PERIODS;
   const made = (id: string, roomId: string, start: number | null, end: number | null, surgeonId = "7"): AddedCase => ({
+    patientName: "",
+    diagnosis: "",
     id,
     date: MONDAY,
     start,

@@ -20,8 +20,8 @@ export { addDays };
  * with the HOSxP workbook's cases (lib/board-rows.ts). Checked the same way in the form and in the server action.
  * Isomorphic: no server-only imports. The database side is lib/cases.ts.
  *
- * A booking is an elective case (Pong, 15 Nov 2026): the doctor picks the day, the HN, the operation, and one of two
- * rooms, their department's room that day (OR X) or the dressing room (ห้องทำแผล); the app works out which room each
+ * A booking is an elective case (Pong, 15 Nov 2026): the doctor picks the day, the HN, the operation (and may give the
+ * patient's name and the diagnosis; Pong, 28 Nov 2026: "both are not required"), and one of two rooms, their department's room that day (OR X) or the dressing room (ห้องทำแผล); the app works out which room each
  * of those is. For the dressing room the doctor also says whether the scrub nurse does the dressing for them. The
  * operation's name never decides a booking's room (Pong: "let surgeon decide which room to use"); it places only the
  * HOSxP workbook's cases nobody booked (lib/dressing.ts).
@@ -31,6 +31,10 @@ export { addDays };
 export const MAX_OPERATION = 300;
 /** Longest note (หมายเหตุ), in characters (the cases table checks the same). */
 export const MAX_NOTE = 500;
+/** Longest patient's name on a booking, in characters (the cases table checks the same). */
+export const MAX_PATIENT_NAME = 100;
+/** Longest diagnosis on a booking, in characters (the cases table checks the same). */
+export const MAX_DIAGNOSIS = 300;
 /** How far ahead a case can be added, in days from today. */
 export const BOOK_AHEAD_DAYS = 60;
 /** What a booking shows in place of the operation's name until the workbook gives it (bookings from before it was required). */
@@ -62,6 +66,13 @@ export type CaseInput = {
   roomId: string;
   /** The patient's HN, normalised (lib/hn.ts). Required for a new booking. */
   hn: string;
+  /**
+   * The patient's name and the diagnosis (Pong, 28 Nov 2026: "add form input diagnosis and patient name, both are not
+   * required"), each one line (cleanOperation): "" when not given (stored as NULL). Shown under the HN's rule, only to the
+   * doctor who booked the case, MX and admins (lib/board-rows.ts); the day view never shows them.
+   */
+  patientName: string;
+  diagnosis: string;
   /** The operation's name. Required for a new booking; "" only on bookings made before it was (stored as NULL). */
   operation: string;
   shift: Shift;
@@ -185,12 +196,12 @@ export function bookedAtText(iso: string): string {
 }
 
 /** The form field an error is about, for the form to mark and focus. */
-export type CaseField = "date" | "time" | "hn" | "operation" | "room" | "shift" | "note";
+export type CaseField = "date" | "time" | "hn" | "patientName" | "diagnosis" | "operation" | "room" | "shift" | "note";
 
 /**
  * Why checkCase refused a booking, for a caller that is no form (the calendar API, lib/calendar-api.ts, answers with it):
- * the day is before the earliest, too far ahead, a weekend or a holiday; the time, HN, operation, shift, room choice or
- * note is wrong; or the doctor's department has no room that day (NoRoomReason), or only the note may change.
+ * the day is before the earliest, too far ahead, a weekend or a holiday; the time, HN, patient's name, diagnosis,
+ * operation, shift, room choice or note is wrong; or the doctor's department has no room that day (NoRoomReason), or only the note may change.
  */
 export type CaseErrorCode =
   | "date_missing"
@@ -200,6 +211,8 @@ export type CaseErrorCode =
   | "holiday"
   | "time_invalid"
   | "hn_invalid"
+  | "patient_name_invalid"
+  | "diagnosis_invalid"
   | "operation_invalid"
   | "operation_too_long"
   | "shift_invalid"
@@ -563,12 +576,12 @@ export const REQUEUE_TEXT = "เปลี่ยนวัน ห้อง หร�
  * What an edit changes (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move date, delete"). `requeue`: a
  * new day, another room (the doctor's other choice of room, or a name that sends the case elsewhere, as an endoscopy to
  * the SCOPE room) or another patient (HN) counts as a new booking, at the back of its room's queue ("จองก่อน ได้คิวก่อน"),
- * so an early booking cannot hold a place for another case; fixing the operation's name, the note, the scrub answer or
- * the time keeps the place (a room's cases go by their times on the board; the queue orders those without one and ties). The room is compared with where the booking is now (bookedRoom), so an admin's move of the repair's
+ * so an early booking cannot hold a place for another case; fixing the operation's name, the patient's name, the
+ * diagnosis, the note, the scrub answer or the time keeps the place (a room's cases go by their times on the board; the queue orders those without one and ties). The room is compared with where the booking is now (bookedRoom), so an admin's move of the repair's
  * dates is no change of the doctor's. `moved`: the room or the day changed. `changed`: anything is saved at all.
  */
 export function bookingChange(
-  before: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "note" | "subtype" | "start" | "end">,
+  before: Pick<AddedCase, "date" | "roomId" | "hn" | "patientName" | "diagnosis" | "operation" | "dressing" | "scrubDoes" | "note" | "subtype" | "start" | "end">,
   after: CaseInput,
   periods: RepairPeriods,
 ): { changed: boolean; requeue: boolean; moved: boolean } {
@@ -580,6 +593,8 @@ export function bookingChange(
     requeue ||
     after.hn !== (before.hn ?? "") ||
     after.roomId !== before.roomId ||
+    after.patientName !== before.patientName ||
+    after.diagnosis !== before.diagnosis ||
     after.operation !== before.operation ||
     after.note !== before.note ||
     after.start !== before.start ||
@@ -687,15 +702,16 @@ export type BookingContext = {
    * The doctor's own booking being edited, when the input is its new state (editCase): its own day needs none of a new
    * booking's day checks, and once that day is closed (bookingState) only the note may change.
    */
-  editing?: Pick<AddedCase, "date" | "roomId" | "hn" | "operation" | "dressing" | "scrubDoes" | "subtype" | "start" | "end" | "place">;
+  editing?: Pick<AddedCase, "date" | "roomId" | "hn" | "patientName" | "diagnosis" | "operation" | "dressing" | "scrubDoes" | "subtype" | "start" | "end" | "place">;
   /** The hospital booked at: รพ.สมุทรสาคร when left out (placeBookingRoom). An edit stays at its booking's. */
   place?: PlaceId;
 };
 
 /**
- * Checks a new booking ({ date, hn, operation, shift, room, scrubDoes, note }) and works out its room. `room` is the
- * doctor's choice, "dept" (the default) or "dressing"; a dressing-room booking needs `scrubDoes`, the answer to
- * SCRUB_QUESTION. `note` is optional (cleanNote, at most MAX_NOTE characters).
+ * Checks a new booking ({ date, hn, patientName, diagnosis, operation, shift, room, scrubDoes, note }) and works out its
+ * room. `room` is the doctor's choice, "dept" (the default) or "dressing"; a dressing-room booking needs `scrubDoes`, the
+ * answer to SCRUB_QUESTION. `patientName` and `diagnosis` are optional (one line, at most MAX_PATIENT_NAME and
+ * MAX_DIAGNOSIS characters), and so is `note` (cleanNote, at most MAX_NOTE characters).
  * The server action and the form run the same checks with the same holidays (the page passes them to the form); the
  * server's answer is the one that counts.
  */
@@ -735,8 +751,9 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   const end = time.time?.end ?? null;
 
   if (closed && editing) {
-    // Only the note: the HN, the operation and the room choice must be the booking's own, as the form leaves them (locked;
-    // a booking from before they were required may have no HN or name). The room stays where the day's list has it.
+    // Only the note: the HN, the patient's name, the diagnosis, the operation and the room choice must be the booking's
+    // own, as the form leaves them (locked; a booking from before they were required may have no HN or name). The room
+    // stays where the day's list has it.
     const kept = changedField(raw, editing, periods);
     if (kept) return refuse("note_only", kept, NOTE_ONLY_TEXT);
     const note = checkNote(raw.note);
@@ -748,6 +765,8 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
         date,
         roomId: room.roomId,
         hn: editing.hn ?? "",
+        patientName: editing.patientName,
+        diagnosis: editing.diagnosis,
         operation: editing.operation,
         shift: "in",
         dressing: room.dressing,
@@ -762,6 +781,12 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
 
   const hn = checkHn(raw.hn);
   if (!hn.ok) return refuse("hn_invalid", "hn", hn.error);
+
+  // The patient's name and the diagnosis, optional, under the HN as in the form.
+  const patientName = checkLine(raw.patientName, MAX_PATIENT_NAME, "ชื่อผู้ป่วย");
+  if (!patientName.ok) return refuse("patient_name_invalid", "patientName", patientName.error);
+  const diagnosis = checkLine(raw.diagnosis, MAX_DIAGNOSIS, "การวินิจฉัย");
+  if (!diagnosis.ok) return refuse("diagnosis_invalid", "diagnosis", diagnosis.error);
 
   if (raw.operation !== undefined && raw.operation !== null && typeof raw.operation !== "string") {
     return refuse("operation_invalid", "operation", "ชื่อการผ่าตัดไม่ถูกต้อง");
@@ -790,7 +815,31 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   // Last, as in the form.
   const note = checkNote(raw.note);
   if (!note.ok) return refuse("note_invalid", "note", note.error);
-  return { ok: true, value: { date, roomId: room.roomId, hn: hn.hn, operation, shift, dressing: room.dressing, scrubDoes, note: note.note, start, end, ...at } };
+  return {
+    ok: true,
+    value: {
+      date,
+      roomId: room.roomId,
+      hn: hn.hn,
+      patientName: patientName.text,
+      diagnosis: diagnosis.text,
+      operation,
+      shift,
+      dressing: room.dressing,
+      scrubDoes,
+      note: note.note,
+      start,
+      end,
+      ...at,
+    },
+  };
+}
+
+/** An optional one-line field (the patient's name, the diagnosis): cleaned as an operation's name, "" when not given. */
+function checkLine(raw: unknown, max: number, what: string): { ok: true; text: string } | { ok: false; error: string } {
+  if (raw !== undefined && raw !== null && typeof raw !== "string") return { ok: false, error: `${what}ไม่ถูกต้อง` };
+  const text = cleanOperation(typeof raw === "string" ? raw : "");
+  return text.length > max ? { ok: false, error: `${what}ยาวเกิน ${max} ตัวอักษร` } : { ok: true, text };
 }
 
 function checkNote(raw: unknown): { ok: true; note: string } | { ok: false; error: string } {
@@ -811,14 +860,17 @@ function sameHn(raw: unknown, own: string | null): boolean {
 }
 
 /**
- * The first of the time, the HN, the operation and the room choice (with its scrub answer) that the form's input changed
- * from the booking being edited, or null when it changed none: a closed day's edit may change only the note. An empty HN or name
- * is the same as a booking's missing one.
+ * The first of the time, the HN, the patient's name, the diagnosis, the operation and the room choice (with its scrub
+ * answer) that the form's input changed from the booking being edited, or null when it changed none: a closed day's edit
+ * may change only the note. An empty HN or name is the same as a booking's missing one.
  */
 function changedField(raw: Record<string, unknown>, editing: NonNullable<BookingContext["editing"]>, periods: RepairPeriods): CaseField | null {
   if ((raw.start ?? null) !== editing.start || (raw.end ?? null) !== editing.end) return "time";
   const blank = raw.hn === undefined || raw.hn === null || raw.hn === "";
   if (blank ? editing.hn !== null : !sameHn(raw.hn, editing.hn)) return "hn";
+  const line = (value: unknown) => cleanOperation(typeof value === "string" ? value : "");
+  if (line(raw.patientName) !== editing.patientName) return "patientName";
+  if (line(raw.diagnosis) !== editing.diagnosis) return "diagnosis";
   const operation = cleanOperation(typeof raw.operation === "string" ? raw.operation : "");
   if (operation !== editing.operation) return "operation";
   const choice = raw.room ?? "dept";

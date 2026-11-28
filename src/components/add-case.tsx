@@ -26,8 +26,10 @@ import {
   DRESSING_ROOM_NAME,
   earliestText,
   editRequeues,
+  MAX_DIAGNOSIS,
   MAX_NOTE,
   MAX_OPERATION,
+  MAX_PATIENT_NAME,
   NO_OPERATION_LABEL,
   NO_ROOM_NOTE,
   NOTE_ONLY_TEXT,
@@ -121,7 +123,9 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
  * The rest (Pong, 15 Nov 2026): the day, in Thai with a calendar
  * that offers only the days that can be booked (from the next workday, or the one after once 15:00 has passed, up to
  * 60 days ahead, never a weekend or holiday); the patient's 7-digit HN on its own card (the HOSxP workbook's case is
- * matched by it); the operation's name, required; the room, the doctor's own choice between their department's room
+ * matched by it); the patient's name and the diagnosis, both optional (Pong, 28 Nov 2026: "add form input diagnosis and
+ * patient name, both are not required"), which only the doctor, MX and admins see, as the HN, so the form says so; the
+ * operation's name, required; the room, the doctor's own choice between their department's room
  * that day (OR X, picked to start with) and the dressing room (ห้องทำแผล; Pong, 15 Nov 2026: "let surgeon decide which
  * room to use"), each named with the room it is that day. There is no in or out of hours choice: a booking is saved as
  * ในเวลา (Pong, 15 Nov 2026). Picking the dressing room asks, in
@@ -135,9 +139,11 @@ const later = (a: string, b: string | null) => (b && b > a ? b : a);
  * The same form edits one of the doctor's own bookings (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move
  * date, delete and other functions"), filled with it: แก้ไขการจอง, saved with บันทึก (app/(board)/actions.ts editCase). Its
  * day can move to any day that can be booked. Once 15:00 the day before its day has passed, only the note can change
- * there (the HN, the operation and the room are locked, and say so), unless the doctor moves it to an open day. A change
+ * there (the HN, the patient's name, the diagnosis, the operation and the room are locked, and say so), unless the doctor
+ * moves it to an open day. A change
  * of day, room or HN puts the case at the back of the queue, which the form says under the note while it would. Booking
- * again (จองซ้ำวันอื่น) is a new booking filled with the same patient, room choice and note; it stays filled after a save,
+ * again (จองซ้ำวันอื่น) is a new booking filled with the same patient (HN, name and diagnosis), operation, room choice and
+ * note; it stays filled after a save,
  * so a series of days takes one tap each.
  */
 export function AddCase({
@@ -191,6 +197,8 @@ export function AddCase({
   const router = useRouter();
   const ref = useRef<HTMLDialogElement>(null);
   const hnRef = useRef<HTMLInputElement>(null);
+  const patientRef = useRef<HTMLInputElement>(null);
+  const diagnosisRef = useRef<HTMLInputElement>(null);
   const operationRef = useRef<HTMLInputElement>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const dateRef = useRef<HTMLDivElement>(null);
@@ -208,6 +216,8 @@ export function AddCase({
   const first = later(earliest, prevEarliest !== earliest ? null : movedOn);
   const [date, setDate] = useState(first);
   const [hn, setHn] = useState("");
+  const [patientName, setPatientName] = useState("");
+  const [diagnosis, setDiagnosis] = useState("");
   const [operation, setOperation] = useState("");
   const [note, setNote] = useState("");
   const [choice, setChoice] = useState<RoomChoice>("dept");
@@ -268,11 +278,15 @@ export function AddCase({
       const ownTime = timeOf(editing);
       const typed =
         normalizeHn(hn) !== normalizeHn(own) ||
+        cleanOperation(patientName) !== editing.patientName ||
+        cleanOperation(diagnosis) !== editing.diagnosis ||
         operation.trim() !== editing.operation ||
         choice !== picked ||
         time?.start !== ownTime?.start ||
         time?.end !== ownTime?.end;
       setHn(own);
+      setPatientName(editing.patientName);
+      setDiagnosis(editing.diagnosis);
       setOperation(editing.operation);
       setChoice(picked);
       setScrubDoes(picked === "dressing" && typeof editing.scrubDoes === "boolean" ? editing.scrubDoes : null);
@@ -283,7 +297,7 @@ export function AddCase({
       if (typed && prevLockFirst !== first) {
         setAbout("save");
         setInvalid(null);
-        setError(`${NOTE_ONLY_TEXT} HN การผ่าตัด ห้อง และเวลากลับเป็นแบบเดิม`);
+        setError(`${NOTE_ONLY_TEXT} ส่วนอื่นกลับเป็นแบบเดิม`);
         setDone("");
       }
     }
@@ -305,7 +319,7 @@ export function AddCase({
 
   /**
    * Fills the form for a request: empty on the first day that can be booked for a new booking; the booking itself for an
-   * edit; its patient, room choice and note on the first day that can be booked to book again, or the next open day when
+   * edit; its patient (HN, name and diagnosis), operation, room choice and note on the first day that can be booked to book again, or the next open day when
    * that is the booking's own (booking again is for another day).
    */
   function begin(next: CaseRequest) {
@@ -324,6 +338,8 @@ export function AddCase({
     }
     setDate(next.mode === "edit" ? next.booking.date : start);
     setHn(from?.hn ? displayHn(from.hn) : "");
+    setPatientName(from?.patientName ?? "");
+    setDiagnosis(from?.diagnosis ?? "");
     setOperation(from?.operation ?? "");
     setNote(from?.note ?? "");
     setChoice(picked);
@@ -392,6 +408,8 @@ export function AddCase({
         dialog?.querySelector<HTMLElement>('[data-testid="case-time-toggle"]')
       )?.focus();
     } else if (field === "hn") hnRef.current?.focus();
+    else if (field === "patientName") patientRef.current?.focus();
+    else if (field === "diagnosis") diagnosisRef.current?.focus();
     else if (field === "operation") operationRef.current?.focus();
     else if (field === "note") noteRef.current?.focus();
     else if (field === "date") dateRef.current?.querySelector<HTMLElement>("button")?.focus();
@@ -482,7 +500,7 @@ export function AddCase({
     }
     // No ในเวลา/นอกเวลา choice (Pong, 15 Nov 2026): a booking is saved as ในเวลา, and a HOSxP case it matches keeps
     // its own เวร on the board.
-    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null, ...(tc ? { place } : {}) };
+    const input = { date, hn, patientName, diagnosis, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null, ...(tc ? { place } : {}) };
     const edit = mode === "edit" ? editing : null;
     const checked = checkCase(input, {
       today,
@@ -531,6 +549,8 @@ export function AddCase({
         if (result.ok && mode === "new") {
           // Ready for the next patient on the same day: back on the day view, whose room is chosen afresh.
           setHn("");
+          setPatientName("");
+          setDiagnosis("");
           setOperation("");
           setNote("");
           setChoice("dept");
@@ -559,7 +579,7 @@ export function AddCase({
    * other fields are checked on the save).
    */
   function next() {
-    const input = { date, hn, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null, ...(tc ? { place } : {}) };
+    const input = { date, hn, patientName, diagnosis, operation, room: choice, scrubDoes, note, start: time?.start ?? null, end: time?.end ?? null, ...(tc ? { place } : {}) };
     const edit = mode === "edit" ? editing : null;
     const checked = checkCase(input, {
       today,
@@ -946,6 +966,69 @@ export function AddCase({
             testId="case-hn"
           />
 
+          {/*
+            The patient's name and the diagnosis (Pong, 28 Nov 2026: "both are not required"), one line each: only the
+            doctor, MX and admins see them on the board, as the HN, so the hint under them says so.
+          */}
+          <div className="space-y-4" data-testid="case-patient-fields">
+          <div>
+            <span className="flex items-baseline justify-between gap-2">
+              <label htmlFor="case-patient" className="text-sm font-semibold text-ink">
+                ชื่อผู้ป่วย <span className="font-normal text-muted">(ถ้ามี)</span>
+              </label>
+              <span className="text-xs text-muted tabular-nums">
+                {patientName.length}/{MAX_PATIENT_NAME}
+              </span>
+            </span>
+            <input
+              id="case-patient"
+              ref={patientRef}
+              value={patientName}
+              onChange={(event) => {
+                setPatientName(event.target.value);
+                edited("patientName");
+              }}
+              maxLength={MAX_PATIENT_NAME}
+              autoComplete="off"
+              aria-invalid={invalid === "patientName" || undefined}
+              aria-describedby={describe("patientName", "case-patient-hint")}
+              className="field field-text mt-1.5"
+              data-testid="case-patient"
+            />
+          </div>
+
+          <div>
+            <span className="flex items-baseline justify-between gap-2">
+              <label htmlFor="case-diagnosis" className="text-sm font-semibold text-ink">
+                การวินิจฉัย <span className="font-normal text-muted">(ถ้ามี)</span>
+              </label>
+              <span className="text-xs text-muted tabular-nums">
+                {diagnosis.length}/{MAX_DIAGNOSIS}
+              </span>
+            </span>
+            <input
+              id="case-diagnosis"
+              ref={diagnosisRef}
+              value={diagnosis}
+              onChange={(event) => {
+                setDiagnosis(event.target.value);
+                edited("diagnosis");
+              }}
+              maxLength={MAX_DIAGNOSIS}
+              autoComplete="off"
+              // No example on a closed day: in a fixed field it would read as the case's diagnosis.
+              placeholder={locked ? undefined : "Gallstone, Fx neck of femur"}
+              aria-invalid={invalid === "diagnosis" || undefined}
+              aria-describedby={describe("diagnosis", "case-patient-hint")}
+              className="field field-text mt-1.5"
+              data-testid="case-diagnosis"
+            />
+            <p id="case-patient-hint" className="mt-1 text-xs leading-5 text-muted" data-testid="case-patient-hint">
+              ชื่อและการวินิจฉัย เห็นเฉพาะคุณ MX และผู้ดูแลระบบ เหมือน HN
+            </p>
+          </div>
+          </div>
+
           <div>
             <span className="flex items-baseline justify-between gap-2">
               <label htmlFor="case-operation" className="text-sm font-semibold text-ink">
@@ -1238,6 +1321,16 @@ export function AddCase({
                     {item.hn ? (
                       <p className="text-sm font-semibold break-all text-ink tabular-nums" data-testid="my-case-hn">
                         HN {displayHn(item.hn)}
+                      </p>
+                    ) : null}
+                    {item.patientName ? (
+                      <p className="text-sm break-words text-ink" data-testid="my-case-patient">
+                        {item.patientName}
+                      </p>
+                    ) : null}
+                    {item.diagnosis ? (
+                      <p className="text-sm break-words text-ink-2" data-testid="my-case-diagnosis">
+                        Dx {item.diagnosis}
                       </p>
                     ) : null}
                     <p className={`text-sm break-words ${item.operation ? (item.hn ? "text-ink-2" : "font-semibold text-ink") : "text-muted"}`}>

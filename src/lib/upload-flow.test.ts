@@ -427,6 +427,8 @@ let nextId = 0;
 function booking(more: Partial<AddedCase>): AddedCase {
   nextId += 1;
   return {
+    patientName: "",
+    diagnosis: "",
     id: String(nextId),
     date: THURSDAY,
     start: null,

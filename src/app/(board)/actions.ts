@@ -50,8 +50,8 @@ import { userForSession } from "@/lib/user-list";
 import { BOARD_PATH, THA_CHALOM_PATH, type PlaceId } from "@/lib/places";
 
 /**
- * Every answer carries the doctor's own bookings from today on, so the form's list stays current. They carry the HN:
- * the list goes only to the doctor who made them.
+ * Every answer carries the doctor's own bookings from today on, so the form's list stays current. They carry the HN,
+ * the patient's name and the diagnosis: the list goes only to the doctor who made them.
  */
 export type CaseResult =
   | { ok: true; mine: AddedCase[]; message: string }
@@ -125,8 +125,8 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
     // The app's clock (lib/clock.ts), the same one the page gave the form, so the two agree on today and on 15:00.
     const { date: today, minutes } = bangkokParts(now());
     const [periods, { holidays }] = await Promise.all([getRepairPeriods(pool), holidaysBetween(today, addDays(today, ahead))]);
-    // Again on the server: the day, the HN (stored normalised), the operation, the room choice, the scrub answer and the
-    // note (cleanNote, at most MAX_NOTE characters);
+    // Again on the server: the day, the HN (stored normalised), the patient's name and the diagnosis (optional, one line
+    // each), the operation, the room choice, the scrub answer and the note (cleanNote, at most MAX_NOTE characters);
     // the room itself is worked out from the doctor's own department as the database has it (never from the form).
     const earliest = firstBookingDay(admin, today, minutes, holidays);
     const checked = checkCase(input, { today, earliest, periods, subtype: doctor.subtype, holidays, place, ahead });
@@ -166,8 +166,8 @@ const PAST = "ผ่านวันผ่าตัดแล้ว แก้ไ�
 
 /**
  * Saves the doctor's edit of one of their own bookings (not one the calendar API pushed: CALENDAR_TEXT) (Pong, 25 Nov 2026: "on DR case row : allow surgeon to edit, move
- * date, delete and other functions"): the new day, HN, operation, room choice, scrub answer and note, checked as a new
- * booking is (lib/added-cases.ts checkCase), except that its own day needs no day checks. Until 15:00 the day before it
+ * date, delete and other functions"): the new day, HN, patient's name, diagnosis, operation, room choice, scrub answer and
+ * note, checked as a new booking is (lib/added-cases.ts checkCase), except that its own day needs no day checks. Until 15:00 the day before it
  * all can change, the day too (a move); from then on only the note, though the case can still move to a day that is
  * open; that note alone is saved then (updateNote), the rest left as the day's list has it. A new day, room choice or HN
  * puts it at the back of its room's queue (bookingChange). In a department with several rooms that day a booking keeps

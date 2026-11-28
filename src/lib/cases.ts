@@ -10,8 +10,8 @@ type Q = Pool | PoolClient;
 /**
  * The doctors' added cases (bookings during the repair): table `cases` (db/schema.sql). Only a doctor adds them (a
  * current claim on an active users row of type DR), always as the surgeon, and only that doctor removes them. Checks of
- * the input are in lib/added-cases.ts; the server actions are in app/(board)/actions.ts. The lists carry the HN: a
- * caller hands it on only to whoever may see it (lib/board-rows.ts).
+ * the input are in lib/added-cases.ts; the server actions are in app/(board)/actions.ts. The lists carry the HN, the
+ * patient's name and the diagnosis: a caller hands them on only to whoever may see them (lib/board-rows.ts).
  */
 
 /** Cases one doctor may add per day (a guard against a runaway script, far above a real list). */
@@ -22,6 +22,8 @@ interface CaseRow {
   date: string;
   room_id: string;
   hn: string | null;
+  patient_name: string | null;
+  diagnosis: string | null;
   operation: string | null;
   shift: Shift;
   dressing: boolean | null;
@@ -41,7 +43,7 @@ interface CaseRow {
 }
 
 const COLUMNS =
-  "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.operation, c.shift, c.dressing, c.scrub_does, c.note, " +
+  "c.id::text AS id, to_char(c.op_date, 'YYYY-MM-DD') AS date, c.room_id, c.hn, c.patient_name, c.diagnosis, c.operation, c.shift, c.dressing, c.scrub_does, c.note, " +
   "c.surgeon_id::text AS surgeon_id, u.first_name, u.last_name, u.subtype, c.queued_at AS booked_at, c.edited_at, c.start_min, c.end_min, c.place, " +
   "c.api_client, c.external_id::text AS external_id";
 
@@ -51,6 +53,9 @@ function toCase(r: CaseRow): AddedCase {
     date: r.date,
     roomId: r.room_id,
     hn: r.hn,
+    // Not given is NULL (db/schema.sql); the app reads it as "".
+    patientName: r.patient_name ?? "",
+    diagnosis: r.diagnosis ?? "",
     // A booking without a name stores NULL (db/schema.sql); the app reads it as "".
     operation: r.operation ?? "",
     shift: r.shift,
@@ -139,7 +144,8 @@ export async function addedToday(pool: Q, surgeonId: string): Promise<number> {
 
 /**
  * Saves a checked case (lib/added-cases.ts checkCase: the HN normalised, the room worked out from the doctor's choice)
- * with this doctor as the surgeon. Returns its id. An empty operation name or note is stored as NULL, never as "".
+ * with this doctor as the surgeon. Returns its id. An empty operation name, patient's name, diagnosis or note is stored
+ * as NULL, never as "".
  * `api`: a booking the calendar API pushed, its client and the calendar's own id of the record (lib/calendar-api.ts).
  */
 export async function insertCase(
@@ -150,8 +156,8 @@ export async function insertCase(
   api: { client: string; externalId: string } | null = null,
 ): Promise<string> {
   const { rows } = await pool.query<{ id: string }>(
-    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, note, surgeon_id, line_sub, start_min, end_min, place, api_client, external_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING id::text AS id`,
+    `INSERT INTO cases (op_date, room_id, hn, operation, shift, dressing, scrub_does, note, surgeon_id, line_sub, start_min, end_min, place, api_client, external_id, patient_name, diagnosis)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING id::text AS id`,
     [
       input.date,
       input.roomId,
@@ -168,6 +174,8 @@ export async function insertCase(
       input.place ?? "skh",
       api?.client ?? null,
       api?.externalId ?? null,
+      input.patientName || null,
+      input.diagnosis || null,
     ],
   );
   return rows[0].id;
@@ -193,14 +201,15 @@ export async function ownCase(pool: Q, id: string, surgeonId: string): Promise<A
 
 /**
  * Saves a doctor's edit of their own case in place (lib/added-cases.ts checkCase and bookingChange): the day, room, HN,
- * operation, room choice, scrub answer, note and time, with edited_at. `requeue` puts it at the back of its room's queue
+ * patient's name, diagnosis, operation, room choice, scrub answer, note and time, with edited_at. `requeue` puts it at the back of its room's queue
  * (queued_at now): a new day, room choice or patient counts as a new booking. The shift and the time it was made stay.
  * Returns false when it is not theirs or was removed meanwhile.
  */
 export async function updateCase(pool: Q, id: string, surgeonId: string, input: CaseInput, requeue: boolean): Promise<boolean> {
   const { rowCount } = await pool.query(
     `UPDATE cases SET op_date = $3, room_id = $4, hn = $5, operation = $6, dressing = $7, scrub_does = $8, note = $9,
-       start_min = $11, end_min = $12, edited_at = now(), queued_at = CASE WHEN $10 THEN now() ELSE queued_at END
+       start_min = $11, end_min = $12, patient_name = $13, diagnosis = $14,
+       edited_at = now(), queued_at = CASE WHEN $10 THEN now() ELSE queued_at END
      WHERE id = $1 AND surgeon_id = $2 AND removed_at IS NULL`,
     [
       id,
@@ -216,6 +225,8 @@ export async function updateCase(pool: Q, id: string, surgeonId: string, input: 
       requeue,
       input.start,
       input.end,
+      input.patientName || null,
+      input.diagnosis || null,
     ],
   );
   return rowCount === 1;
@@ -223,7 +234,8 @@ export async function updateCase(pool: Q, id: string, surgeonId: string, input: 
 
 /**
  * Saves only the note of one of this doctor's cases, with edited_at: the edit of a booking whose day is closed (lib/added-
- * cases.ts bookingState), which leaves its day, room, HN, name and room choice as the day's list has them (a booking
+ * cases.ts bookingState), which leaves its day, room, HN, patient's name, diagnosis, operation's name and room choice as
+ * the day's list has them (a booking
  * from before the form asked keeps its NULL room choice). Returns false when it is not theirs or was removed meanwhile.
  */
 export async function updateNote(pool: Q, id: string, surgeonId: string, note: string): Promise<boolean> {

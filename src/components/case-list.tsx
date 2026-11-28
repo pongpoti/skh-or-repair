@@ -83,8 +83,9 @@ export function isCaseBubbleOpen(): boolean {
 }
 
 /**
- * A room's case rows (Pong, 15 and 16 Nov 2026): the operation on one line, the patient's name and the HN for who may
- * see them, the surgeon on one line without the title, the booking's time, and the icon at the right.
+ * A room's case rows (Pong, 15 and 16 Nov 2026): the operation on one line, the patient's name, the HN and the
+ * diagnosis (Pong, 28 Nov 2026) for who may see them, the surgeon on one line without the title, the booking's time, and
+ * the icon at the right.
  *
  * A name too long for its line ends in "…" and a chevron; a tap on it unfolds the whole name in place, and another
  * folds it (Pong, 16 Nov 2026: "I want op name single line. How do I view full name ?"). Several can be open at once,
@@ -97,8 +98,8 @@ export function isCaseBubbleOpen(): boolean {
  *
  * A row whose booking has a note (หมายเหตุ; Pong, 17 Nov 2026: "each case row has หมายเหตุ => click to open dialog to
  * see details") shows a หมายเหตุ button under the booking's time. A tap opens the note in a dialog over the room, with
- * the case it belongs to: the room and its place in it, the whole operation name, the patient's name and HN for who may
- * see them, the surgeon and the booking's time. ปิด, the cross, Escape or a tap outside the card closes it. A row
+ * the case it belongs to: the room and its place in it, the whole operation name, the patient's name, HN and diagnosis
+ * for who may see them, the surgeon and the booking's time. ปิด, the cross, Escape or a tap outside the card closes it. A row
  * without a note shows no button.
  *
  * On the doctor's own bookings (`own`, the rows with a bookingId that are in their list from today on), a จัดการ button
@@ -319,9 +320,9 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
               <span className="sr-only">ลำดับ </span>
               {item.order}
             </span>
-            {/* Pong, 15-16 Nov 2026: the operation on one line, the patient's name and the HN (only when the server sent
-                them: the booking's doctor, MX and admins), the surgeon as large as the HN, and the booking's time
-                smaller below. */}
+            {/* Pong, 15-16 Nov 2026: the operation on one line, the patient's name, the HN and the diagnosis (only when
+                the server sent them: the booking's doctor, MX and admins), the surgeon as large as the HN, and the
+                booking's time smaller below. */}
             <div className="case-main min-w-0">
               <p className={`case-op-line ${cancelled ? "text-muted" : "text-ink"}`} data-testid="row-op">
                 {isCut ? (
@@ -349,6 +350,12 @@ export function CaseList({ cases, own = null }: { cases: readonly BoardRow[]; ow
               {item.hn ? (
                 <p className="case-line font-semibold text-ink-2 tabular-nums" data-testid="row-hn">
                   HN {displayHn(item.hn)}
+                </p>
+              ) : null}
+              {/* The diagnosis the doctor gave on the booking (Pong, 28 Nov 2026), as the name: who may see the HN. */}
+              {item.diagnosis ? (
+                <p className="case-line break-words text-ink-2" data-testid="row-diagnosis">
+                  <span className="font-semibold">Dx</span> {item.diagnosis}
                 </p>
               ) : null}
               <p className="case-line text-ink-2" data-testid="row-surgeon">
@@ -497,6 +504,12 @@ function NoteDialog({ dialogRef, row, onClosed }: { dialogRef: React.RefObject<H
               <>
                 <dt>HN</dt>
                 <dd className="tabular-nums">{displayHn(row.hn)}</dd>
+              </>
+            ) : null}
+            {row.diagnosis ? (
+              <>
+                <dt>การวินิจฉัย</dt>
+                <dd>{row.diagnosis}</dd>
               </>
             ) : null}
             <dt>ศัลยแพทย์</dt>

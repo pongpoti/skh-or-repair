@@ -20,7 +20,9 @@ export const SAMPLE_DOCTOR_ID = "9001";
  * it, to show it still matches the booking (bookings store the HN normalised, lib/hn.ts). Two bookings are in the
  * dressing room by the doctor's choice, one for each answer to the scrub question, so both the doctor's and the scrub's
  * icons show with &upload=0; the scrub's is in HOSxP too, so it also shows after the upload. Three bookings carry a
- * made-up note (หมายเหตุ), one over several lines, so the rows' note button and its dialog can be seen.
+ * made-up note (หมายเหตุ), one over several lines, so the rows' note button and its dialog can be seen. Two of the sample
+ * doctor's bookings carry a made-up diagnosis, one with a patient's name too (it is not in HOSxP, so only &upload=0 shows
+ * it; HOSxP's name stands for a matched one), so the rows' Dx line can be seen.
  */
 export function sampleCases(date: string, periods: RepairPeriods): { workbook: WorkbookCase[]; bookings: AddedCase[] } {
   const rooms = openRooms(date, periods).map((room) => room.id);
@@ -43,6 +45,7 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
     surgeon: string,
     scrubDoes: boolean | null = null,
     note = "",
+    patient: { name?: string; diagnosis?: string } = {},
   ): AddedCase => {
     id += 1;
     const dressing = scrubDoes !== null;
@@ -51,7 +54,9 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
     // An hour each from 08:30 in booking order, so the day view and the rows show times.
     const start = 8 * 60 + 30 + (id - 1) * 60;
     const time = start + 60 <= 15 * 60 + 30 ? { start, end: start + 60 } : { start: null, end: null };
-    return { id: String(id), date, roomId, hn, operation, shift: "in", dressing, scrubDoes, note, surgeonId, surgeon, subtype: "GENSX", bookedAt, ...time };
+    const patientName = patient.name ?? "";
+    const diagnosis = patient.diagnosis ?? "";
+    return { id: String(id), date, roomId, hn, patientName, diagnosis, operation, shift: "in", dressing, scrubDoes, note, surgeonId, surgeon, subtype: "GENSX", bookedAt, ...time };
   };
   const dressingRoom = roomsHeldBy("INFECT", date, periods)[0] ?? room(0);
 
@@ -67,8 +72,8 @@ export function sampleCases(date: string, periods: RepairPeriods): { workbook: W
     booking(room(0), "100001", "", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง", null, "ขอ C-arm\nเตรียมเลือด PRC 2 unit"),
     booking(room(1), "100003", "", "9002", "ตัวอย่าง สาม"),
     booking(room(1), "100004", "ORIF radius", "9002", "ตัวอย่าง สาม", null, "ขอ set small fragment และ mini C-arm"),
-    booking(room(2), "100005", "Cholecystectomy", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง"),
-    booking(room(2), "100006", "Herniorrhaphy, right", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง"),
+    booking(room(2), "100005", "Cholecystectomy", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง", null, "", { diagnosis: "Symptomatic gallstone" }),
+    booking(room(2), "100006", "Herniorrhaphy, right", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง", null, "", { name: "นาย ตัวอย่าง จองเอง", diagnosis: "Inguinal hernia, right" }),
     booking(dressingRoom, "100007", "I&D abscess, right thigh", SAMPLE_DOCTOR_ID, "ตัวอย่าง หนึ่ง", true, "ผู้ป่วยแพ้ latex"),
     booking(dressingRoom, "100008", "Wound dressing, sacrum", "9002", "ตัวอย่าง สาม", false),
   ];

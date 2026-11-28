@@ -13,8 +13,8 @@ import { subtypeLabel } from "./user-labels.ts";
 /**
  * The board's case rows, at both hospitals: the HOSxP workbook's cases (the latest upload of the cycle,
  * lib/workbook-store.ts, the hospital's own) and the doctors' bookings (lib/cases.ts), matched one to one by HN. Pure and isomorphic; the
- * server page builds the rows and hands the client only what the viewer may see (an HN only to the doctor who booked
- * the case, MX and admins).
+ * server page builds the rows and hands the client only what the viewer may see (an HN, the patient's name and the
+ * diagnosis only to the doctor who booked the case, MX and admins).
  */
 
 /** Where a row comes from: the workbook alone, a booking alone, or a workbook case that matches a booking. */
@@ -34,10 +34,16 @@ export type BoardRow = Operation & {
   /** The patient's HN, present only when the viewer may see it (the key is left out otherwise). */
   hn?: string;
   /**
-   * The patient's name from the HOSxP workbook (Pong, 16 Nov 2026: "Add patient name line above HN"), under the HN's
-   * rule: present only when the viewer may see the HN and the workbook has a name. A booking alone has none.
+   * The patient's name (Pong, 16 Nov 2026: "Add patient name line above HN"), under the HN's rule: present only when the
+   * viewer may see the HN and there is a name. The HOSxP workbook's when it has one, else the one the doctor gave on the
+   * booking (Pong, 28 Nov 2026: "add form input diagnosis and patient name, both are not required").
    */
   patientName?: string;
+  /**
+   * The diagnosis the doctor gave on the booking (Pong, 28 Nov 2026), under the HN's rule as the name. The workbook's
+   * diagnosis is never read (lib/workbook.ts), so a case nobody booked has none.
+   */
+  diagnosis?: string;
   /** The doctor who booked the room (booking and matched rows). */
   bookedBy?: string;
   /**
@@ -411,9 +417,14 @@ function mergeRows(
   };
   const hospital = place ? { place } : {};
 
-  // The doctor who made a booking sees its HN; MX and admins see every HN.
+  // The doctor who made a booking sees its HN, the patient's name and the diagnosis; MX and admins see every one.
   const ownBooking = (booking: AddedCase) => viewer.userId !== null && booking.surgeonId === viewer.userId;
   const seesHn = (booking: AddedCase) => viewer.allHn || ownBooking(booking);
+  const patientOf = (booking: AddedCase, fromHosxp?: string | null): { patientName?: string; diagnosis?: string } => {
+    if (!seesHn(booking)) return {};
+    const name = fromHosxp || booking.patientName;
+    return { ...(name ? { patientName: name } : {}), ...(booking.diagnosis ? { diagnosis: booking.diagnosis } : {}) };
+  };
   const ownId = (booking: AddedCase): { bookingId?: string } => (ownBooking(booking) ? { bookingId: booking.id } : {});
   // The booked rows by their time, then by the booking's place in `today` (the booking order); then the unbooked ones
   // in file order.
@@ -443,7 +454,8 @@ function mergeRows(
         source: "matched",
         flag: null,
         ...(seesHn(booking) && hn ? { hn } : {}),
-        ...(seesHn(booking) && item.patientName ? { patientName: item.patientName } : {}),
+        // HOSxP's name when it has one: the hospital's own spelling.
+        ...patientOf(booking, item.patientName),
         bookedBy: booking.surgeon,
         ...ownId(booking),
         ...when(booking),
@@ -493,6 +505,7 @@ function mergeRows(
       source: "booking",
       flag: uploaded ? "not-in-hosxp" : null,
       ...(seesHn(booking) && booking.hn ? { hn: booking.hn } : {}),
+      ...patientOf(booking),
       bookedBy: booking.surgeon,
       ...ownId(booking),
       ...when(booking),
