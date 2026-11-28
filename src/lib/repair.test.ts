@@ -100,13 +100,13 @@ test("the dates an admin saved decide, not the defaults; a gap between the halve
   assert.equal(allocationFor("or-11", "2027-01-04", moved)?.am?.code, "MIXED", "Monday's OR 11 in the first half's rooms");
 });
 
-test("first half: OR 9 to 13 operate, OR 7 and 8 are recovery rooms, OR 1 to 6 and RR 1 are closed, RR 2 stays a recovery room", () => {
+test("first half: OR 9 to 13 operate, OR 7 and 8 are recovery rooms, OR 1 to 6 and the recovery area are closed", () => {
   for (const date of [FIRST_DAY, FIRST_MONDAY, FIRST_LAST]) {
     assert.deepEqual(openRooms(date, REPAIR).map((room) => room.id), ["or-9", "or-10", "or-11", "or-12", "or-13"], date);
     for (const n of [7, 8]) assert.equal(roomUse(`or-${n}`, date, REPAIR), "recovery", `OR ${n} ${date}`);
     for (const n of [1, 2, 3, 4, 5, 6]) assert.equal(roomUse(`or-${n}`, date, REPAIR), "closed", `OR ${n} ${date}`);
     assert.equal(recoveryAreaClosed("r-1", date, REPAIR), true);
-    assert.equal(recoveryAreaClosed("r-2", date, REPAIR), false);
+    assert.equal(recoveryAreaClosed("r-2", date, REPAIR), true);
   }
   assert.equal(unusedRoomsText(FIRST_MONDAY, REPAIR), "OR 7–8 เป็นห้องพักฟื้น · OR 1–6 ปิด");
   assert.deepEqual(REPAIR_LAYOUTS[1].emergencyRooms, ["or-12", "or-13"], "NEURO and CVT emergencies: OR 12 or 13");
@@ -205,19 +205,16 @@ function inside([x, y]: [number, number], polygon: [number, number][]): boolean 
 }
 
 test("each half's repair zone covers its closed rooms and none of the rooms in use", () => {
-  // The first half's RR 2 is cut out of the zone (a second subpath, filled even-odd; Pong, 27 Nov 2026).
-  assert.equal(REPAIR_LAYOUTS[1].zone, "M20 20L1187 20L1187 700L400 700L400 590L20 590Z M393 348L815 348L815 532L393 532Z");
+  assert.equal(REPAIR_LAYOUTS[1].zone, "M20 20L1187 20L1187 700L400 700L400 590L20 590Z");
   assert.equal(REPAIR_LAYOUTS[2].zone, "M433 532L757 532L757 700L1187 700L1187 1686L20 1686L20 1093L677 1093L677 700L433 700Z");
   for (const [date, half] of [[FIRST_MONDAY, 1], [SECOND_DAY, 2]] as const) {
-    // Even-odd: a point is in the zone when it lies inside an odd number of its subpaths.
-    const parts = REPAIR_LAYOUTS[half].zone.split("M").filter(Boolean).map(points);
-    const inZone = (point: [number, number]) => parts.filter((part) => inside(point, part)).length % 2 === 1;
+    const zone = points(REPAIR_LAYOUTS[half].zone);
     for (const room of ROOMS) {
       // The room's corners, pulled 3 units towards its label so a shared wall does not count.
       const corners = points(room.d).map(([x, y]): [number, number] => [x + Math.sign(room.labelX - x) * 3, y + Math.sign(room.labelY - y) * 3]);
       const closed = room.kind === "or" ? roomUse(room, date, REPAIR) === "closed" : recoveryAreaClosed(room, date, REPAIR);
-      if (closed) assert.ok(inZone([room.labelX, room.labelY]), `${room.id} is inside the half ${half} zone`);
-      else assert.ok(corners.every((corner) => !inZone(corner)), `${room.id} is clear of the half ${half} zone`);
+      if (closed) assert.ok(inside([room.labelX, room.labelY], zone), `${room.id} is inside the half ${half} zone`);
+      else assert.ok(corners.every((corner) => !inside(corner, zone)), `${room.id} is clear of the half ${half} zone`);
     }
   }
 });
