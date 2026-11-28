@@ -634,7 +634,7 @@ async function main() {
   // loaded once the app has created them, as in production: loadUsers() after the servers are up).
   const db = new pg.Pool({ connectionString: DB_URL, max: 2 });
   await assertDisposableUsers((sql) => db.query(sql), "E2E_DATABASE_URL"); // users holding real data: stop before the DROP
-  await db.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, schedule_mode, user_claims, email_codes, user_emails, users, access_requests");
+  await db.query("DROP TABLE IF EXISTS case_events, tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, schedule_mode, user_claims, email_codes, user_emails, users, access_requests");
 
   const appEnv = {
     ...baseEnv(),
@@ -4210,6 +4210,22 @@ async function main() {
       const booked = await db.query("SELECT to_char(op_date, 'YYYY-MM-DD') AS day FROM cases WHERE id > $1 AND surgeon_id = $2", [casesBefore, uid]);
       assert(JSON.stringify(booked.rows) === JSON.stringify([{ day: "2026-11-17" }]), `booked for today after 15:00: ${JSON.stringify(booked.rows)}`);
       await ownerShot(dr, "booking-admin-today.png");
+      // The booking log (Pong, 28 Nov 2026): the admin opens it from the account menu and finds the booking just made,
+      // which the trigger logged as booked on the board; the search narrows the list to it
+      await dr.click('[data-testid="user-menu"]');
+      await dr.click('[data-testid="account-log-link"]');
+      await dr.waitForURL(`${APP}/admin/bookings`);
+      await dr.fill('[data-testid="log-search"]', "7900099");
+      const logRow = dr.locator('[data-testid="log-booking"]');
+      await logRow.first().waitFor();
+      assert((await logRow.count()) === 1, `one booking for the HN: ${await logRow.count()}`);
+      const logText = (await logRow.textContent()) ?? "";
+      assert(logText.includes("จองอยู่") && logText.includes("Admin test case") && logText.includes("สมุทรสาคร"), `the log's row: ${logText}`);
+      await logRow.locator("summary").click();
+      const steps = await dr.$$eval('[data-testid="log-timeline"] .badge', (els) => els.map((el) => el.textContent?.trim()));
+      assert(JSON.stringify(steps) === JSON.stringify(["จอง"]), `its history: ${JSON.stringify(steps)}`);
+      await noSideScroll(dr, "booking log");
+      await ownerShot(dr, "booking-log.png");
       // leave the bookings and the claims as the later tests expect them
       await db.query("DELETE FROM cases WHERE id > $1 AND surgeon_id = $2", [casesBefore, uid]);
       await db.query("UPDATE user_claims SET line_sub = $1 WHERE user_id = $2 AND undone_at IS NULL", [RP.drY.sub, RP.drY.userId]);

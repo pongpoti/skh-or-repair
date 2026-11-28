@@ -16,7 +16,7 @@ describe("database schema", () => {
   });
 
   test("applies to an empty database and is idempotent (also under concurrency)", async () => {
-    await pool.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+    await pool.query("DROP TABLE IF EXISTS case_events, tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
     await Promise.all([ensureSchema(pool), ensureSchema(pool), ensureSchema(pool)]);
     await ensureSchema(pool);
     const { rows } = await pool.query<{ table_name: string }>(
@@ -25,6 +25,7 @@ describe("database schema", () => {
     const names = rows.map((r) => r.table_name);
     for (const t of [
       "access_requests",
+      "case_events",
       "cases",
       "line_bindings",
       "login_events",
@@ -110,7 +111,7 @@ describe("database schema", () => {
   });
 
   test("on a database where users already exists with data (production), applying the schema twice leaves users untouched", async () => {
-    await pool.query("DROP TABLE IF EXISTS tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
+    await pool.query("DROP TABLE IF EXISTS case_events, tutorial_seen, otp_codes, line_bindings, login_events, cases, mx_members, users_added, user_phones, workbook_cases, workbook_uploads, repair_periods, user_claims, email_codes, user_emails, users, access_requests");
     await pool.query(PRODUCTION_USERS_DDL);
     await pool.query(
       `INSERT INTO users (first_name, last_name, type, subtype) VALUES

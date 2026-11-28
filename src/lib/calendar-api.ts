@@ -383,9 +383,14 @@ const formInput = (record: CalendarRecord, time: boolean) => ({
   end: time ? record.end : null,
 });
 
-/** Takes the record's lock inside a day's lock (withDayLock), so two calls about one record never interleave. */
+/**
+ * Takes the record's lock inside a day's lock (withDayLock), so two calls about one record never interleave, and marks
+ * the transaction as the calendar's: the booking log's trigger (db/schema.sql case_events) then says the change came from
+ * the calendar.
+ */
 async function lockRecord(client: PoolClient, externalId: string): Promise<void> {
   await client.query("SELECT pg_advisory_xact_lock(hashtext('cases-api:' || $1 || ':' || $2))", [CALENDAR_CLIENT, externalId]);
+  await client.query("SELECT set_config('orskh.via', 'calendar', true)");
 }
 
 /** In a department with several rooms that day: the doctor's own room there, else the emptier one (as a new booking). */
