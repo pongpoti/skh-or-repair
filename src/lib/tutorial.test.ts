@@ -37,7 +37,10 @@ const rowsIn = (board: ReturnType<typeof tutorialBoard>, roomId: string) =>
 test("the practice room is the doctor's department's room; obstetrics practises in general surgery's", () => {
   assert.equal(practiceSubtype("GENSX", DAY, REPAIR), "GENSX");
   assert.equal(practiceRoom("GENSX", DAY, REPAIR), "or-12");
-  assert.equal(practiceRoom("URO", DAY, REPAIR), "or-11", "no URO room: the mixed room");
+  assert.equal(practiceRoom("PLASTIC", DAY, REPAIR), "or-11", "3rd Friday: plastic with maxillofacial in the mixed room");
+  assert.equal(practiceRoom("MAXILLO", DAY, REPAIR), "or-11");
+  assert.equal(practiceRoom("URO", DAY, REPAIR), null, "Friday is not URO's turn of the mixed room");
+  assert.equal(practiceSubtype("URO", DAY, REPAIR), "GENSX", "so URO practises in general surgery's room");
   assert.equal(practiceSubtype("OBGYN", DAY, REPAIR), "GENSX", "obstetrics operates in its own building during the repair");
   assert.equal(practiceSubtype(null, DAY, REPAIR), "GENSX");
 });

@@ -102,7 +102,7 @@ const USERS_CSV = [
   "สมศักดิ์,เกษียณ,RN,OR",
   "กมล,ทองดี,DR,OBGYN",
   "ชัยวัฒน์,มีสุข,DR,GENSX",
-  "ณัฐพล,วงศ์ใหญ่,DR,NEPHRO",
+  "ณัฐพล,วงศ์ใหญ่,DR,URO",
   "สมใจ,ใจเย็น,DR,URO",
   "ปราณี,สายบุญ,RN,OR",
   "วิไล,แสงทอง,RN,ANES",
@@ -165,7 +165,7 @@ const RP = {
   drX: { phone: null, name: "ณัฐพล วงศ์ใหญ่", sub: "U00000000000000000000000000000dx1", userId: null },
   drY: { phone: null, name: "ชัยวัฒน์ มีสุข", sub: "U00000000000000000000000000000dy1", userId: null },
 };
-// The bookings' HNs (invented, 7 digits): doctor X (NEPHRO: the mixed room OR 11) books one for Monday and two for
+// The bookings' HNs (invented, 7 digits): doctor X (URO: the mixed room OR 11 on Monday 16 Nov, the 3rd Monday, and Tuesday afternoons) books one for Monday and two for
 // Tuesday (one typed with a dash, matching the workbook's 7000002; one a dressing HOSxP will not list); doctor Y
 // (GENSX: OR 12) books 7000015, which the workbook writes 007000015.
 const HN_TODAY = "7900001";
@@ -3471,7 +3471,7 @@ async function main() {
       await page.waitForSelector(`${dialog}[open]`);
       assert((await textOf(page, "#add-case-title")) === "จองห้องผ่าตัด", "dialog title");
       // the department on a line of its own, under the surgeon's name
-      assert((await textOf(page, '[data-testid="case-dept"]')) === "อายุรกรรมโรคไต", "the department line");
+      assert((await textOf(page, '[data-testid="case-dept"]')) === "ศัลยกรรมทางเดินปัสสาวะ", "the department line");
       assert((await dateValue(page, "case-date")) === "2026-11-16", "the form starts on Monday");
       assert((await textOf(page, '[data-testid="case-date"]')).includes("วันจันทร์ที่ 16 พฤศจิกายน 2569"), "the day written out in Thai");
       // the 15:00 rule in Pong's words, always, then the earliest day (Pong, 15 Nov 2026), a little larger than before
@@ -3497,7 +3497,7 @@ async function main() {
 
       // The day view (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar (just like in
       // google calendar app) then show form input"): the half hours from 08:30 to 15:30 of the room the doctor's choice
-      // gives that day (the nephrologist's department has no room of its own during the repair: the mixed room OR 11).
+      // gives that day (urology's turn of the mixed room OR 11 that Monday, Pong 28 Nov 2026).
       // It is behind the ระบุเวลา switch, off to start with (Pong, 27 Nov 2026: "Add toggle time input : disable as
       // default"): no time, said in the footer.
       const toggle = `${dialog} [data-testid="case-time-toggle"]`;
@@ -4070,17 +4070,18 @@ async function main() {
       await page.click('[data-testid="upload-submit"]');
       await page.waitForFunction(() => document.querySelector('[data-testid="upload-result"] [role="status"]'));
       assert(
-        (await result()) === "บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว ลงห้อง 8 จาก 8 เคส · ท่าฉลอม 1 จาก 1 · ขึ้นกระดานเวลา 16:00 น.",
+        (await result()) === "บันทึกตารางของวันอังคารที่ 17 พ.ย. 2569 แล้ว ลงห้อง 6 จาก 8 เคส · ท่าฉลอม 1 จาก 1 · ขึ้นกระดานเวลา 16:00 น.",
         `saved: ${await result()}`,
       );
       await page.waitForSelector('[data-testid="upload-matching"]');
       assert((await textOf(page, '[data-testid="upload-latest"] h2 + p')) === `15:20 น. · ${RP.mx.name}`, "when and by whom");
       const stats = await page.$$eval('[data-testid="upload-latest"] dd', (els) => els.map((e) => e.textContent.replace(/\s+/g, " ").trim()));
-      // All 9 kept go to a room: 8 at รพ.สมุทรสาคร, the vascular case in the mixed room OR 11 (Pong, 18 Nov 2026: "Vas stay
-      // on others room if not emer"), and รพ.ท่าฉลอม's in its general surgery room, OR 1 on a Tuesday (Pong, 27 Nov 2026:
-      // "Excel file include both place on one sheet"). 5 HOSxP cases nobody booked (not the 2 dressings: nobody need book
-      // the dressing room), รพ.ท่าฉลอม's among them, and 1 booking HOSxP lacks.
-      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "9 เคส", "6 รายการ"]), `counts: ${JSON.stringify(stats)}`);
+      // 7 of the 9 kept go to a room: 6 at รพ.สมุทรสาคร and รพ.ท่าฉลอม's in its general surgery room, OR 1 on a Tuesday
+      // (Pong, 27 Nov 2026: "Excel file include both place on one sheet"). The vascular and ENT cases have no room: Tuesday's
+      // turn of the mixed room OR 11 is PEDSX's and URO's (Pong, 28 Nov 2026: "Off the board + notice"). 3 HOSxP cases
+      // nobody booked (not the 2 dressings: nobody need book the dressing room), รพ.ท่าฉลอม's among them, and 1 booking
+      // HOSxP lacks.
+      assert(JSON.stringify(stats) === JSON.stringify(["17 แถว", "9 เคส", "7 เคส", "4 รายการ"]), `counts: ${JSON.stringify(stats)}`);
       const latest = await textOf(page, '[data-testid="upload-latest"]');
       for (const line of ["ยกเลิกการผ่าตัด", "OR 12 · GENSX", "ID ซ้ำ นับครั้งเดียว"]) assert(latest.includes(line), `summary shows ${line}`);
       assert(!latest.includes("เคสของ รพ.นครท่าฉลอม"), "รพ.ท่าฉลอม's case is no longer left off");
@@ -4097,7 +4098,7 @@ async function main() {
       assert(tcUnbooked.length === 1 && tcUnbooked[0].includes("HN 7000012") && tcUnbooked[0].includes("OR 1"), `ท่าฉลอม's case nobody booked: ${JSON.stringify(tcUnbooked)}`);
       assert((await page.locator('[data-testid="upload-not-in-hosxp-tc"]').count()) === 0, "no ท่าฉลอม booking HOSxP lacks");
       assert((await textOf(page, '[data-testid="upload-matching"]')) === "แพทย์จองไว้ 3 รายการ · ตรงกัน 2 รายการ", `matching: ${await textOf(page, '[data-testid="upload-matching"]')}`);
-      assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 4, "four HOSxP cases nobody booked, outside the dressing room");
+      assert((await page.locator('[data-testid="upload-unbooked"] li').count()) === 2, "two HOSxP cases nobody booked, outside the dressing room");
       const missing = await textOf(page, '[data-testid="upload-not-in-hosxp"]');
       assert(missing.includes(`HN ${HN_X_MISSING}`) && missing.includes(RP.drX.name) && missing.includes("OR 10"), `the booking HOSxP does not list: ${missing}`);
 
@@ -4105,7 +4106,7 @@ async function main() {
       const up = (await db.query("SELECT id, cycle_day::text AS c, target_date::text AS t, uploaded_by, uploader_name, file_name, total_rows, kept, placed FROM workbook_uploads")).rows;
       assert(
         up.length === 1 && up[0].c === "2026-11-16" && up[0].t === "2026-11-17" && up[0].uploaded_by === RP.mx.sub && up[0].uploader_name === RP.mx.name &&
-          up[0].file_name === "e2e-or-export.xls" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 8,
+          up[0].file_name === "e2e-or-export.xls" && up[0].total_rows === 17 && up[0].kept === 9 && up[0].placed === 6,
         `upload row: ${JSON.stringify(up)}`,
       );
       const cases = (
@@ -4248,12 +4249,13 @@ async function main() {
       assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดถัดไป", "tomorrow's list");
       assert((await page.getAttribute("header time", "datetime")) === "2026-11-17", "dated Tuesday");
       assert((await page.locator('[data-testid="no-upload-alert"]').count()) === 0, "uploaded: no alert");
-      // no ไม่ตรง badge since 16 Nov 2026: the strip is empty; the rooms keep their mismatch marks
-      assert((await page.locator("[data-notice-id]").count()) === 0, "uploaded: no notice in the switch");
+      // no ไม่ตรง badge since 16 Nov 2026; the rooms keep their mismatch marks. Tuesday's turn of the mixed room is
+      // PEDSX's and URO's (Pong, 28 Nov 2026), so HOSxP's vascular and ENT cases are off the board: the no-room notice.
+      assert(JSON.stringify(await page.$$eval("[data-notice-id]", (els) => els.map((el) => el.dataset.noticeId))) === JSON.stringify(["no-room"]), `uploaded: the no-room notice only: ${JSON.stringify(await page.$$eval("[data-notice-id]", (els) => els.map((el) => el.dataset.noticeId)))}`);
       // nor an admin who is not a doctor
       assert((await page.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button for an admin who is not a DR");
       // HOSxP's cases nobody booked, but not the dressing room's; the booking HOSxP does not list is off the board
-      for (const [room, flagged] of [["or-10", false], ["or-11", true], ["or-12", true], ["or-13", false]]) {
+      for (const [room, flagged] of [["or-10", false], ["or-11", false], ["or-12", true], ["or-13", false]]) {
         const label = (await page.getAttribute(`#${room} .fp-floor`, "aria-label")) ?? "";
         assert(label.includes("ข้อมูลไม่ตรงกับการจอง") === flagged, `${room} mismatch mark: ${label}`);
       }
@@ -4395,16 +4397,18 @@ async function main() {
       await page.waitForSelector(".case-row");
       const orthoRoom = await sheetRows(page);
       assert(orthoRoom.some((row) => JSON.stringify(row) === JSON.stringify(["matched", null, "HN 7000002"])), `OR 13: ${JSON.stringify(orthoRoom)}`);
+      // OR 11 on Tuesday is PEDSX's and URO's (Pong, 28 Nov 2026): HOSxP's vascular and ENT cases are off the board, and
+      // doctor X's matched case went to OR 13, so the mixed room has no rows.
       await page.goto(`${APP}/skh?room=or-11`, { waitUntil: "networkidle" });
-      await page.waitForSelector(".case-row");
       const mixedRoom = await sheetRows(page);
       assert(!mixedRoom.some((row) => row[0] === "matched"), `OR 11 has no matched pair: ${JSON.stringify(mixedRoom)}`);
 
       // the HN in each viewer's page: everything for MX, a doctor's own bookings only, none for a nurse
       const html = {};
       for (const key of ["mx", "nurse", "drX", "drY"]) html[key] = (await htmlAs(RP[key])).html;
-      const placed = ["7000001", "7000002", "7000003", "7000010", "7000011", "7000013", "7000014", "7000015"];
+      const placed = ["7000001", "7000002", "7000003", "7000010", "7000011", "7000015"];
       for (const hn of placed) assert(html.mx.includes(hn), `MX sees ${hn}`);
+      for (const hn of ["7000013", "7000014"]) assert(!html.mx.includes(hn), `${hn} (no room on Tuesday) is off the board`);
       assert(!html.mx.includes(HN_X_MISSING), "the booking HOSxP does not list is off the board, even for MX");
       for (const hn of [...WORKBOOK_HNS, HN_TODAY, HN_X_MISSING]) assert(!html.nurse.includes(hn), "no HN in the nurse's page");
       for (const hn of WORKBOOK_HNS.filter((h) => h !== "7000002")) assert(!html.drX.includes(hn), "doctor X gets no HN but their own");
@@ -4412,7 +4416,7 @@ async function main() {
       assert(html.drX.includes("7000002") && html.drY.includes(HN_Y_MATCH), "each doctor's own HNs");
       // the patient's name goes with the HN: every one for MX, a doctor's own case only, none for a nurse
       const patients = (page) => new Set(page.match(/ตัวอย่าง ผู้ป่วย\d+/g) ?? []);
-      assert(patients(html.mx).size >= 7, `MX sees the patients' names: ${[...patients(html.mx)]}`);
+      assert(patients(html.mx).size >= 6, `MX sees the patients' names: ${[...patients(html.mx)]}`);
       assert(patients(html.nurse).size === 0, "no patient's name in the nurse's page");
       assert(patients(html.drX).size === 1 && patients(html.drY).size === 1, `each doctor sees only their own patient's name: ${[...patients(html.drX)]} ${[...patients(html.drY)]}`);
       assert(!html.mx.includes("7000012"), "รพ.ท่าฉลอม's case is not on รพ.สมุทรสาคร's board");
@@ -4516,7 +4520,7 @@ async function main() {
       await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2026-11-17");
       await dialog.waitFor({ state: "hidden" });
       assert((await textOf(page, '[data-testid="board-eyebrow"]')) === "ตารางผ่าตัดวันนี้", "today's eyebrow");
-      assert((await page.locator("[data-notice-id]").count()) === 0, "Tuesday has its upload: no notice in the switch");
+      assert(JSON.stringify(await page.$$eval("[data-notice-id]", (els) => els.map((el) => el.dataset.noticeId))) === JSON.stringify(["no-room"]), "Tuesday has its upload: only the no-room notice (vascular and ENT have no room)");
       await ownerShot(page, "board-picked-day.png");
       // a room opened on the picked day keeps it, and shows that day's cases
       await page.goto(`${APP}/skh?date=2026-11-17&room=or-12`, { waitUntil: "networkidle" });
@@ -5043,8 +5047,8 @@ async function main() {
       const record = (id, more = {}) => ({
         id,
         admitDate: "2026-12-01",
-        operationStart: "2026-12-02T09:00:00",
-        operationEnd: "2026-12-02T11:00:00",
+        operationStart: "2026-12-03T09:00:00",
+        operationEnd: "2026-12-03T11:00:00",
         type: "Surgery",
         hn: "7300001",
         citizenId: "1100000000001",
@@ -5071,7 +5075,7 @@ async function main() {
       const created = await api("POST", "", record(501));
       assert(created.status === 201 && created.body.result === "created" && created.location === "/api/v1/calendar/cases/501", `created: ${created.status} ${created.text}`);
       const room = created.body.case.room;
-      assert(created.body.case.date === "2026-12-02" && created.body.case.start === "09:00" && created.body.case.end === "11:00" && /^OR \d+$/.test(room), created.text);
+      assert(created.body.case.date === "2026-12-03" && created.body.case.start === "09:00" && created.body.case.end === "11:00" && /^OR \d+$/.test(room), created.text);
       assert(created.body.ignored.includes("citizenId") && created.body.ignored.includes("fullName"), "the fields not read are named");
       for (const secret of ["7300001", "AVR", "1100000000001", "ทดลอง ปฏิทิน", "aortic"]) assert(!created.text.includes(secret), `${secret} in the answer`);
       const row = (await db.query("SELECT surgeon_id::text AS surgeon, hn, operation, note, line_sub, api_client, external_id::text AS ext FROM cases WHERE external_id = 501")).rows;
@@ -5080,11 +5084,11 @@ async function main() {
 
       // the board, for any viewer: the row says จากปฏิทิน
       const roomId = `or-${room.slice(3)}`;
-      const board = await htmlAs(RP.nurse, `/skh?date=2026-12-02&room=${roomId}`);
+      const board = await htmlAs(RP.nurse, `/skh?date=2026-12-03&room=${roomId}`);
       assert(board.status === 200 && board.html.includes('data-testid="row-via-calendar"') && board.html.includes("จากปฏิทิน"), "the badge on the board");
 
       // PUT moves it (the calendar's เลื่อนคิว); GET reads it; the list has it; DELETE cancels it
-      const moved = await api("PUT", "/501", record(501, { operationStart: "2026-12-02T13:00:00", operationEnd: "2026-12-02T15:00:00" }));
+      const moved = await api("PUT", "/501", record(501, { operationStart: "2026-12-03T13:00:00", operationEnd: "2026-12-03T15:00:00" }));
       assert(moved.status === 200 && moved.body.result === "updated" && moved.body.case.start === "13:00", `moved: ${moved.status} ${moved.text}`);
       assert((await api("GET", "/501")).body.case.status === "booked", "GET one");
       const listed = await api("GET", "?from=2026-12-01&to=2026-12-31");

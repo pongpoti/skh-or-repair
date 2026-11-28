@@ -48,7 +48,8 @@ test("the weekly schedule before and after the repair (Pong, 21 Nov 2026): the g
   // With the first half from 1 Jan 2026 a past day had the first half's rooms; after the repair the weekly schedule.
   assert.equal(room(input("ORTHO", { procedure: "Dressing wound" }), PAST_MONDAY), "or-10", "dressing");
   assert.equal(room(input("GENSX"), PAST_MONDAY), "or-12");
-  assert.equal(room(input("CVT"), PAST_MONDAY), "or-11", "no CVT room: the mixed room");
+  assert.equal(room(input("NEURO"), PAST_MONDAY), "or-11", "2nd Monday: NEURO's turn of the mixed room");
+  assert.equal(room(input("CVT"), PAST_MONDAY), "no-room", "CVT's turn is Thursday");
   assert.deepEqual(roomsHeldBy("GENSX", PAST_MONDAY, REPAIR), ["or-12"]);
   assert.equal(room(input("GENSX"), AFTER_MONDAY), "or-2");
   assert.equal(room(input("GENSX"), "2026-11-07"), "no-room", "Saturday");
@@ -122,8 +123,8 @@ test("chest medicine sets its cases in OR 4 on Mondays in the weekly schedule, t
   assert.equal(planned(input("CHEST"), "2026-11-10"), "no-room", "Tuesday: no room");
   assert.equal(planned(input("CHEST", { emergency: true }), PAST_MONDAY), "or-8", "an emergency still goes to OR 8");
   assert.equal(planned(input("CHEST", { procedure: "Dressing wound" }), PAST_MONDAY), "or-1");
-  assert.equal(room(input("CHEST"), FIRST_MONDAY), "or-11", "first half: the mixed room");
-  assert.equal(room(input("CHEST"), SECOND_MONDAY), "or-4", "second half: OR 4 is the mixed room");
+  assert.equal(room(input("CHEST"), FIRST_MONDAY), "no-room", "the repair: no turn of the mixed room for chest medicine");
+  assert.equal(room(input("CHEST"), SECOND_MONDAY), "no-room");
 });
 
 test("first half: the half's rooms, NEURO and CVT emergencies in OR 12 or 13, obstetrics off the board", () => {
@@ -132,7 +133,9 @@ test("first half: the half's rooms, NEURO and CVT emergencies in OR 12 or 13, ob
   assert.equal(room(input(null, { emergency: true }), FIRST_MONDAY), "or-9");
   assert.equal(room(input("NEURO", { emergency: true }), FIRST_MONDAY), "or-12", "OR 12 and 13 tie: the first");
   assert.equal(room(input("CVT", { emergency: true }), FIRST_MONDAY, { "or-12": 2, "or-13": 1 }), "or-13", "the fewest cases");
-  assert.equal(room(input("NEURO"), FIRST_MONDAY), "or-11", "not an emergency: no NEURO room, so the mixed room");
+  assert.equal(room(input("NEURO"), FIRST_MONDAY), "no-room", "not an emergency: 3rd Monday is URO's turn of the mixed room");
+  assert.equal(room(input("NEURO"), PAST_MONDAY), "or-11", "2nd Monday: NEURO's turn");
+  assert.equal(room(input("URO"), FIRST_MONDAY), "or-11");
   // No SCOPE room during the repair: a general surgeon's endoscopy in GENSX's room (Pong, 19 Nov 2026: "no more scope case")
   for (const procedure of ["EGD", "Colonoscope", "ERCP", "ERCP +-stent", "EUS"]) {
     assert.equal(room(input("GENSX", { procedure }), FIRST_MONDAY), "or-12", `${procedure}: GENSX's room`);
@@ -140,8 +143,8 @@ test("first half: the half's rooms, NEURO and CVT emergencies in OR 12 or 13, ob
   assert.equal(room(input("SCOPE", { procedure: "colonoscopy" }), FIRST_MONDAY), "or-12", "a SCOPE label: a general surgeon's");
   assert.equal(room(input("GENSX"), FIRST_MONDAY), "or-12");
   assert.equal(room(input("ORTHO"), FIRST_MONDAY), "or-13");
-  assert.equal(room(input("EYE"), FIRST_MONDAY), "or-11");
-  assert.equal(room(input("VASCULAR"), FIRST_MONDAY), "or-11");
+  assert.equal(room(input("EYE"), FIRST_MONDAY), "no-room", "no turn of the mixed room (Pong, 28 Nov 2026)");
+  assert.equal(room(input("VASCULAR"), FIRST_MONDAY), "no-room");
   assert.equal(room(input(null), FIRST_MONDAY), "no-department");
   for (const item of [input("OBGYN"), input("OBGYN", { emergency: true }), input("OBGYN", { procedure: "dressing" })]) {
     assert.equal(room(item, FIRST_MONDAY), "obgyn-building", JSON.stringify(item));
@@ -180,9 +183,9 @@ test("a department with no room that day is left off the board (Pong, 27 Nov 202
   assert.deepEqual(rooms([vx("A", { choice: "dept", bookedRoom: "or-9" })]), ["no-room"]);
   // The dressing and emergency cases keep their rooms.
   assert.deepEqual(rooms([vx("A", { operation: "Wound dressing" }), vx("A", { urgency: "Emergency" })]), ["or-1", "or-8"]);
-  // At the weekend no room; during the repair the mixed room, as before.
+  // At the weekend no room; during the repair neither: vascular surgery has no turn of the mixed room (28 Nov 2026).
   assert.equal(room(input("VASCULAR"), "2027-03-27"), "no-room", "Saturday");
-  assert.equal(room(input("VASCULAR"), FIRST_MONDAY), "or-11", "the repair's mixed room");
+  assert.equal(room(input("VASCULAR"), FIRST_MONDAY), "no-room", "no turn of the repair's mixed room");
 });
 
 test("a department with two rooms keeps each surgeon's cases in one room (Pong, 22 Nov 2026)", () => {
