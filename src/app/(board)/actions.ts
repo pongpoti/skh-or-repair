@@ -135,7 +135,7 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
     const earliest = firstBookingDay(admin, today, minutes, holidays);
     // CVT also books Sundays and holidays, in OR 13 (checkCase reads it only for them).
     const offFrom = firstOffDay(admin, today, minutes);
-    const checked = checkCase(input, { today, earliest, offFrom, periods, subtype: doctor.subtype, holidays, place, ahead });
+    const checked = checkCase(input, { today, earliest, offFrom, admin, periods, subtype: doctor.subtype, holidays, place, ahead });
     if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
     const value = checked.value;
 
@@ -149,7 +149,7 @@ async function bookAt(place: PlaceId, input: unknown): Promise<CaseResult> {
       const day = await listCasesOn(client, value.date, place);
       // A department with several rooms that day: the room of the doctor's own booking there, else the emptier one,
       // the one free at that time first. รพ.ท่าฉลอม gives a department one room a day.
-      const offDay = booksOffDays(doctor.subtype, place) && isOffDay(value.date, holidays);
+      const offDay = booksOffDays(doctor.subtype, place, admin) && isOffDay(value.date, holidays);
       const rooms = value.dressing || place !== "skh" || offDay ? [] : deptRooms(doctor.subtype, value.operation, value.date, periods);
       if (rooms.length > 1) value.roomId = roomAmong(rooms, doctor.id, value.date, day, periods, timeOf(value));
       await insertCase(client, doctor.id, user.sub, value);
@@ -207,12 +207,12 @@ export async function editCase(id: unknown, input: unknown): Promise<CaseResult>
     if (bookingState(booking.date, today, earliest) === "past") return { ok: false, error: PAST, mine: await mine() };
     if (await startedToday(pool, booking, today, doctor.id, periods)) return { ok: false, error: STARTED_TEXT, mine: await mine() };
     const editing = { ...booking, subtype: doctor.subtype };
-    const checked = checkCase(input, { today, earliest, offFrom, periods, subtype: doctor.subtype, holidays, editing, ahead });
+    const checked = checkCase(input, { today, earliest, offFrom, admin, periods, subtype: doctor.subtype, holidays, editing, ahead });
     if (!checked.ok) return { ok: false, error: checked.error, earliest: checked.earliest };
     const value = checked.value;
 
     // A closed day: only the note, saved alone (checkCase made sure nothing else changed).
-    const offFromHere = booksOffDays(doctor.subtype, place) ? offFrom : null;
+    const offFromHere = booksOffDays(doctor.subtype, place, admin) ? offFrom : null;
     if (value.date === booking.date && value.date < opensFrom(value.date, earliest, offFromHere, holidays)) {
       if (value.note === booking.note) return { ok: true, mine: await mine(), message: "ไม่มีอะไรเปลี่ยน" };
       if (!(await updateNote(pool, id, doctor.id, value.note))) return { ok: false, error: GONE, mine: await mine() };

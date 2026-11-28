@@ -8,7 +8,6 @@ import {
   atThaChalom,
   bookedRoom,
   bookingState,
-  booksOffDays,
   editClosesOn,
   opensFrom,
   NO_OPERATION_LABEL,
@@ -36,7 +35,10 @@ export type OwnBookings = {
   today: string;
   /** The first day that can be booked (lib/added-cases.ts earliestBookingDay): a day before it is closed for edits. */
   earliest: string;
-  /** The first Sunday or holiday that can be booked, for CVT (lib/added-cases.ts firstOffDay); null for everyone else. */
+  /**
+   * The first Sunday or holiday that can be booked (lib/added-cases.ts firstOffDay), for a doctor who books them (CVT, an
+   * admin: booksOffDays); null for everyone else.
+   */
   offFrom?: string | null;
   /** The holidays the 15:00 cut-off steps over, for when a booking closes (editClosesOn). */
   holidays: readonly Holiday[];
@@ -149,7 +151,7 @@ function Action({
  * 15:00 the day before it (opensFrom), any other at the 15:00 cut-off.
  */
 export function ownState(booking: Pick<AddedCase, "date" | "subtype" | "place">, own: Pick<OwnBookings, "today" | "earliest" | "offFrom" | "holidays">) {
-  const offFrom = own.offFrom != null && booksOffDays(booking.subtype, booking.place) ? own.offFrom : null;
+  const offFrom = own.offFrom != null && booking.place !== "tha-chalom" ? own.offFrom : null;
   return bookingState(booking.date, own.today, opensFrom(booking.date, own.earliest, offFrom, own.holidays));
 }
 
@@ -385,7 +387,7 @@ export function BookingSheet({
                   : fromCalendar
                     ? CALENDAR_TEXT
                     : state === "open"
-                      ? editDeadline(booking.date, own.today, own.holidays, own.offFrom != null && booksOffDays(booking.subtype, booking.place))
+                      ? editDeadline(booking.date, own.today, own.holidays, own.offFrom != null && booking.place !== "tha-chalom")
                       : NOTE_ONLY_TEXT}
               </p>
               {done ? (

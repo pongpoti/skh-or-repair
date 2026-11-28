@@ -1036,3 +1036,21 @@ test("a saved CVT Sunday or holiday booking stays in OR 13, and closes for edits
   assert.equal(editClosesOn("2026-11-22", "2026-11-22", [], true), null);
   assert.equal(editClosesOn("2026-11-23", "2026-11-18", [], true), "2026-11-20", "a Monday still closes Friday 15:00");
 });
+
+test("an admin books Sundays and holidays like CVT, in OR 13, whatever their department (Pong, 28 Nov 2026)", () => {
+  assert.ok(booksOffDays("ORTHO", "skh", true) && booksOffDays("GENSX", undefined, true));
+  assert.ok(!booksOffDays("ORTHO", "tha-chalom", true), "not at รพ.ท่าฉลอม");
+  assert.ok(!booksOffDays("ORTHO", "skh", false));
+  // Saturday 28 Nov 2026 at 16:00: an admin books from today, so Sunday 29 Nov is open.
+  const admin = { today: "2026-11-28", earliest: "2026-11-30", offFrom: "2026-11-28", subtype: "GENSX", holidays: DECEMBER, admin: true, ahead: 366 };
+  const sunday = check({ ...ok, date: "2026-11-29" }, admin);
+  assert.ok(sunday.ok);
+  assert.equal(sunday.value.roomId, "or-13", "OR 13, not GENSX's OR 12");
+  const holiday = check({ ...ok, date: "2026-12-10" }, admin);
+  assert.ok(holiday.ok);
+  assert.equal(holiday.value.roomId, "or-13");
+  const saturday = check({ ...ok, date: "2026-12-05" }, admin);
+  assert.ok(!saturday.ok);
+  assert.equal(saturday.code, "weekend", "Saturdays stay closed");
+  assert.equal(check({ ...ok, date: "2026-11-29" }, { ...admin, admin: false }).ok, false, "a GENSX doctor who is not an admin");
+});
