@@ -44,6 +44,8 @@ export type Department = {
   label: string;
   /** The department's colour in the report's schedule and floor plans. */
   color: string;
+  /** Other departments that share this turn of the room (PL+MX: maxillofacial beside plastic surgery). */
+  also?: readonly DeptCode[];
 };
 
 function dept(code: DeptCode, name: string, color: string, label: string = code): Department {
@@ -101,8 +103,25 @@ export const INSTRUMENT_ROOM = {
   ink: "#241C16",
 } as const;
 
+/**
+ * Plastic surgery and maxillofacial surgery holding one turn of the repair's mixed room together (Pong, 28 Nov 2026,
+ * "Plastic&Maxillo"): plastic's colour, both departments' cases.
+ */
+export const PLASTIC_MAXILLO: Department = {
+  code: "PLASTIC",
+  name: "ศัลยกรรมตกแต่ง · แม็กซิลโลเฟเชียล",
+  label: "PL+MX",
+  color: "#A85C52",
+  also: ["MAXILLO"],
+};
+
+/** Whether `dept` holds a turn for `code`'s cases (its own code, or a department sharing the turn). */
+export function holdsFor(dept: Department | null | undefined, code: DeptCode): boolean {
+  return !!dept && (dept.code === code || (dept.also?.includes(code) ?? false));
+}
+
 /** A department holding the room on a given day. `nth` limits it to those occurrences of the weekday in the month. */
-type Turn = { dept: DeptCode; nth?: readonly number[] };
+type Turn = { dept: DeptCode | Department; nth?: readonly number[] };
 /** Empty means the room is not allocated that day. */
 type Slot = readonly Turn[];
 /** Monday to Friday. */
@@ -147,6 +166,41 @@ const PLAN: Record<string, RoomPlan> = {
 const GUESTS: Partial<Record<DeptCode, Readonly<Record<string, readonly number[]>>>> = {
   CHEST: { "or-4": [0] },
 };
+
+/**
+ * The repair's mixed-department room (OR 11 in the first half, OR 4 in the second) by weekday (Pong, 28 Nov 2026,
+ * the same in both halves): Monday URO in weeks 1, 3 and 5, NEURO in weeks 2 and 4; Tuesday PEDSX in the morning, URO
+ * in the afternoon; Wednesday ENT in weeks 1, 3 and 5, plastic with maxillofacial in weeks 2 and 4; Thursday CVT;
+ * Friday plastic with maxillofacial in weeks 1, 3 and 5, ENT in weeks 2 and 4.
+ */
+const PL_MX: Slot = [{ dept: PLASTIC_MAXILLO }];
+const MIXED_ROTATION: RoomPlan = {
+  am: [weekTurns("URO", "NEURO"), one("PEDSX"), [{ dept: "ENT", nth: [1, 3, 5] }, { dept: PLASTIC_MAXILLO, nth: [2, 4] }], one("CVT"), [{ dept: PLASTIC_MAXILLO, nth: [1, 3, 5] }, { dept: "ENT", nth: [2, 4] }]],
+  pm: [weekTurns("URO", "NEURO"), one("URO"), [{ dept: "ENT", nth: [1, 3, 5] }, { dept: PLASTIC_MAXILLO, nth: [2, 4] }], one("CVT"), [{ dept: PLASTIC_MAXILLO, nth: [1, 3, 5] }, { dept: "ENT", nth: [2, 4] }]],
+};
+
+/**
+ * Days whose mixed-room turn differs from the week rule, as Pong's calendar of Dec 2569 – Apr 2570 has them: the
+ * Fridays of January 2027 run the other way round (1 Jan is a holiday), plastic with maxillofacial on 8 and 22 Jan, ENT
+ * on 15 and 29 Jan.
+ */
+const MIXED_DAYS: Readonly<Record<string, Slot>> = {
+  "2027-01-08": PL_MX,
+  "2027-01-15": one("ENT"),
+  "2027-01-22": PL_MX,
+  "2027-01-29": one("ENT"),
+};
+
+/** Who holds the repair's mixed-department room on `date`: the day's turn of the rotation (MIXED_ROTATION). */
+export function mixedRoomAllocation(date: string): RoomAllocation | null {
+  const day = weekdayIndex(date);
+  const nth = weekOfMonth(date);
+  if (day === null || nth === null || day > 4) return null;
+  const fixed = MIXED_DAYS[date];
+  const am = owner(fixed ?? MIXED_ROTATION.am[day], nth);
+  const pm = owner(fixed ?? MIXED_ROTATION.pm[day], nth);
+  return { am, pm, split: am?.label !== pm?.label, repair: true };
+}
 
 /** The rooms that take `code`'s cases on `date` as a guest in the weekly schedule (GUESTS), in number order. */
 export function weeklyGuestRooms(code: DeptCode, date: string): string[] {
@@ -193,7 +247,8 @@ function parseDate(iso: string): Date | null {
 
 function owner(slot: Slot, nth: number): Department | null {
   const turn = slot.find((item) => !item.nth || item.nth.includes(nth));
-  return turn ? DEPARTMENTS[turn.dept] : null;
+  if (!turn) return null;
+  return typeof turn.dept === "string" ? DEPARTMENTS[turn.dept] : turn.dept;
 }
 
 /**
@@ -213,6 +268,7 @@ export function allocationFor(roomId: string, date: string, periods: RepairPerio
   if (repair) {
     const use = repair.rooms[roomId];
     if (!use || use === "RR" || use === "INSTR") return null;
+    if (use === "MIXED") return mixedRoomAllocation(date);
     const dept = DEPARTMENTS[use];
     return { am: dept, pm: dept, split: false, repair: true };
   }

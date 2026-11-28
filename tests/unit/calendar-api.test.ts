@@ -464,9 +464,9 @@ describe("calendar API (database)", () => {
     delete process.env.BOT_HOLIDAYS_URL;
     forgetHolidayFeeds();
 
-    const workday = await post(at("2026-12-09T13:00:00", null, { id: 710, hn: "7300390" }));
+    const workday = await post(at("2026-12-17T13:00:00", null, { id: 710, hn: "7300390" }));
     assert.equal(workday.status, 201);
-    assert.notEqual(caseOf(workday).room, "OR 13", "a workday keeps CVT's room of the day");
+    assert.notEqual(caseOf(workday).room, "OR 13", "a workday (a Thursday, CVT's turn of the mixed room) keeps CVT's room of the day");
     const special = await post(at("2026-12-07T09:00:00", "2026-12-07T11:00:00", { id: 711, hn: "7300391" }));
     assert.deepEqual([special.status, caseOf(special).date, caseOf(special).room], [201, "2026-12-07", "OR 13"], "a BOT special holiday");
     const constitution = await post(at("2026-12-10T13:00:00", null, { id: 712, hn: "7300392" }));

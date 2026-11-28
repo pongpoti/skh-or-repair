@@ -102,7 +102,7 @@ const USERS_CSV = [
   "สมศักดิ์,เกษียณ,RN,OR",
   "กมล,ทองดี,DR,OBGYN",
   "ชัยวัฒน์,มีสุข,DR,GENSX",
-  "ณัฐพล,วงศ์ใหญ่,DR,NEPHRO",
+  "ณัฐพล,วงศ์ใหญ่,DR,URO",
   "สมใจ,ใจเย็น,DR,URO",
   "ปราณี,สายบุญ,RN,OR",
   "วิไล,แสงทอง,RN,ANES",
@@ -165,7 +165,7 @@ const RP = {
   drX: { phone: null, name: "ณัฐพล วงศ์ใหญ่", sub: "U00000000000000000000000000000dx1", userId: null },
   drY: { phone: null, name: "ชัยวัฒน์ มีสุข", sub: "U00000000000000000000000000000dy1", userId: null },
 };
-// The bookings' HNs (invented, 7 digits): doctor X (NEPHRO: the mixed room OR 11) books one for Monday and two for
+// The bookings' HNs (invented, 7 digits): doctor X (URO: the mixed room OR 11 on Monday 16 Nov, the 3rd Monday, and Tuesday afternoons) books one for Monday and two for
 // Tuesday (one typed with a dash, matching the workbook's 7000002; one a dressing HOSxP will not list); doctor Y
 // (GENSX: OR 12) books 7000015, which the workbook writes 007000015.
 const HN_TODAY = "7900001";
@@ -3471,7 +3471,7 @@ async function main() {
       await page.waitForSelector(`${dialog}[open]`);
       assert((await textOf(page, "#add-case-title")) === "จองห้องผ่าตัด", "dialog title");
       // the department on a line of its own, under the surgeon's name
-      assert((await textOf(page, '[data-testid="case-dept"]')) === "อายุรกรรมโรคไต", "the department line");
+      assert((await textOf(page, '[data-testid="case-dept"]')) === "ศัลยกรรมทางเดินปัสสาวะ", "the department line");
       assert((await dateValue(page, "case-date")) === "2026-11-16", "the form starts on Monday");
       assert((await textOf(page, '[data-testid="case-date"]')).includes("วันจันทร์ที่ 16 พฤศจิกายน 2569"), "the day written out in Thai");
       // the 15:00 rule in Pong's words, always, then the earliest day (Pong, 15 Nov 2026), a little larger than before
@@ -3497,7 +3497,7 @@ async function main() {
 
       // The day view (Pong, 27 Nov 2026: "select time (time range 8.30 to 15.30) on day view of calendar (just like in
       // google calendar app) then show form input"): the half hours from 08:30 to 15:30 of the room the doctor's choice
-      // gives that day (the nephrologist's department has no room of its own during the repair: the mixed room OR 11).
+      // gives that day (urology's turn of the mixed room OR 11 that Monday, Pong 28 Nov 2026).
       // It is behind the ระบุเวลา switch, off to start with (Pong, 27 Nov 2026: "Add toggle time input : disable as
       // default"): no time, said in the footer.
       const toggle = `${dialog} [data-testid="case-time-toggle"]`;

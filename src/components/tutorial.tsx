@@ -11,7 +11,7 @@ import { Mascot, talkFor, type MascotMood } from "@/components/mascot";
 import { SuiteBoard, type BoardView, type CaseAdding } from "@/components/suite-board";
 import { TopBar } from "@/components/top-bar";
 import { bookedMessage, bookingChange, checkCase, daySlots, editedMessage, type AddedCase } from "@/lib/added-cases";
-import { allocationFor, DEPARTMENTS, INSTRUMENT_ROOM, readableTextOn, RECOVERY_ROOM, type Department } from "@/lib/allocation";
+import { allocationFor, DEPARTMENTS, INSTRUMENT_ROOM, PLASTIC_MAXILLO, readableTextOn, RECOVERY_ROOM, type Department } from "@/lib/allocation";
 import { boardNotices } from "@/lib/board-notices";
 import { thaiDate } from "@/lib/days";
 import type { Holiday } from "@/lib/holidays";
@@ -1507,7 +1507,7 @@ function PlanSymbolsCard({ day, periods, onNext }: { day: string; periods: Repai
         <Key symbol={<NoTableIcon size={22} />}>ยังไม่มีตาราง HOSxP ของวันนั้น</Key>
       </ul>
       <p className="coach-card-note">
-        {DEPARTMENTS.EMER.label} ห้องฉุกเฉิน · {DEPARTMENTS.INFECT.label} ห้องทำแผล · {DEPARTMENTS.MIXED.label} ห้องคละแผนก
+        {DEPARTMENTS.EMER.label} ห้องฉุกเฉิน · {DEPARTMENTS.INFECT.label} ห้องทำแผล · {PLASTIC_MAXILLO.label} ศัลยกรรมตกแต่งกับแม็กซิลโลเฟเชียล
       </p>
       <div className="coach-card-actions">
         <button type="button" className="btn btn-primary w-full" onClick={onNext} data-testid="coach-next">

@@ -111,7 +111,10 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   const SECOND = "2027-01-27"; // the second half: OR 1 D/S, 2 ORTHO, 3 EMER, 4 mixed, 5 GENSX
   assert.deepEqual(room("GENSX", "Lap chole", FIRST), { ok: true, roomId: "or-12", dressing: false });
   assert.deepEqual(room("ORTHO", "ORIF radius", FIRST), { ok: true, roomId: "or-13", dressing: false });
-  for (const subtype of ["URO", "NEURO", "CVT", "ENT"]) assert.deepEqual(room(subtype, "x", FIRST), { ok: true, roomId: "or-11", dressing: false }, `${subtype}: the mixed room`);
+  // The mixed room by its weekday rotation (Pong, 28 Nov 2026): the 3rd Monday is URO's; the others have no room then.
+  assert.deepEqual(room("URO", "x", FIRST), { ok: true, roomId: "or-11", dressing: false }, "URO's turn of the mixed room");
+  for (const subtype of ["NEURO", "CVT", "ENT", "EYE"]) assert.equal(room(subtype, "x", FIRST).ok, false, `${subtype}: no turn that day`);
+  assert.deepEqual(room("CVT", "x", "2026-11-19"), { ok: true, roomId: "or-11", dressing: false }, "CVT's Thursday");
   // The repair has no SCOPE room: a general surgeon's endoscopy is in GENSX's room like the rest (Pong, 19 Nov 2026).
   assert.deepEqual(room("GENSX", "EGD", FIRST), { ok: true, roomId: "or-12", dressing: false }, "an endoscopy in GENSX's room");
   // In the weekly schedule it is the SCOPE room's, OR 3, as the workbook's (Pong, 21 Nov 2026: "Move scope cases to scope
@@ -120,9 +123,10 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   assert.deepEqual(room("GENSX", "Lap chole", "2027-03-22"), { ok: true, roomId: "or-2", dressing: false }, "the rest of the list in GENSX's room");
   assert.deepEqual(room("URO", "Colonoscopy", "2027-03-22"), { ok: true, roomId: "or-7", dressing: false }, "only a general surgeon's");
   assert.deepEqual(room("GENSX", "Lap chole", SECOND), { ok: true, roomId: "or-5", dressing: false });
-  assert.deepEqual(room("EYE", "Phaco", SECOND), { ok: true, roomId: "or-4", dressing: false });
+  assert.deepEqual(room("PLASTIC", "STSG", SECOND), { ok: true, roomId: "or-4", dressing: false }, "the 4th Wednesday: PLASTIC + MAXILLO's turn");
+  assert.equal(room("EYE", "Phaco", SECOND).ok, false, "EYE has no turn of the mixed room");
   // No weekly schedule (Pong, 18 Nov 2026): a day before 16 Nov has the first half's rooms too.
-  assert.deepEqual(room("URO", "TURP", "2026-11-11"), { ok: true, roomId: "or-11", dressing: false }, "the first half's mixed room");
+  assert.deepEqual(room("URO", "TURP", "2026-11-02"), { ok: true, roomId: "or-11", dressing: false }, "the first half's mixed room");
   // an empty name still shows the department's room in the form
   assert.deepEqual(room("ORTHO", "", FIRST), { ok: true, roomId: "or-13", dressing: false });
   // Chest medicine has no period of its own: OR 4 on Mondays in the weekly schedule (21 Nov 2026), no room other days
@@ -130,7 +134,7 @@ test("OR X: the department's room that day, by the workbook's rules, whatever th
   assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-22"), { ok: true, roomId: "or-4", dressing: false });
   assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-23"), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" });
   assert.deepEqual(room("CHEST", "Bronchoscopy", "2027-03-27"), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" });
-  assert.deepEqual(room("CHEST", "Bronchoscopy", FIRST), { ok: true, roomId: "or-11", dressing: false }, "the repair's mixed room");
+  assert.deepEqual(room("CHEST", "Bronchoscopy", FIRST), { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" }, "no turn of the repair's mixed room");
   // the surgeon decides (Pong, 15 Nov 2026): a name that reads like a dressing stays in the department's room
   for (const name of ["D/S + VAC", "Debridement", "I&D abscess", "Wound dressing"]) {
     assert.deepEqual(room("ORTHO", name, FIRST), { ok: true, roomId: "or-13", dressing: false }, name);
@@ -170,7 +174,7 @@ test("no room: obstetrics-gynaecology during the repair, an unknown department, 
   assert.equal(refused("OBGYN", "TAH", "2027-03-18"), "or-6", "after the repair: the weekly schedule's obstetric room");
   assert.equal(refused(null, "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
   assert.equal(refused("", "Lap chole", "2026-11-16"), "ยังไม่มีสาขาของคุณในระบบ ติดต่อผู้ดูแล");
-  assert.equal(refused("ANES", "Lap chole", "2026-11-16"), "or-11", "a subtype the suite has no department for: the mixed room");
+  assert.equal(refused("ANES", "Lap chole", "2026-11-16"), "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น", "a subtype the suite has no department for: no turn of the mixed room");
   assert.equal(refused("GENSX", "Lap chole", "2026-11-21"), "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น", "a Saturday");
 });
 
@@ -477,7 +481,7 @@ test("a department with no room that day books none (Pong, 27 Nov 2026: in place
   const NO_ROOM = { ok: false, reason: "no-room", error: "ไม่มีห้องของสาขาคุณในวันที่เลือก เลือกวันอื่น" };
   assert.deepEqual(bookingRoom("VASCULAR", "EVLA", TUESDAY, P, "dept"), NO_ROOM);
   assert.deepEqual(deptRooms("VASCULAR", "EVLA", TUESDAY, P), []);
-  assert.deepEqual(bookingRoom("VASCULAR", "EVLA", "2026-12-14", P, "dept"), { ok: true, roomId: "or-11", dressing: false }, "the repair's mixed room");
+  assert.deepEqual(bookingRoom("VASCULAR", "EVLA", "2026-12-14", P, "dept"), NO_ROOM, "the repair: no turn of the mixed room (Pong, 28 Nov 2026)");
   // A booking saved in a borrowed room before stays there (bookedRoom keeps the saved room when none can be worked out).
   const saved: AddedCase = {
     patientName: "",
@@ -985,8 +989,10 @@ test("checkCase: a CVT booking of a Sunday or holiday goes to OR 13; everyone el
   assert.ok(!monday.ok);
   assert.deepEqual([monday.code, monday.earliest], ["date_too_early", "2026-11-24"], "the next open day after it");
   const tuesday = check({ ...ok, date: "2026-11-24" }, cvt);
-  assert.ok(tuesday.ok);
-  assert.equal(tuesday.value.roomId, "or-11", "a workday: CVT's room of the day");
+  assert.ok(!tuesday.ok, "a workday that is not CVT's turn of the mixed room");
+  const thursday = check({ ...ok, date: "2026-11-26" }, cvt);
+  assert.ok(thursday.ok);
+  assert.equal(thursday.value.roomId, "or-11", "a workday: CVT's room of the day (Thursday's turn of the mixed room)");
   const holiday = check({ ...ok, date: "2026-12-10" }, cvt);
   assert.ok(holiday.ok);
   assert.equal(holiday.value.roomId, "or-13", "a weekday holiday: OR 13, not the mixed room");

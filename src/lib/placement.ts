@@ -1,4 +1,4 @@
-import { allocationFor, weeklyGuestRooms, type DeptCode } from "./allocation.ts";
+import { allocationFor, holdsFor, weeklyGuestRooms, type DeptCode } from "./allocation.ts";
 import { isDressingOperation } from "./dressing.ts";
 import { repairOn, type RepairPeriods } from "./repair.ts";
 import { isOpenRoom } from "./rooms.ts";
@@ -80,7 +80,7 @@ export function roomsHeldBy(code: DeptCode, date: string, periods: RepairPeriods
     const id = `or-${n}`;
     if (!isOpenRoom(id, date, periods)) continue;
     const allocation = allocationFor(id, date, periods);
-    if (allocation?.am?.code === code || allocation?.pm?.code === code) rooms.push(id);
+    if (holdsFor(allocation?.am, code) || holdsFor(allocation?.pm, code)) rooms.push(id);
   }
   return rooms;
 }
@@ -107,8 +107,9 @@ const unplaced = (reason: UnplacedReason): { ok: false; reason: UnplacedReason }
  *
  * During the repair (`periods`, lib/repair.ts), with the half's rooms: obstetrics-gynaecology is not placed at all
  * (it operates in the obstetric building); dressing cases use the dressing room; emergencies the emergency room, NEURO
- * and CVT the half's own rooms for them; departments with no room of their own the mixed-department room; anything
- * else its department's room.
+ * and CVT the half's own rooms for them; anything else its department's room, which for departments with no room of
+ * their own is the mixed-department room on their turn of its weekday rotation (lib/allocation.ts MIXED_ROTATION). On
+ * any other day such a case has no room and is left off the board, as in the weekly schedule.
  *
  * The repair has no SCOPE room, so a general surgeon's endoscopy goes to the GENSX room like the rest of their list then
  * (Pong, 19 Nov 2026: "no more scope case", after a colonoscopy showed in the mixed room).
@@ -155,9 +156,10 @@ export function candidateRooms(input: PlaceInput, date: string, periods: RepairP
   // The dressing room takes dressing cases only.
   let rooms = roomsHeldBy(dept, date, periods).filter((room) => !dressing.includes(room));
   if (rooms.length === 0 && !repair) rooms = weeklyGuestRooms(dept, date).filter((room) => isOpenRoom(room, date, periods));
-  if (rooms.length === 0) rooms = roomsHeldBy("MIXED", date, periods);
-  // The weekly schedule has no mixed room: a department with no room that day (a vascular surgeon on a Monday) has none
-  // (Pong, 27 Nov 2026: "Leave off board and display on noti bar"). The repair always has its mixed room.
+  // A department with no room that day has none, in the weekly schedule (a vascular surgeon on a Monday; Pong, 27 Nov
+  // 2026: "Leave off board and display on noti bar") and during the repair, whose mixed-department room takes only the
+  // day's turn of its rotation (MIXED_ROTATION in lib/allocation.ts; Pong, 28 Nov 2026: "Off the board + notice", so
+  // EYE, VASCULAR, NEPHRO and CHEST, which have no turn, have no room).
   return rooms.length > 0 ? pool(rooms) : unplaced("no-room");
 }
 
