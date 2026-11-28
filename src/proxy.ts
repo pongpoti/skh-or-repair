@@ -13,7 +13,7 @@ import { UNAVAILABLE_PATH, unavailablePath } from "@/lib/unavailable";
 
 /**
  * Runs before every request except static build assets and a few public files (see matcher):
- * 1. canonical-host redirect (production only)
+ * 1. canonical-host redirect (production only; not for the Telegram webhook and the calendar API)
  * 2. CSRF origin check for non-GET requests
  * 3. per-request CSP nonce
  * 4. device gate (lib/gate.ts): on Vercel, a phone outside the LIFF app in LINE (or a client that is no browser) gets
@@ -81,9 +81,12 @@ export async function proxy(req: NextRequest) {
     app = null; // misconfigured: nothing below can authenticate anyone
   }
 
-  // 1. Canonical host (e.g. a deployment URL -> APP_URL).
+  // 1. Canonical host (e.g. a deployment URL or the former skh-or-repair.vercel.app -> APP_URL).
   //    Target is always APP_URL's origin + the same path, so this is not an open redirect.
-  if (app && process.env.VERCEL_ENV === "production" && req.headers.get("host") !== app.host) {
+  //    Server-to-server calls are served on any host instead: a client following a 308 to another host drops the
+  //    Authorization header (the calendar API's key), and Telegram does not follow redirects at all.
+  const serverToServer = pathname === TELEGRAM_WEBHOOK_PATH || isCalendarApiPath(pathname);
+  if (app && process.env.VERCEL_ENV === "production" && req.headers.get("host") !== app.host && !serverToServer) {
     // Path/query are assigned on a URL fixed to APP_URL's origin; leading "//" is collapsed so
     // the Location can never become protocol-relative (Next may relativize same-host redirects).
     const target = new URL(app.origin);
@@ -95,7 +98,6 @@ export async function proxy(req: NextRequest) {
   // 2. CSRF: any state-changing method must come from our own origin (except the server-to-server calls: Telegram's
   //    webhook and the calendar API, whose routes check their own secret).
   const method = req.method.toUpperCase();
-  const serverToServer = pathname === TELEGRAM_WEBHOOK_PATH || isCalendarApiPath(pathname);
   if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS" && !serverToServer) {
     if (!app || !isSameOrigin(req.headers, app.origin)) {
       return NextResponse.json({ error: app ? "ทำรายการไม่สำเร็จ โหลดหน้าใหม่แล้วลองอีกครั้ง" : "ระบบยังไม่พร้อม ติดต่อผู้ดูแล" }, { status: 403, headers: { "Cache-Control": "no-store" } });
