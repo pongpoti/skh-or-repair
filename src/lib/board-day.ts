@@ -119,7 +119,7 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * The day picked in the board's address (?date=YYYY-MM-DD), or null when none is given or it cannot be shown: not a
  * real day, outside pickRange, or a weekend or holiday (the suite runs no list then, and the calendar never offers one),
- * unless it is one of `openDays`: a Sunday or holiday that CVT booked (lib/added-cases.ts booksOffDays).
+ * unless it is one of `openDays`: a weekend day or holiday that CVT booked (lib/added-cases.ts booksOffDays).
  */
 export function pickedDay(
   value: unknown,

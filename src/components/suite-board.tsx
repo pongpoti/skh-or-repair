@@ -60,7 +60,7 @@ export type CaseAdding = {
   /** The first day the doctor can book (lib/added-cases.ts firstBookingDay), by the server's clock. */
   earliest: string;
   /**
-   * The first Sunday or holiday the doctor can book (lib/added-cases.ts firstOffDay), for CVT at รพ.สมุทรสาคร, who books
+   * The first weekend day or holiday the doctor can book (lib/added-cases.ts firstOffDay), for CVT at รพ.สมุทรสาคร, who books
    * them in OR 13; null or left out for everyone else.
    */
   offFrom?: string | null;

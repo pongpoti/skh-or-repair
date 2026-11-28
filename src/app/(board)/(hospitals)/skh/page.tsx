@@ -70,7 +70,7 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
         today: day.today,
         // An admin books from today at any hour, a year ahead (Pong, 27 Nov 2026: "No restriction").
         earliest: firstBookingDay(isAdmin(user.sub), day.today, day.minutes, holidays),
-        // CVT and admins book Sundays and holidays too, in OR 13 (Pong, 28 Nov 2026).
+        // CVT and admins book weekends and holidays too, in OR 13 (Pong, 28 Nov 2026).
         offFrom: booksOffDays(doctor.subtype, "skh", isAdmin(user.sub)) ? firstOffDay(isAdmin(user.sub), day.today, day.minutes) : null,
         admin: isAdmin(user.sub),
         holidays,
@@ -128,7 +128,7 @@ export default async function BoardPage({
   // holidays it closes: the address of a picked day is checked against them.
   const range = pickRange(day.today, periods);
   const [{ holidays: closed, unlisted }, booked] = await Promise.all([holidaysBetween(range.min, range.max), bookedDays(range.min, range.max)]);
-  // The Sundays and holidays CVT booked (OR 13, Pong, 28 Nov 2026): the picker offers them too.
+  // The weekends and holidays CVT booked (OR 13, Pong, 28 Nov 2026): the picker offers them too.
   const openDays = booked.filter((iso) => isOffDay(iso, closed));
   // Another day picked on the board (?date=YYYY-MM-DD, Pong, 15 Nov 2026), when it is one the picker offers; else the
   // board's own day. Picking the board's own day is the same as picking none.

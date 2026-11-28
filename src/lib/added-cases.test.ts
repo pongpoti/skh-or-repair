@@ -940,12 +940,12 @@ test("an admin books with no time limits: today at any hour, a year ahead (Pong,
 
 // Pong, 28 Nov 2026: "There is room booking exception for CVT. They can book on sunday and special holiday. The app
 // automatically assign to OR13."
-test("CVT books Sundays and holidays (not Saturdays) at รพ.สมุทรสาคร, in OR 13", () => {
+test("CVT books weekends and holidays at รพ.สมุทรสาคร, in OR 13 (Pong: \"Sat is considered holiday\")", () => {
   assert.ok(booksOffDays("CVT") && booksOffDays("CVT", "skh"));
   assert.ok(!booksOffDays("CVT", "tha-chalom") && !booksOffDays("GENSX") && !booksOffDays(null));
   assert.ok(isOffDay("2026-11-22", []), "a Sunday");
-  assert.ok(!isOffDay("2026-11-21", []), "a Saturday");
-  assert.ok(!isOffDay("2026-12-05", [{ date: "2026-12-05", name: "วันพ่อแห่งชาติ" }]), "a Saturday holiday stays closed");
+  assert.ok(isOffDay("2026-11-21", []), "a Saturday");
+  assert.ok(isOffDay("2026-12-05", [{ date: "2026-12-05", name: "วันพ่อแห่งชาติ" }]), "a Saturday holiday");
   assert.ok(isOffDay("2026-12-10", DECEMBER) && isOffDay("2026-12-07", DECEMBER), "weekday holidays");
   assert.ok(!isOffDay("2026-12-11", DECEMBER), "a workday");
 
@@ -959,8 +959,8 @@ test("CVT books Sundays and holidays (not Saturdays) at รพ.สมุทร�
   assert.equal(firstOffDay(false, "2026-11-20", at(14)), "2026-11-21");
   assert.equal(firstOffDay(false, "2026-11-21", at(15)), "2026-11-23");
   assert.equal(firstOffDay(true, "2026-11-22", at(20)), "2026-11-22");
-  // Friday 14:00: the Sunday, then Monday; Friday 15:30: Sunday, then (Monday closed) Tuesday.
-  assert.equal(firstOpenDay("2026-11-23", "2026-11-21", []), "2026-11-22");
+  // Friday 14:00: Saturday; Friday 15:30: Sunday, then (Monday closed) Tuesday.
+  assert.equal(firstOpenDay("2026-11-23", "2026-11-21", []), "2026-11-21");
   assert.equal(firstOpenDay("2026-11-24", "2026-11-22", []), "2026-11-22");
   assert.equal(firstOpenDay("2026-11-24", null, []), "2026-11-24", "anyone else: the first workday");
   assert.equal(opensFrom("2026-11-22", "2026-11-24", "2026-11-22", []), "2026-11-22");
@@ -970,7 +970,7 @@ test("CVT books Sundays and holidays (not Saturdays) at รพ.สมุทร�
   // The calendar: Sundays and holidays open for CVT, Saturdays closed.
   assert.equal(closedDayNote("2026-11-22", [], true), null);
   assert.equal(closedDayNote("2026-12-10", DECEMBER, true), null);
-  assert.equal(closedDayNote("2026-11-21", [], true), "วันเสาร์");
+  assert.equal(closedDayNote("2026-11-21", [], true), null, "Saturdays too");
   assert.equal(closedDayNote("2026-11-22", []), "วันเสาร์-อาทิตย์", "anyone else");
   assert.match(OFF_DAY_RULE, /OR 13/);
 });
@@ -991,8 +991,11 @@ test("checkCase: a CVT booking of a Sunday or holiday goes to OR 13; everyone el
   assert.ok(holiday.ok);
   assert.equal(holiday.value.roomId, "or-13", "a weekday holiday: OR 13, not the mixed room");
   const saturday = check({ ...ok, date: "2026-11-28" }, cvt);
-  assert.ok(!saturday.ok);
-  assert.equal(saturday.code, "weekend");
+  assert.ok(saturday.ok);
+  assert.equal(saturday.value.roomId, "or-13", "a Saturday: OR 13");
+  const closedSaturday = check({ ...ok, date: "2026-11-21" }, cvt);
+  assert.ok(!closedSaturday.ok);
+  assert.deepEqual([closedSaturday.code, closedSaturday.earliest], ["date_too_early", "2026-11-22"], "Friday 15:30 closes Saturday");
   const dressing = check({ ...ok, date: "2026-11-22", room: "dressing", scrubDoes: true }, cvt);
   assert.ok(!dressing.ok);
   assert.equal(dressing.code, "no_dressing_room", "no dressing room on a Sunday");
@@ -1050,7 +1053,7 @@ test("an admin books Sundays and holidays like CVT, in OR 13, whatever their dep
   assert.ok(holiday.ok);
   assert.equal(holiday.value.roomId, "or-13");
   const saturday = check({ ...ok, date: "2026-12-05" }, admin);
-  assert.ok(!saturday.ok);
-  assert.equal(saturday.code, "weekend", "Saturdays stay closed");
+  assert.ok(saturday.ok);
+  assert.equal(saturday.value.roomId, "or-13", "a Saturday too");
   assert.equal(check({ ...ok, date: "2026-11-29" }, { ...admin, admin: false }).ok, false, "a GENSX doctor who is not an admin");
 });

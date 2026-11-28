@@ -260,19 +260,19 @@ export function cleanNote(v: string): string {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// Sundays and holidays (Pong, 28 Nov 2026: "There is room booking exception for CVT. They can book on sunday and special
+// weekends and holidays (Pong, 28 Nov 2026: "There is room booking exception for CVT. They can book on sunday and special
 // holiday. The app automatically assign to OR13.")
 
-/** The department whose doctors book Sundays and holidays too, at รพ.สมุทรสาคร. */
+/** The department whose doctors book weekends and holidays too, at รพ.สมุทรสาคร. */
 export const OFF_DAY_DEPT = "CVT";
 /** The room such a booking goes to. */
 export const OFF_DAY_ROOM = "or-13";
 
-/** What the booking form says under the date to someone who books Sundays and holidays (booksOffDays). */
-export const OFF_DAY_RULE = "จองวันอาทิตย์และวันหยุดได้ ที่ OR 13";
+/** What the booking form says under the date to someone who books weekends and holidays (booksOffDays). */
+export const OFF_DAY_RULE = "จองวันเสาร์-อาทิตย์และวันหยุดได้ ที่ OR 13";
 
 /**
- * Whether a doctor of `subtype` books Sundays and holidays at `place` (รพ.สมุทรสาคร when left out): CVT there, and an
+ * Whether a doctor of `subtype` books weekends and holidays at `place` (รพ.สมุทรสาคร when left out): CVT there, and an
  * admin of any department (Pong, 28 Nov 2026: "Allow admin to book like cvt").
  */
 export function booksOffDays(subtype: string | null | undefined, place?: PlaceId, admin = false): boolean {
@@ -280,18 +280,15 @@ export function booksOffDays(subtype: string | null | undefined, place?: PlaceId
 }
 
 /**
- * A day the suite runs no elective list that CVT may book: a Sunday, or a holiday from Monday to Friday. Saturdays stay
- * closed, holiday or not (Pong named Sunday only).
+ * A day the suite runs no elective list that CVT may book: any day that is not a workday, so Saturdays, Sundays and
+ * holidays (Pong, 28 Nov 2026: "CVT is allowable to book all holidays. Sat is considered holiday").
  */
 export function isOffDay(iso: string, holidays: readonly Holiday[]): boolean {
-  const [y, m, d] = iso.split("-").map(Number);
-  const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-  if (weekday === 6) return false;
-  return weekday === 0 || holidayIn(holidays, iso) !== null;
+  return !isWorkday(iso, holidays);
 }
 
 /**
- * The room a Sunday or holiday booking goes to on `date`: OR 13 whenever it is in use for operations, else (the repair's
+ * The room a weekend day or holiday booking goes to on `date`: OR 13 whenever it is in use for operations, else (the repair's
  * second half, which closes OR 7 to 13) the half's CVT emergency room, OR 2. Null when neither is open.
  */
 export function offDayRoom(date: string, periods: RepairPeriods): string | null {
@@ -301,7 +298,7 @@ export function offDayRoom(date: string, periods: RepairPeriods): string | null 
 }
 
 /**
- * The first Sunday or holiday someone can book, at `minutes` past midnight on `today`: such a day closes at 15:00 the day
+ * The first weekend day or holiday someone can book, at `minutes` past midnight on `today`: such a day closes at 15:00 the day
  * before it, as a workday does (from 15:00 the day after tomorrow, else tomorrow); for an admin today, whatever the hour.
  * It counts only for a day that isOffDay; the first workday stays earliestBookingDay.
  */
@@ -311,7 +308,7 @@ export function firstOffDay(admin: boolean, today: string, minutes: number): str
 }
 
 /**
- * The first day `date` itself could be booked from: `offFrom` (firstOffDay) for a Sunday or holiday when the doctor books
+ * The first day `date` itself could be booked from: `offFrom` (firstOffDay) for a weekend day or holiday when the doctor books
  * them (offFrom not null), else `earliest`. A day before it is closed, for a new booking and for an edit.
  */
 export function opensFrom(date: string, earliest: string, offFrom: string | null, holidays: readonly Holiday[]): string {
@@ -319,7 +316,7 @@ export function opensFrom(date: string, earliest: string, offFrom: string | null
 }
 
 /**
- * The first day that can be booked at all: `earliest`, or a Sunday or holiday before it from `offFrom` on (Friday 14:00
+ * The first day that can be booked at all: `earliest`, or a weekend day or holiday before it from `offFrom` on (Friday 14:00
  * gives a CVT doctor the Sunday).
  */
 export function firstOpenDay(earliest: string, offFrom: string | null, holidays: readonly Holiday[]): string {
@@ -395,11 +392,10 @@ export function earliestText(today: string, earliest: string, holidays: readonly
 
 /**
  * Why a day cannot be booked in the calendar, or null when it can (the earliest day and the 60 days aside). With
- * `offDays` (booksOffDays) Sundays and holidays are open, and only Saturdays closed.
+ * `offDays` (booksOffDays) weekends and holidays are open too.
  */
 export function closedDayNote(iso: string, holidays: readonly Holiday[], offDays = false): string | null {
   if (offDays && isOffDay(iso, holidays)) return null;
-  if (offDays && workdayIndex(iso) === null) return "วันเสาร์";
   if (workdayIndex(iso) === null) return "วันเสาร์-อาทิตย์";
   return holidayIn(holidays, iso)?.name ?? null;
 }
@@ -483,7 +479,7 @@ export function placeBookingRoom(
   choice: RoomChoice,
   offDay = false,
 ): BookingRoom {
-  // `offDay`: the caller checked the doctor books Sundays and holidays (booksOffDays) and the day is one.
+  // `offDay`: the caller checked the doctor books weekends and holidays (booksOffDays) and the day is one.
   if (offDay && place !== "tha-chalom") return offDayBooking(date, periods, choice);
   if (place !== "tha-chalom") return bookingRoom(subtype, operation, date, periods, choice);
   if (choice === "dressing") return noRoom("no-dressing-room");
@@ -494,7 +490,7 @@ export function placeBookingRoom(
 }
 
 /**
- * The room of a CVT booking on a Sunday or holiday (offDayRoom, OR 13), whatever the day's plan gives the department; the
+ * The room of a CVT booking on a weekend day or holiday (offDayRoom, OR 13), whatever the day's plan gives the department; the
  * dressing room runs no list then.
  */
 function offDayBooking(date: string, periods: RepairPeriods, choice: RoomChoice): BookingRoom {
@@ -628,7 +624,7 @@ export function bookedRoom(
   // รพ.ท่าฉลอม's table has no repair to move rooms: a booking stays in the room it was saved in.
   if (atThaChalom(booking)) return { roomId: booking.roomId, dressing: false };
   const choice = bookedChoice(booking, periods);
-  // A CVT booking of a Sunday or holiday stays in the room it was given (offDayRoom), which the day's plan may give
+  // A CVT booking of a weekend day or holiday stays in the room it was given (offDayRoom), which the day's plan may give
   // another department (a holiday) or none (a Sunday).
   if (choice === "dept" && booksOffDays(booking.subtype, booking.place) && booking.roomId === offDayRoom(booking.date, periods)) {
     return { roomId: booking.roomId, dressing: false };
@@ -743,7 +739,7 @@ export function editRequeues(
  * mornings open it again until 15:00), so the sheet always names the next moment it closes. Null past `date`.
  */
 export function editClosesOn(date: string, today: string, holidays: readonly Holiday[] = [], offDays = false): string | null {
-  // A CVT booking of a Sunday or holiday closes at 15:00 the day before (firstOffDay).
+  // A CVT booking of a weekend day or holiday closes at 15:00 the day before (firstOffDay).
   if (offDays && isOffDay(date, holidays)) {
     const before = addDays(date, -1);
     return before >= today ? before : null;
@@ -797,11 +793,11 @@ export type BookingContext = {
   /** How many days ahead may be booked (bookAheadDays): BOOK_AHEAD_DAYS when left out. */
   ahead?: number;
   /**
-   * The first Sunday or holiday that can be booked (firstOffDay), for a doctor who books them (booksOffDays: CVT at
-   * รพ.สมุทรสาคร); ignored for everyone else. Left out, Sundays and holidays stay closed.
+   * The first weekend day or holiday that can be booked (firstOffDay), for a doctor who books them (booksOffDays: CVT at
+   * รพ.สมุทรสาคร); ignored for everyone else. Left out, weekends and holidays stay closed.
    */
   offFrom?: string;
-  /** An admin, who books Sundays and holidays too, whatever their department (booksOffDays). */
+  /** An admin, who books weekends and holidays too, whatever their department (booksOffDays). */
   admin?: boolean;
   /**
    * The doctor's own booking being edited, when the input is its new state (editCase): its own day needs none of a new
@@ -838,13 +834,13 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
   // An edit that keeps its booking's day: the day was checked when it was booked. Its day closed meanwhile (15:00 the day
   // before passed): only the note may change, as MX has the day's list.
   const keepsDay = editing !== undefined && date === editing.date;
-  // CVT at รพ.สมุทรสาคร books Sundays and holidays too, in OR 13 (booksOffDays).
+  // CVT at รพ.สมุทรสาคร books weekends and holidays too, in OR 13 (booksOffDays).
   const offFrom = booksOffDays(subtype, place, context.admin) && context.offFrom ? context.offFrom : null;
   const offDay = offFrom !== null && isOffDay(date, holidays);
   const closed = keepsDay && date < opensFrom(date, earliest, offFrom, holidays);
   if (!keepsDay) {
     if (date < opensFrom(date, earliest, offFrom, holidays)) {
-      // The first day open after the one asked for: a Sunday or holiday before the first workday, for CVT.
+      // The first day open after the one asked for: a weekend day or holiday before the first workday, for CVT.
       let first = firstOpenDay(earliest, offFrom, holidays);
       if (first <= date) first = firstOpenDay(earliest, addDays(date, 1), holidays);
       return refuse("date_too_early", "date", earliestText(today, first, holidays), { earliest: first });
@@ -852,7 +848,7 @@ export function checkCase(input: unknown, context: BookingContext): CheckedCase 
     const ahead = context.ahead ?? BOOK_AHEAD_DAYS;
     if (date > addDays(today, ahead)) return refuse("date_too_far", "date", `จองล่วงหน้าได้ไม่เกิน ${ahead} วัน`);
     if (!offDay) {
-      if (workdayIndex(date) === null) return refuse("weekend", "date", offFrom ? "วันเสาร์ไม่มีผ่าตัด เลือกวันอื่น" : "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
+      if (workdayIndex(date) === null) return refuse("weekend", "date", "เสาร์-อาทิตย์ไม่มีผ่าตัด เลือกวันอื่น");
       const holiday = holidayIn(holidays, date);
       if (holiday) return refuse("holiday", "date", `วันหยุด (${holiday.name}) เลือกวันอื่น`);
     }

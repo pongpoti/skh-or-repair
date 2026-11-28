@@ -36,7 +36,7 @@ export type OwnBookings = {
   /** The first day that can be booked (lib/added-cases.ts earliestBookingDay): a day before it is closed for edits. */
   earliest: string;
   /**
-   * The first Sunday or holiday that can be booked (lib/added-cases.ts firstOffDay), for a doctor who books them (CVT, an
+   * The first weekend day or holiday that can be booked (lib/added-cases.ts firstOffDay), for a doctor who books them (CVT, an
    * admin: booksOffDays); null for everyone else.
    */
   offFrom?: string | null;
@@ -147,7 +147,7 @@ function Action({
 }
 
 /**
- * Where the doctor's own booking stands (lib/added-cases.ts bookingState): a CVT booking of a Sunday or holiday closes at
+ * Where the doctor's own booking stands (lib/added-cases.ts bookingState): a CVT booking of a weekend day or holiday closes at
  * 15:00 the day before it (opensFrom), any other at the 15:00 cut-off.
  */
 export function ownState(booking: Pick<AddedCase, "date" | "subtype" | "place">, own: Pick<OwnBookings, "today" | "earliest" | "offFrom" | "holidays">) {
