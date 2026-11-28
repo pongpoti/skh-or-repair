@@ -4,7 +4,6 @@ import { AdminBar } from "@/components/admin-bar";
 import { MxMembers } from "@/components/mx-members";
 import { RepairPeriodsForm } from "@/components/repair-periods-form";
 import { StaffList } from "@/components/staff-list";
-import { TestModeSection } from "@/components/test-mode-section";
 import { todayIso } from "@/lib/days";
 import { DEFAULT_REPAIR_PERIODS } from "@/lib/repair";
 import { roleLabel, subtypeLabel, type UserType } from "@/lib/user-labels";
@@ -55,7 +54,6 @@ export default function PreviewAdminPage() {
           <RepairPeriodsForm initial={{ periods: DEFAULT_REPAIR_PERIODS, changed: null, fallback: false, today: todayIso() }} />
           <MxMembers initial={{ members, users: PREVIEW_USERS }} />
           <StaffList initial={PREVIEW_STAFF} />
-          <TestModeSection href="/preview?notices=all" />
         </div>
       </main>
     </div>

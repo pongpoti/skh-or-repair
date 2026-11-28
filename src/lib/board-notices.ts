@@ -7,8 +7,8 @@ import { shortThaiDate } from "./repair.ts";
  * HOSxP file yet for the board's day ("remove วันหยุด badge, it is unnecessary", and the โหลดไม่สำเร็จ and ไม่ตรง badges
  * too). Since 27 Nov 2026 a second: HOSxP cases no room takes that day ("Leave off board and display on noti bar for
  * both places"). Each is a badge in the middle of the strip; a tap opens its full message as a chat bubble. The repair
- * needs no notice: the plan's own "พื้นที่ปิดซ่อม" zone shows it. The demo schedule has a badge of its own
- * (DEMO_NOTICE), for admins only.
+ * needs no notice: the plan's own "พื้นที่ปิดซ่อม" zone shows it. The tutorial's made-up day has a badge of its own
+ * (lib/tutorial.ts TUTORIAL_NOTICE).
  */
 
 /** Where the notices go: a slot beside the board's own hospital in the bar's switch (components/place-tabs.tsx). */
@@ -23,12 +23,13 @@ export type NoticeTone = "neutral" | "alert";
 export type NoticeIcon = "no-table" | "flask" | "no-room";
 
 export type BoardNotice = {
-  id: "demo" | "sim" | "no-upload" | "no-room";
+  /** "demo" is the tutorial's made-up day. */
+  id: "demo" | "no-upload" | "no-room";
   tone: NoticeTone;
   icon: NoticeIcon;
   /** The whole message in one line: the badge's text when it is alone, and the bubble's title. */
   text: string;
-  /** The badge's text when several badges share the strip (only with the demo's). */
+  /** The badge's text when several badges share the strip. */
   short: string;
   /** A number the chip shows beside its icon (the no-room cases), when the notice has one. */
   count?: number;
@@ -83,40 +84,13 @@ export function boardNotices({
 
 /**
  * Every kind of notice at once, for seeing how the strip looks with all of them (Pong, 15 Nov 2026: "Test mode: show me
- * all possible notification badges stacked within noti bar"): an admin's /?notices=all, and the preview's. Since 27 Nov
- * 2026 the two badges, the no-room one with made-up counts.
+ * all possible notification badges stacked within noti bar"): the development preview's ?notices=all (an admin's
+ * /?notices=all went on 28 Nov 2026 with the โหมดทดสอบ section). Since 27 Nov 2026 the two badges, the no-room one with
+ * made-up counts.
  */
 export function everyNotice(date: string): BoardNotice[] {
   return boardNotices({ missingUpload: date, offBoard: [{ dept: "VASCULAR", count: 2 }, { dept: null, count: 1 }] });
 }
-
-/**
- * The first badge of the demo schedule (lib/demo-schedule.ts), an admin's /?demo=1, so the made-up cases are never
- * taken for the day's real list.
- */
-export const DEMO_NOTICE: BoardNotice = {
-  id: "demo",
-  tone: "neutral",
-  icon: "flask",
-  text: "ตารางตัวอย่าง · เคสสมมติ ไม่ใช่ข้อมูลจริง",
-  short: "ตารางตัวอย่าง",
-  detail: "เคสสมมติ ไม่ได้บันทึก ไม่กระทบการจองจริง แตะโลโก้เพื่อกลับตารางจริง",
-  testId: "demo-notice",
-};
-
-/**
- * The first badge of the simulated bookings (lib/sim-bookings.ts), an admin's /?sim=1: the day's real HOSxP list with
- * made-up bookings, so they are never taken for the doctors' own.
- */
-export const SIM_NOTICE: BoardNotice = {
-  id: "sim",
-  tone: "neutral",
-  icon: "flask",
-  text: "การจองจำลอง · จองสมมติจากเคส HOSxP จริง",
-  short: "การจองจำลอง",
-  detail: "การจองสมมติจากรายการ HOSxP ของวันนั้น ไม่ได้บันทึก ไม่กระทบการจองจริง แตะโลโก้เพื่อกลับตารางจริง",
-  testId: "sim-notice",
-};
 
 /** A badge's text: the whole message when it is alone in the strip, its short form when there are several. */
 export function badgeText(notice: BoardNotice, count: number): string {

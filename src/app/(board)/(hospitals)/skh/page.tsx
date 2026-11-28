@@ -8,19 +8,15 @@ import { isAdmin } from "@/lib/admin";
 import { profileFor } from "@/lib/auth/display-name";
 import { requestPath, requireUser } from "@/lib/auth/server";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickedDay, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
-import { boardNotices, DEMO_NOTICE, everyNotice, SIM_NOTICE, type BoardNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
 import { doctorFor, listCasesBy, listCasesOn } from "@/lib/cases";
 import { now } from "@/lib/clock";
 import { db } from "@/lib/db";
-import { demoBoardRows, demoDay } from "@/lib/demo-schedule";
 import { holidaysBetween } from "@/lib/holidays";
 import { formatPhone } from "@/lib/phone";
-import { BOARD_PATH } from "@/lib/places";
 import type { RepairPeriods } from "@/lib/repair";
 import { currentRepairPeriods } from "@/lib/repair-store";
 import { boardViewer } from "@/lib/roles";
-import { simulatedBookings } from "@/lib/sim-bookings";
 import type { SessionUser } from "@/lib/tokens";
 import { TUTORIAL_COOKIE } from "@/lib/tutorial";
 import { tutorialSeen } from "@/lib/tutorial-store";
@@ -95,59 +91,11 @@ async function loadBoard(user: SessionUser, day: BoardDay, periods: RepairPeriod
   }
 }
 
-/**
- * The demo schedule's board (lib/demo-schedule.ts): made-up cases in every open room of the day, through the board's own
- * rules, seen as an admin sees a day (every HN). Nothing is read from or written to the database, and there is no
- * booking form, so a booking can never be made from made-up rows. Its badge comes first in the strip.
- */
-function demoBoard(day: BoardDay, periods: RepairPeriods): { board: BoardView; notices: BoardNotice[] } {
-  const built = demoBoardRows(day.boardDate, periods, { allHn: true, userId: null });
-  const board: BoardView = {
-    date: day.boardDate,
-    rows: built.rows,
-    uploaded: built.uploaded,
-    mismatchCount: built.mismatchCount,
-    mismatchByRoom: built.mismatchByRoom,
-  };
-  return { board, notices: [DEMO_NOTICE] };
-}
-
-/**
- * The simulated bookings' board (lib/sim-bookings.ts; Pong, 22 Nov 2026): the day's stored HOSxP list with bookings
- * made up from it, through the board's own rules, seen as an admin sees a day (every HN). The day's real bookings are
- * not read and nothing is written, and there is no booking form. Its badge comes first in the strip; a day with no list
- * has the no-upload badge after it. Null on a database problem, as loadBoard.
- */
-async function simBoard(day: BoardDay, periods: RepairPeriods): Promise<{ board: BoardView; notices: BoardNotice[] } | null> {
-  try {
-    const workbook = await workbookForDay(await db(), day.boardDate);
-    const cases = workbook?.cases ?? null;
-    const bookings = cases ? simulatedBookings(cases, day.boardDate, periods) : [];
-    const built = buildBoardRows({ date: day.boardDate, periods, workbook: cases, bookings, viewer: { allHn: true, userId: null } });
-    const board: BoardView = {
-      date: day.boardDate,
-      rows: built.rows,
-      uploaded: built.uploaded,
-      mismatchCount: built.mismatchCount,
-      mismatchByRoom: built.mismatchByRoom,
-      offBoard: built.offBoard,
-    };
-    return { board, notices: [SIM_NOTICE, ...boardNotices({ missingUpload: cases ? null : day.boardDate, offBoard: built.offBoard })] };
-  } catch (error) {
-    console.error("[board] simulated bookings unavailable:", (error as Error).message);
-    return null;
-  }
-}
-
 export default async function BoardPage({
   searchParams,
 }: {
   searchParams: Promise<{
     room?: string;
-    notices?: string;
-    demo?: string | string[];
-    sim?: string | string[];
-    half?: string | string[];
     date?: string | string[];
   }>;
 }) {
@@ -172,36 +120,17 @@ export default async function BoardPage({
   // board's own day. Picking the board's own day is the same as picking none.
   const picked = pickedDay(params.date, day.today, periods, closed);
   const admin = isAdmin(user.sub);
-  // /admin opens the demo schedule for a half (?half=1 or 2): it goes on as the day of that half the board shows, so the
-  // address holds only the day from then on, and the date picker moves between days of the demo as on the board.
-  if (params.demo === "1" && admin && (params.half === "1" || params.half === "2")) {
-    const shown = demoDay(params.half === "1" ? 1 : 2, { today: day.today, boardDate: day.boardDate, max: range.max, periods, holidays: closed });
-    // A half with no day left (over, or only a weekend or holidays to go) goes back to /admin, where its button now
-    // says so by the same rule, rather than to a day of the other half.
-    redirect(!shown ? "/admin" : shown !== day.boardDate ? `${BOARD_PATH}?demo=1&date=${shown}` : `${BOARD_PATH}?demo=1`);
-  }
   const view: BoardDay =
     picked && picked !== day.boardDate ? { ...day, boardDate: picked, relation: relationTo(picked, day.today) } : day;
-  // The demo schedule, for admins only (Pong, 15 Nov 2026): /?demo=1 fills every room of the day shown with made-up
-  // cases (/admin opens it on a day of either half; the date picker keeps it on). Anyone else gets the real board.
-  // The simulated bookings, for admins only (Pong, 22 Nov 2026): /?sim=1 shows the day's real HOSxP list with bookings
-  // made up from it (/admin opens it on 1 Oct 2026; the date picker and the swipe keep it on).
-  const demoOn = params.demo === "1" && admin;
-  const simOn = !demoOn && params.sim === "1" && admin;
-  const demo = demoOn ? demoBoard(view, periods) : simOn ? await simBoard(view, periods) : null;
-  const loaded =
-    demoOn || simOn ? demo && { board: demo.board, adding: null, canUpload: true, tutorialDue: false } : await loadBoard(user, view, periods, view !== day);
+  // The admin's demo schedule (?demo=1), simulated bookings (?sim=1) and test notices (?notices=all) went on 28 Nov 2026
+  // (Pong: "On admin setting: remove ตารางตัวอย่าง การจองจำลอง and โหมดทดสอบ"): such an address shows the real board.
+  const loaded = await loadBoard(user, view, periods, view !== day);
   // Outside the try of loadBoard: redirect() works by throwing.
   if (!loaded) redirect(unavailablePath("server", await requestPath()));
   // Someone who has not seen the tutorial yet starts there, once (components/tutorial.tsx): starting or skipping it
   // notes it seen.
   if (loaded.tutorialDue) redirect("/tutorial?first=1");
   const { board, adding, canUpload } = loaded;
-  // Test mode, for admins only (Pong, 15 Nov 2026): /?notices=all puts every kind of notice in the strip at once, to see
-  // how they look together. Anyone else gets the board's own notices; the rooms and bookings are the real ones.
-  // The demo's own badge stays first whatever else the strip shows, so made-up cases are never taken for real ones.
-  const allNotices = params.notices === "all" && admin ? everyNotice(view.boardDate) : null;
-  const testNotices = demo ? [demo.notices[0], ...(allNotices ?? demo.notices.slice(1))] : (allNotices ?? undefined);
   // The days the top bar's calendar offers, which a swipe across the plan moves between too.
   const datePick = { today: day.today, current: day.boardDate, ...range, holidays: closed, unlisted };
 
@@ -232,7 +161,6 @@ export default async function BoardPage({
         periods={periods}
         roomId={params.room ?? null}
         adding={adding}
-        notices={testNotices}
         swipe={datePick}
       />
     </div>

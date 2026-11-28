@@ -6,7 +6,6 @@ import { TopBar } from "@/components/top-bar";
 import { boardEyebrow, loadBoardDay, nextBoardRefresh, pickRange, relationTo, type BoardDay } from "@/lib/board-day";
 import { everyNotice } from "@/lib/board-notices";
 import { buildBoardRows } from "@/lib/board-rows";
-import { demoBoardRows } from "@/lib/demo-schedule";
 import { addDays, parseDay, todayIso, weekDates } from "@/lib/days";
 import { holidaysBetween } from "@/lib/holidays";
 import { currentRepairPeriods } from "@/lib/repair-store";
@@ -37,8 +36,6 @@ function fixedDay(date: string, time: string | undefined, today: string | undefi
  * - ?holiday=วันปิยมหาราช shows the closed day (no badge in the strip since 16 Nov 2026).
  * - ?sample=1 adds made-up HOSxP cases and bookings (preview/sample.ts) to see the row icons, flags and room marks;
  *   with ?upload=0 the bookings alone, as before MX uploads.
- * - ?demo=1 fills every open room with the admin's demo schedule (lib/demo-schedule.ts, ten or more made-up cases a
- *   room), as an admin sees it: a long list for the room's sheet and its full screen card.
  * - ?account=1 shows the account menu behind the avatar.
  * - ?mx=1 shows the board as MX sees it (every HN, the upload button); otherwise as the sample's doctor, who sees the
  *   HN of their own bookings. ?admin=1 adds the admin button.
@@ -69,7 +66,6 @@ export default async function PreviewPage({
     dept?: string;
     time?: string;
     today?: string;
-    demo?: string;
   }>;
 }) {
   if (process.env.NODE_ENV !== "development") notFound();
@@ -99,15 +95,13 @@ export default async function PreviewPage({
   const bookings = params.book
     ? [...sample.bookings.filter((item) => item.surgeonId !== SAMPLE_DOCTOR_ID), ...mine].sort((a, b) => (a.bookedAt ?? "").localeCompare(b.bookedAt ?? ""))
     : sample.bookings;
-  const built = params.demo
-    ? demoBoardRows(day.boardDate, periods, { allHn: true, userId: null })
-    : buildBoardRows({
-        date: day.boardDate,
-        periods,
-        workbook: params.sample && params.upload !== "0" ? sample.workbook : null,
-        bookings,
-        viewer: { allHn: Boolean(params.mx), userId: params.mx ? null : SAMPLE_DOCTOR_ID },
-      });
+  const built = buildBoardRows({
+    date: day.boardDate,
+    periods,
+    workbook: params.sample && params.upload !== "0" ? sample.workbook : null,
+    bookings,
+    viewer: { allHn: Boolean(params.mx), userId: params.mx ? null : SAMPLE_DOCTOR_ID },
+  });
   const board: BoardView | null = holiday
     ? null
     : { date: day.boardDate, rows: built.rows, uploaded: built.uploaded, mismatchCount: built.mismatchCount, mismatchByRoom: built.mismatchByRoom };
