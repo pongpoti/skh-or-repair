@@ -33,8 +33,8 @@ export function placeHref(href: string, pickedDate: string | null): string {
   return pickedDate ? `${href}?date=${pickedDate}` : href;
 }
 
-/** The board's own address keys (a room, a day, the admins' test modes). */
-const BOARD_KEYS = ["room", "date", "demo", "sim", "half", "notices"] as const;
+/** The board's own address keys (a room, a day; the admins' test modes went on 28 Nov 2026). */
+const BOARD_KEYS = ["room", "date"] as const;
 
 /**
  * Where `/` goes: รพ.สมุทรสาคร's board. An address of the board from before 26 Nov 2026, `/?date=…` or `/?room=…` (a

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { badgeText, boardNotices, bubblePlace, DEMO_NOTICE, everyNotice } from "./board-notices.ts";
+import { badgeText, boardNotices, bubblePlace, everyNotice } from "./board-notices.ts";
+import { TUTORIAL_NOTICE } from "./tutorial.ts";
 
 test("no notice when the board's day has its HOSxP table: the strip stays empty", () => {
   assert.deepEqual(boardNotices({ missingUpload: null }), []);
@@ -19,7 +20,7 @@ test("the one notice (Pong, 16 Nov 2026): no HOSxP table yet, with the database-
   assert.ok(noUpload.detail.includes("15:00–16:00"), "the bubble says when MX uploads");
 });
 
-test("test mode's every notice is the two badges: no holiday, load failure or mismatch badges", () => {
+test("the preview's every notice is the two badges: no holiday, load failure or mismatch badges", () => {
   const ids = everyNotice("2026-11-16").map((notice) => notice.id);
   assert.deepEqual(ids, ["no-upload", "no-room"]);
 });
@@ -45,11 +46,11 @@ test("the no-room notice: the HOSxP cases no room takes that day, per department
   assert.doesNotMatch(JSON.stringify(noRoom), /HN|\d{6,}/);
 });
 
-test("a badge says the whole message alone and its short form with others (the demo's)", () => {
+test("a badge says the whole message alone and its short form with others (the tutorial's)", () => {
   const [notice] = boardNotices({ missingUpload: "2026-11-16" });
   assert.equal(badgeText(notice, 1), "ยังไม่มีตาราง HOSxP ของ 16 พ.ย. 2569");
   assert.equal(badgeText(notice, 2), "ยังไม่มี HOSxP");
-  assert.ok(DEMO_NOTICE.short.length < DEMO_NOTICE.text.length);
+  assert.ok(TUTORIAL_NOTICE.short.length < TUTORIAL_NOTICE.text.length);
 });
 
 test("the bubble: centred on its badge, kept inside the strip, its tail on the badge", () => {

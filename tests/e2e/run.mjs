@@ -1524,11 +1524,12 @@ async function main() {
 
       // / and the board's address from before (a link kept in a chat) go on to the board at /skh
       const session = await cookie(ctxA, "session");
-      for (const [from, to] of [["/?room=or-7", "/skh?room=or-7"], ["/?date=2026-12-03&room=or-12", "/skh?date=2026-12-03&room=or-12"], ["/?demo=1&half=2", "/skh?demo=1&half=2"]]) {
+      for (const [from, to] of [["/?room=or-7", "/skh?room=or-7"], ["/?date=2026-12-03&room=or-12", "/skh?date=2026-12-03&room=or-12"]]) {
         const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
         assert(r.status === 307 && r.location === to, `${from} -> ${r.status} ${r.location}`);
       }
-      for (const from of ["/", "/?utm_source=line"]) {
+      // the admins' old test modes went on 28 Nov 2026 (Pong: "remove ตารางตัวอย่าง การจองจำลอง and โหมดทดสอบ")
+      for (const from of ["/", "/?utm_source=line", "/?demo=1&half=2"]) {
         const r = await rawRequest(from, { host: `localhost:${APP_PORT}`, cookie: `session=${session.value}` });
         assert(r.status === 307 && r.location === "/skh", `${from} -> ${r.status} ${r.location}`);
       }
@@ -2230,37 +2231,15 @@ async function main() {
         await page.keyboard.press("Escape");
         await menu.waitFor({ state: "hidden" });
       }
-      // Test mode (Pong, 15 Nov 2026): the admin page links to the board with every kind of notice in the strip at once
-      assert(adminHtml.includes('href="/skh?notices=all"'), "the admin page links to the test notices");
+      // No test modes since 28 Nov 2026 (Pong: "On admin setting: remove ตารางตัวอย่าง การจองจำลอง and โหมดทดสอบ"): the
+      // admin page links to none, and their old addresses show an admin the real board, with its own notices only
+      for (const gone of ["notices=all", "demo=1", "sim=1", "ตารางตัวอย่าง", "การจองจำลอง", "โหมดทดสอบ"]) assert(!adminHtml.includes(gone), `the admin page has no ${gone}`);
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto(`${APP}/skh?notices=all`, { waitUntil: "networkidle" });
+      await page.goto(`${APP}/skh?notices=all&demo=1&sim=1`, { waitUntil: "networkidle" });
       const kinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      // since 16 Nov 2026 ยังไม่มีตาราง HOSxP (Pong: no วันหยุด, โหลดไม่สำเร็จ or ไม่ตรง badges), since 27 Nov 2026 the
-      // cases no room takes too ("Leave off board and display on noti bar for both places"), with made-up counts
-      assert(JSON.stringify(kinds) === JSON.stringify(["no-upload", "no-room"]), `every notice: ${JSON.stringify(kinds)}`);
-      // a chip each in the switch: the no-room one shows its count beside its icon, its whole message for screen readers
-      assert((await plainText(page, '[data-testid="no-room-alert"] .notice-badge-count')) === "3", `the no-room chip's count: ${await plainText(page, '[data-testid="no-room-alert"]')}`);
-      assert((await plainText(page, '[data-testid="no-room-alert"] .sr-only')) === "3 เคสไม่มีห้องผ่าตัด", "the no-room chip's spoken name");
-      assert((await page.locator('[data-testid="place-tab"][aria-current="page"] [data-testid="notice-strip"]').count()) === 1, "the chips in the board's own hospital");
-      assert((await page.locator('[data-testid="no-room-alert"] svg[data-icon="no-room"]').count()) === 1, "the no-room badge's icon");
-      await noSideScroll(page, "the test notices at 390px");
-      for (const [file, open] of [["board-test-notices.png", null], ["board-test-notices-open.png", "no-upload"], ["board-test-notices-no-room.png", "no-room"]]) {
-        if (open) {
-          if (await page.isVisible('[data-testid="notice-bubble"]')) {
-            await page.keyboard.press("Escape");
-            await page.locator('[data-testid="notice-bubble"]').waitFor({ state: "detached" });
-          }
-          await page.click(`[data-notice-id="${open}"]`);
-          await page.waitForSelector('[data-testid="notice-bubble"]');
-          await page.waitForTimeout(400);
-        }
-        if (open === "no-room") {
-          const bubble = await plainText(page, '[data-testid="notice-bubble"]');
-          assert(bubble.includes("3 เคสไม่มีห้องผ่าตัด") && bubble.includes("ศัลยกรรมหลอดเลือด 2 เคส · ไม่ทราบสาขา 1 เคส"), `the no-room bubble: ${bubble}`);
-        }
-        await page.screenshot({ path: join(SCREENS, file) });
-        shots.push(file);
-      }
+      // no HOSxP list yet that day: at most the board's own no-table notice, never every kind at once
+      assert(kinds.every((kind) => kind === "no-upload"), `the board's own notice only: ${JSON.stringify(kinds)}`);
+      assert(!(await page.content()).includes("ตัวอย่าง หนึ่ง"), "no made-up cases");
       await ctx.close();
     });
 
@@ -3009,14 +2988,14 @@ async function main() {
       page.on("pageerror", (e) => errors.push(e.message));
       await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
       // Every section is closed to start with (Pong, 16 Nov 2026: "make them collapsed by default and disable any button
-      // when on collapsed"): its body hidden, and the buttons in its heading (เพิ่ม MX, the test notices) greyed out and inert.
+      // when on collapsed"): its body hidden, and the buttons in its heading (เพิ่ม MX, เพิ่มชื่อ) greyed out and inert.
       const sections = await page.$$eval("main section[data-open]", (els) =>
         els.map((el) => [el.querySelector("h2")?.textContent?.trim(), el.dataset.open, el.querySelector("[id$='-body']")?.checkVisibility() ?? null]),
       );
       assert(
         JSON.stringify(sections) ===
           JSON.stringify(
-            ["ตารางผ่าตัดและช่วงปิดซ่อม", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ตารางตัวอย่าง", "ล้างตาราง HOSxP", "การจองจำลอง", "โหมดทดสอบ"].map((title) => [
+            ["ตารางผ่าตัดและช่วงปิดซ่อม", "ผู้จัดการตาราง (MX)", "รายชื่อทั้งหมด", "ล้างตาราง HOSxP"].map((title) => [
               title,
               "false",
               false,
@@ -3028,7 +3007,7 @@ async function main() {
         els.map((el) => [el.dataset.testid, el.inert, [...el.querySelectorAll("a, button")].length]),
       );
       assert(
-        JSON.stringify(inertActions) === JSON.stringify([["mx-actions", true, 1], ["staff-actions", true, 1], ["test-mode-actions", true, 1]]),
+        JSON.stringify(inertActions) === JSON.stringify([["mx-actions", true, 1], ["staff-actions", true, 1]]),
         `the headings' buttons are inert while closed: ${JSON.stringify(inertActions)}`,
       );
       assert(!(await page.isVisible('[data-testid="repair-save"]')), "nothing of a closed section's body shows");
@@ -4258,22 +4237,6 @@ async function main() {
       assert((await page.locator("[data-notice-id]").count()) === 0, "uploaded: no notice in the switch");
       // nor an admin who is not a doctor
       assert((await page.locator('[data-testid="add-case-button"]').count()) === 0, "no booking button for an admin who is not a DR");
-      // test mode is for admins only: on a day with its upload, a non-admin's /?notices=all has no false "no table" badge
-      // or room icon
-      {
-        const viewer = await contextAs(RP.nurse);
-        const other = await viewer.newPage();
-        await other.goto(`${APP}/skh?notices=all&room=or-12`, { waitUntil: "networkidle" });
-        await other.waitForSelector(".sheet-head h2");
-        assert((await other.locator("[data-notice-id]").count()) === 0, "no test notices for a non-admin");
-        assert((await other.locator('[data-testid="room-no-table"]').count()) === 0, "no room icon for a non-admin");
-        await viewer.close();
-        // and an admin's does show both, the room's icon too
-        await page.goto(`${APP}/skh?notices=all&room=or-12`, { waitUntil: "networkidle" });
-        await page.waitForSelector('[data-testid="room-no-table"]');
-        assert((await page.locator('[data-notice-id="no-upload"]').count()) === 1, "an admin's test notice");
-        await page.goto(`${APP}/skh`, { waitUntil: "networkidle" });
-      }
       // HOSxP's cases nobody booked, but not the dressing room's; the booking HOSxP does not list is off the board
       for (const [room, flagged] of [["or-10", false], ["or-11", true], ["or-12", true], ["or-13", false]]) {
         const label = (await page.getAttribute(`#${room} .fp-floor`, "aria-label")) ?? "";
@@ -5608,117 +5571,7 @@ async function main() {
       rmSync(NOW_FILE, { force: true });
     });
 
-    await t("admin: the demo schedule on /admin: at least 10 made-up cases in every room of a day in either half, nothing saved; admins only", async () => {
-      // Monday 10:00: the board shows Monday, in the repair's first half (14 Nov 2026 – 26 Jan 2027)
-      setNow("2026-11-16T10:00:00+07:00");
-      const counts = async () => (await db.query("SELECT (SELECT count(*) FROM cases)::int AS c, (SELECT count(*) FROM workbook_cases)::int AS w, (SELECT count(*) FROM workbook_uploads)::int AS u")).rows[0];
-      const before = await counts();
-      const ctx = await contextAs(RP.admin);
-      const page = await ctx.newPage();
-      const errors = [];
-      page.on("pageerror", (e) => errors.push(e.message));
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
-      const section = page.locator('[data-testid="demo-section"]');
-      // closed to start with, like every section: the half buttons show once it is opened
-      assert(!(await page.isVisible('[data-testid="demo-half-1"]')), "the demo section starts closed");
-      await openSection(page, "demo");
-      assert((await textOf(page, "#demo-title")) === "ตารางตัวอย่าง", "the section's title");
-      const half = (n) => page.locator(`[data-testid="demo-half-${n}"]`);
-      assert((await half(1).getAttribute("href")) === "/skh?demo=1&half=1" && (await half(2).getAttribute("href")) === "/skh?demo=1&half=2", "a link for each half");
-      assert((await half(1).innerText()).replace(/\s+/g, " ") === "ครึ่งแรก 1 ม.ค. 2569 – 26 ม.ค. 2570", `the first half: ${await half(1).innerText()}`);
-      assert((await half(2).innerText()).replace(/\s+/g, " ") === "ครึ่งหลัง 27 ม.ค. 2570 – 17 มี.ค. 2570", `the second half: ${await half(2).innerText()}`);
-      for (const n of [1, 2]) assert(((await half(n).boundingBox())?.height ?? 0) >= 44, "44px targets");
-      await noSideScroll(page, "the admin page with the demo section at 390px");
-      await section.scrollIntoViewIfNeeded();
-      await section.screenshot({ path: join(SCREENS, "admin-demo.png") });
-      shots.push("admin-demo.png");
-
-      // the rooms of the day shown, each opened by its address: at least 10 cases, all made up
-      const roomRows = async (room, date) => {
-        await page.goto(`${APP}/skh?demo=1${date ? `&date=${date}` : ""}&room=${room}`, { waitUntil: "networkidle" });
-        await page.waitForSelector(".case-row");
-        return page.$$eval(".case-row", (rows) => rows.map((row) => row.innerText));
-      };
-      const checkDay = async (date, rooms) => {
-        for (const room of rooms) {
-          const rows = await roomRows(room, date);
-          assert(rows.length >= 10 && rows.length <= 12, `${room}: ${rows.length} cases`);
-          assert(rows.every((text) => text.includes("ตัวอย่าง")), `${room}: made-up surgeons`);
-        }
-      };
-
-      // ครึ่งแรก: the board's own day, Monday, so the address keeps no date
-      await half(1).click();
-      await page.waitForURL((url) => url.pathname === "/skh" && url.search === "?demo=1");
-      assert((await page.getAttribute("header time", "datetime")) === "2026-11-16", "the first half's demo is the board's own day");
-      assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "1", "the first half's plan");
-      const kinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      assert(JSON.stringify(kinds) === JSON.stringify(["demo"]), `the demo's badge alone: ${JSON.stringify(kinds)}`);
-      await ownerShot(page, "board-demo-first-half.png");
-      await page.click('[data-notice-id="demo"]');
-      await page.waitForSelector('[data-testid="notice-bubble"]');
-      assert((await textOf(page, "#board-notice-bubble-title")) === "ตารางตัวอย่าง · เคสสมมติ ไม่ใช่ข้อมูลจริง", "the badge says it is made up");
-      await page.waitForTimeout(400);
-      await ownerShot(page, "board-demo-notice.png");
-      await checkDay(null, ["or-9", "or-10", "or-11", "or-12", "or-13"]);
-      await ownerShot(page, "board-demo-room.png");
-      // the demo's dressing room, OR 10: who does each dressing, the doctor and the scrub both
-      await roomRows("or-10", null);
-      const doers = await rowIcons(page);
-      assert(doers.includes("scrub") && doers.includes("surgeon") && doers.every((who) => who === "scrub" || who === "surgeon"), `OR 10: ${JSON.stringify(doers)}`);
-      await ownerShot(page, "board-demo-dressing.png");
-      // with the test notices too, the demo's badge stays first
-      await page.goto(`${APP}/skh?demo=1&notices=all`, { waitUntil: "networkidle" });
-      const both = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      assert(JSON.stringify(both) === JSON.stringify(["demo", "no-upload", "no-room"]), `the demo with every notice: ${JSON.stringify(both)}`);
-
-      // ครึ่งหลัง: its first workday, Wednesday 27 Jan 2027, by its address
-      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
-      await openSection(page, "demo");
-      await half(2).click();
-      await page.waitForURL((url) => url.searchParams.get("demo") === "1" && url.searchParams.get("date") === "2027-01-27" && !url.searchParams.has("half"));
-      assert((await page.getAttribute("header time", "datetime")) === "2027-01-27", "the second half's first day");
-      assert((await page.getAttribute('[data-testid="repair-zone"]', "data-half")) === "2", "the second half's plan");
-      assert((await page.locator('[data-notice-id="demo"]').count()) === 1, "the demo's badge");
-      await ownerShot(page, "board-demo-second-half.png");
-      await checkDay("2027-01-27", ["or-1", "or-2", "or-3", "or-4", "or-5"]);
-      // the date picker stays in the demo
-      await page.goto(`${APP}/skh?demo=1&date=2027-01-27`, { waitUntil: "networkidle" });
-      await page.click('[data-testid="board-date-button"]');
-      await page.locator('[data-testid="board-date-dialog"]').waitFor({ state: "visible" });
-      await page.click('#board-date-calendar [data-date="2027-01-28"]');
-      await page.waitForURL((url) => url.searchParams.get("date") === "2027-01-28" && url.searchParams.get("demo") === "1");
-      await page.waitForFunction(() => document.querySelector("header time")?.getAttribute("datetime") === "2027-01-28");
-      assert((await page.locator('[data-notice-id="demo"]').count()) === 1, "another day of the demo");
-      // the logo goes back to the real board
-      await page.click('header a[aria-label="ORSKH.APP หน้าแรก"]');
-      await page.waitForURL((url) => url.pathname === "/skh" && url.search === "");
-      await page.waitForFunction(() => !document.querySelector('[data-notice-id="demo"]'));
-      // in the second half, the first half's button says it is over, and its address goes back to /admin rather than
-      // to a day of the second half
-      setNow("2027-02-01T10:00:00+07:00");
-      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
-      await openSection(page, "demo");
-      assert((await half(1).getAttribute("aria-disabled")) === "true" && (await half(1).getAttribute("href")) === null, "the first half is over");
-      assert((await half(1).innerText()).replace(/\s+/g, " ") === "ครึ่งแรก จบแล้ว", `the first half: ${await half(1).innerText()}`);
-      assert((await half(2).getAttribute("href")) === "/skh?demo=1&half=2", "the second half still opens");
-      await page.goto(`${APP}/skh?demo=1&half=1`, { waitUntil: "networkidle" });
-      assert(new URL(page.url()).pathname === "/admin", `a half that is over goes back to /admin: ${page.url()}`);
-      setNow("2026-11-16T10:00:00+07:00");
-      assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
-      await ctx.close();
-
-      // nothing was saved, and anyone but an admin gets the real board, with no redirect
-      assert(JSON.stringify(await counts()) === JSON.stringify(before), `no booking or upload saved: ${JSON.stringify(await counts())}`);
-      for (const path of ["/skh?demo=1", "/skh?demo=1&half=2"]) {
-        const r = await fetch(`${APP}${path}`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
-        const html = await r.text();
-        assert(r.status === 200 && !html.includes("ตารางตัวอย่าง") && !html.includes("ตัวอย่าง หนึ่ง"), `${path} for a nurse: ${r.status}`);
-      }
-    });
-
-    await t("admin: one day's HOSxP lists reset on /admin, both hospitals, bookings kept; the simulated bookings on the board's day", async () => {
+    await t("admin: one day's HOSxP lists reset on /admin, both hospitals, bookings kept", async () => {
       // Pong, 27 Nov 2026: "Add option for admin to reset OR schedule of specific date (reset only for hosxp case)"
       // Tue 17 Nov 10:00. Made-up lists: Tuesday's (two uploads, a รพ.ท่าฉลอม case among them) and Wednesday's.
       setNow("2026-11-17T10:00:00+07:00");
@@ -5780,31 +5633,9 @@ async function main() {
         assert((await textOf(page, '[data-testid="no-upload-alert"]')).startsWith("ยังไม่มีตาราง HOSxP"), `${path}: no list now`);
       }
 
-      // the simulated bookings (Pong, 22 Nov 2026) open on the board's own day, made up from Wednesday's list there
-      await page.goto(`${APP}/admin`, { waitUntil: "networkidle" });
-      await openSection(page, "sim");
-      assert((await textOf(page, "#sim-title")) === "การจองจำลอง", "the simulation's section title");
-      assert((await page.getAttribute('[data-testid="sim-october"]', "href")) === "/skh?sim=1", "it opens on the board's day");
-      assert(((await page.locator('[data-testid="sim-october"]').boundingBox())?.height ?? 0) >= 44, "a 44px target");
-      await page.goto(`${APP}/skh?sim=1&date=2026-11-18`, { waitUntil: "networkidle" });
-      const simKinds = await page.$$eval('[data-testid="notice-strip"] .notice-badge', (els) => els.map((el) => el.dataset.noticeId));
-      assert(JSON.stringify(simKinds) === JSON.stringify(["sim"]), `the simulation's badge alone: ${JSON.stringify(simKinds)}`);
-      // the tests' first half runs from 1 Jan 2026, so Wednesday's general surgery case is in the repair's GENSX room
-      const simRows = [];
-      for (const room of ["or-2", "or-5", "or-11", "or-12", "or-13"]) {
-        await page.goto(`${APP}/skh?sim=1&date=2026-11-18&room=${room}`, { waitUntil: "networkidle" });
-        simRows.push(...(await sheetRows(page)));
-      }
-      assert(simRows.length === 1 && simRows.every(([source]) => source !== "booking"), `the simulation's one case: ${JSON.stringify(simRows)}`);
-      await page.click('header a[aria-label="ORSKH.APP หน้าแรก"]');
-      await page.waitForURL((url) => url.pathname === "/skh" && url.search === "");
-      await page.waitForFunction(() => !document.querySelector('[data-notice-id="sim"]'));
-      assert((await db.query("SELECT count(*)::int AS n FROM cases")).rows[0].n === bookingsBefore, "no booking saved");
       assert(errors.length === 0, `no page errors: ${errors.join(" | ")}`);
       await ctx.close();
-      // anyone but an admin gets the real board, and no /admin
-      const simNurse = await fetch(`${APP}/skh?sim=1`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
-      assert(simNurse.status === 200 && !(await simNurse.text()).includes("การจองจำลอง"), `/?sim=1 for a nurse: ${simNurse.status}`);
+      // anyone but an admin gets no /admin
       const r = await fetch(`${APP}/admin`, { headers: { cookie: `session=${await sessionOf(RP.nurse)}` }, redirect: "manual" });
       assert(r.status === 404, `/admin for a nurse: ${r.status}`);
 

@@ -66,7 +66,7 @@ export function thaiDate(iso: string, month: "long" | "short" = "long"): string 
 }
 
 /**
- * The board's address for another day (`iso`), keeping the other parameters in `search` (the open room, the demo): the
+ * The board's address for another day (`iso`), keeping the other parameters in `search` (the open room): the
  * board's own day (`current`), or none, drops the date, so the board turns over at 16:00 again.
  */
 export function boardDayHref(iso: string | null, current: string, pathname = "/", search = ""): string {

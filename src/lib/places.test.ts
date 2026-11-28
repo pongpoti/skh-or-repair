@@ -18,9 +18,8 @@ test("/ opens รพ.สมุทรสาคร's board (Pong, 27 Nov 2026), an
   assert.equal(homeHref({ utm_source: "line" }), "/skh", "only the board's own keys go along");
   assert.equal(homeHref({ date: "2026-12-03" }), "/skh?date=2026-12-03");
   assert.equal(homeHref({ date: "2026-12-03", room: "or-12" }), "/skh?date=2026-12-03&room=or-12");
-  assert.equal(homeHref({ demo: "1", half: "2" }), "/skh?demo=1&half=2");
-  assert.equal(homeHref({ sim: "1", date: "2026-10-01" }), "/skh?sim=1&date=2026-10-01");
-  assert.equal(homeHref({ notices: "all" }), "/skh?notices=all");
+  assert.equal(homeHref({ demo: "1", half: "2" }), "/skh", "the admins' old test modes (gone 28 Nov 2026) are no board key");
+  assert.equal(homeHref({ room: "or-12", demo: "1" }), "/skh?room=or-12&demo=1", "an address with a board key keeps its whole query");
   assert.equal(homeHref({ room: ["or-1", "or-2"] }), "/skh?room=or-1&room=or-2", "a repeated key stays repeated");
   assert.equal(homeHref({ room: "a&b=c" }), "/skh?room=a%26b%3Dc", "values are encoded");
   assert.equal(homeHref({ room: "" }), "/skh?room=", "an empty room is still the board's");
